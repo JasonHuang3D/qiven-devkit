@@ -1,0 +1,10 @@
+# Engineering Protocol
+
+These documents define the shared engineering discipline for @REPOSITORY_NAME@:
+
+- `implementation-standard.md`: scope, design, dependency, portability, and review rules.
+- `testing-standard.md`: risk-based testing and local validation.
+- `worker-protocol.md`: branch, commit, blocker, and handoff behavior.
+- `feature-spec.md`: the minimum contract for an implementation-ready CTO specification.
+
+Repository architecture remains repository-owned. Shared engineering protocol does not replace domain architecture documents.

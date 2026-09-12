@@ -1,0 +1,59 @@
+name: CI
+
+run-name: CI / ${{ inputs.jobs }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: "Validation units: full, windows, linux, macos"
+        required: true
+        default: full
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        shell: bash
+        env:
+          REQUESTED: ${{ inputs.jobs }}
+        run: |
+          case "$REQUESTED" in
+            full) matrix='[{"name":"Windows","os":"windows-2022"},{"name":"Linux","os":"ubuntu-24.04"},{"name":"macOS","os":"macos-15"}]' ;;
+            windows) matrix='[{"name":"Windows","os":"windows-2022"}]' ;;
+            linux) matrix='[{"name":"Linux","os":"ubuntu-24.04"}]' ;;
+            macos) matrix='[{"name":"macOS","os":"macos-15"}]' ;;
+            *) echo "Unknown validation unit: $REQUESTED" >&2; exit 1 ;;
+          esac
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+  test:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - run: cmake -DDEVKIT_ROOT="${{ github.workspace }}" -P tools/test.cmake
+  ci-gate:
+    name: CI Gate
+    if: ${{ always() }}
+    needs: [plan, test]
+    runs-on: ubuntu-24.04
+    steps:
+      - shell: bash
+        env:
+          PLAN: ${{ needs.plan.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          [[ "$PLAN" == success ]]
+          [[ "$TEST" == success ]]

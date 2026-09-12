@@ -1,0 +1,17 @@
+@echo off
+setlocal
+set "ROOT=%~dp0.."
+set "PATCH=%ROOT%\jason-brother.patch"
+pushd "%ROOT%" || exit /b 1
+if not exist "%PATCH%" echo [Qiven] Patch not found: %PATCH%& popd & exit /b 1
+where git >nul 2>nul || (echo [Qiven] Git was not found in PATH.& popd & exit /b 1)
+git diff --quiet && git diff --cached --quiet || (echo [Qiven] Working tree has tracked changes.& popd & exit /b 1)
+git apply --ignore-space-change --check "%PATCH%" || (popd & exit /b 1)
+git apply --ignore-space-change "%PATCH%" || (popd & exit /b 1)
+git diff --check || (popd & exit /b 1)
+call "%ROOT%\tools\format.cmd" || (popd & exit /b 1)
+call "%ROOT%\tools\format-check.cmd" || (popd & exit /b 1)
+call "%ROOT%\tools\gen-vs2022-x64.cmd" || (popd & exit /b 1)
+del /q "%PATCH%"
+popd
+echo [Qiven] Patch applied successfully to @REPOSITORY_NAME@.

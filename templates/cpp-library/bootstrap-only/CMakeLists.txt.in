@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.28)
+project(@CMAKE_PROJECT_NAME@ VERSION 0.1.0 LANGUAGES CXX)
+
+option(@TEST_OPTION_NAME@ "Build @REPOSITORY_NAME@ tests" ON)
+
+# Bootstrap-only: choose the final library structure and linkage after domain design is approved.
+add_library(@CMAKE_TARGET_NAME@ INTERFACE)
+add_library(@CMAKE_ALIAS@ ALIAS @CMAKE_TARGET_NAME@)
+target_compile_features(@CMAKE_TARGET_NAME@ INTERFACE cxx_std_20)
+
+if(@TEST_OPTION_NAME@)
+    enable_testing()
+endif()

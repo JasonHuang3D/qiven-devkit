@@ -1,0 +1,132 @@
+cmake_minimum_required(VERSION 3.28)
+if(NOT DEFINED DEVKIT_ROOT)
+    get_filename_component(DEVKIT_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+endif()
+
+function(fail message_text)
+    message(FATAL_ERROR "TEST FAILURE: ${message_text}")
+endfunction()
+function(assert_exists path)
+    if(NOT EXISTS "${path}")
+        fail("expected path does not exist: ${path}")
+    endif()
+endfunction()
+function(assert_contains path needle)
+    file(READ "${path}" content)
+    string(FIND "${content}" "${needle}" position)
+    if(position EQUAL -1)
+        fail("${path} does not contain: ${needle}")
+    endif()
+endfunction()
+function(assert_not_contains path needle)
+    file(READ "${path}" content)
+    string(FIND "${content}" "${needle}" position)
+    if(NOT position EQUAL -1)
+        fail("${path} unexpectedly contains: ${needle}")
+    endif()
+endfunction()
+function(run_expect_success)
+    execute_process(COMMAND ${ARGV} RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(NOT result EQUAL 0)
+        fail("command failed (${result}): ${ARGV}\n${output}\n${error}")
+    endif()
+endfunction()
+
+string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef nonce)
+if(DEFINED ENV{TEMP} AND NOT "$ENV{TEMP}" STREQUAL "")
+    set(fixture_parent "$ENV{TEMP}")
+elseif(DEFINED ENV{TMPDIR} AND NOT "$ENV{TMPDIR}" STREQUAL "")
+    set(fixture_parent "$ENV{TMPDIR}")
+else()
+    set(fixture_parent "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
+set(fixtures "${fixture_parent}/qiven-devkit-tests-${nonce}")
+file(MAKE_DIRECTORY "${fixtures}")
+set(repo "${fixtures}/qiven-example")
+
+run_expect_success("${CMAKE_COMMAND}"
+    -DDEVKIT_ROOT=${DEVKIT_ROOT} -DDESTINATION=${repo}
+    -DREPOSITORY_NAME=qiven-example -DCMAKE_PROJECT_NAME=qiven-example
+    -DCMAKE_TARGET_NAME=qiven-example -DCMAKE_ALIAS=qiven::example
+    -DCPP_NAMESPACE=qiven::example -DTEST_OPTION_NAME=QIVEN_EXAMPLE_BUILD_TESTS
+    -DVS_SOLUTION_NAME=qiven-example -P "${DEVKIT_ROOT}/cmake/QivenRepoNew.cmake")
+
+foreach(relative IN ITEMS .clang-format .editorconfig .gitattributes CMakePresets.json AGENTS.md
+        tools/resolve-toolchain.cmd tools/format.cmd tools/format-check.cmd tools/gen-vs2022-x64.cmd
+        tools/apply-jason-brother.cmd tools/delete-all-branches-but-main.cmd docs/engineering/README.md
+        .gitignore README.md CMakeLists.txt .github/workflows/ci.yml .qiven/repo.json .qiven/generated-state.cmake)
+    assert_exists("${repo}/${relative}")
+endforeach()
+assert_contains("${repo}/CMakePresets.json" "QIVEN_EXAMPLE_BUILD_TESTS")
+assert_not_contains("${repo}/CMakePresets.json" "QIVEN_BUILD_TESTS")
+assert_contains("${repo}/tools/resolve-toolchain.cmd" "..\\..\\qiven-toolchain-win")
+assert_contains("${repo}/tools/gen-vs2022-x64.cmd" "qiven-example.sln")
+
+file(GLOB_RECURSE generated_files LIST_DIRECTORIES false "${repo}/*" "${repo}/.*")
+foreach(path IN LISTS generated_files)
+    assert_not_contains("${path}" "qiven-foundation")
+    assert_not_contains("${path}" "${DEVKIT_ROOT}")
+endforeach()
+
+file(SHA256 "${repo}/.qiven/generated-state.cmake" state_before)
+run_expect_success("${CMAKE_COMMAND}" -DDEVKIT_ROOT=${DEVKIT_ROOT} -DREPOSITORY=${repo} -P "${DEVKIT_ROOT}/cmake/QivenRepoSync.cmake")
+file(SHA256 "${repo}/.qiven/generated-state.cmake" state_after)
+if(NOT state_before STREQUAL state_after)
+    fail("no-op sync changed generated state")
+endif()
+
+set(devkit_copy "${fixtures}/devkit-copy")
+file(COPY "${DEVKIT_ROOT}/" DESTINATION "${devkit_copy}" PATTERN ".git" EXCLUDE)
+file(APPEND "${devkit_copy}/templates/cpp-library/managed/.editorconfig.in" "\n# fixture-template-update\n")
+file(READ "${devkit_copy}/templates/cpp-library/managed-files.cmake" manifest)
+string(REPLACE "0.1.0" "0.1.1-test" manifest "${manifest}")
+file(WRITE "${devkit_copy}/templates/cpp-library/managed-files.cmake" "${manifest}")
+run_expect_success("${CMAKE_COMMAND}" -DDEVKIT_ROOT=${devkit_copy} -DREPOSITORY=${repo} -P "${devkit_copy}/cmake/QivenRepoSync.cmake")
+assert_contains("${repo}/.editorconfig" "fixture-template-update")
+assert_contains("${repo}/.qiven/generated-state.cmake" "0.1.1-test")
+
+file(APPEND "${repo}/README.md" "\nconsumer readme edit\n")
+file(APPEND "${repo}/CMakeLists.txt" "\n# consumer cmake edit\n")
+file(APPEND "${repo}/.github/workflows/ci.yml" "\n# consumer ci edit\n")
+file(APPEND "${repo}/.clang-format" "\n# consumer managed edit\n")
+file(APPEND "${devkit_copy}/templates/cpp-library/managed/.clang-format.in" "\n# devkit managed edit\n")
+file(APPEND "${devkit_copy}/templates/cpp-library/managed/.gitattributes.in" "\n# must-not-apply\n")
+file(SHA256 "${repo}/.gitattributes" untouched_before)
+execute_process(COMMAND "${CMAKE_COMMAND}" -DDEVKIT_ROOT=${devkit_copy} -DREPOSITORY=${repo} -P "${devkit_copy}/cmake/QivenRepoSync.cmake" RESULT_VARIABLE conflict_result)
+if(conflict_result EQUAL 0)
+    fail("sync accepted a consumer/Devkit conflict")
+endif()
+file(SHA256 "${repo}/.gitattributes" untouched_after)
+if(NOT untouched_before STREQUAL untouched_after)
+    fail("conflicting sync was not all-or-nothing")
+endif()
+assert_contains("${repo}/README.md" "consumer readme edit")
+assert_contains("${repo}/CMakeLists.txt" "consumer cmake edit")
+assert_contains("${repo}/.github/workflows/ci.yml" "consumer ci edit")
+
+set(existing "${fixtures}/existing")
+file(MAKE_DIRECTORY "${existing}")
+file(WRITE "${existing}/keep.txt" "do not overwrite\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -DDEVKIT_ROOT=${DEVKIT_ROOT} -DDESTINATION=${existing}
+    -DREPOSITORY_NAME=x -DCMAKE_PROJECT_NAME=x -DCMAKE_TARGET_NAME=x -DCMAKE_ALIAS=qiven::x
+    -DCPP_NAMESPACE=qiven::x -DTEST_OPTION_NAME=X_TESTS -DVS_SOLUTION_NAME=x
+    -P "${DEVKIT_ROOT}/cmake/QivenRepoNew.cmake" RESULT_VARIABLE protection_result)
+if(protection_result EQUAL 0)
+    fail("generator overwrote a meaningful destination")
+endif()
+assert_contains("${existing}/keep.txt" "do not overwrite")
+
+if(WIN32 AND DEFINED QIVEN_TOOLCHAIN_ROOT_TEST AND EXISTS "${QIVEN_TOOLCHAIN_ROOT_TEST}/cmake/bin/cmake.exe")
+    set(cmd_repo "${fixtures}/qiven-cmd-example")
+    run_expect_success("${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
+        cmd /c "${DEVKIT_ROOT}/tools/new-cpp-library.cmd" "${cmd_repo}" qiven-cmd-example qiven-cmd-example
+        qiven-cmd-example qiven::cmd qiven::cmd QIVEN_CMD_BUILD_TESTS qiven-cmd-example)
+    run_expect_success("${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
+        cmd /c "${DEVKIT_ROOT}/tools/sync-repo.cmd" "${cmd_repo}")
+endif()
+
+file(REMOVE_RECURSE "${fixtures}")
+if(EXISTS "${fixtures}")
+    fail("fixture cleanup failed")
+endif()
+message(STATUS "All qiven-devkit tests passed; disposable fixtures removed")

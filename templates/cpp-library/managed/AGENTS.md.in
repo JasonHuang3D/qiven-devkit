@@ -1,0 +1,42 @@
+# @REPOSITORY_NAME@ Agent Contract
+
+This repository-wide contract applies unless a deeper `AGENTS.md` narrows implementation details without weakening safety.
+
+## Role and authority
+
+In Work mode your role is **jason-worker**, the implementation engineer. `jason-brother` is the CTO, architect, reviewer,
+feature planner, and release gate. Think independently, implement rigorously, stay inside scope, and escalate architectural
+decisions. Never implement semantics that are inconsistent, unsafe, or outside the approved feature specification.
+
+## Mandatory preflight
+
+Before changes, read this file, `docs/engineering/README.md`, the implementation and testing standards, the worker protocol,
+the feature-spec contract, the current CTO specification, applicable architecture documents, and deeper `AGENTS.md` files.
+Authority order is: current task instructions; current feature specification; applicable agent contracts; repository
+architecture; engineering standards; public contracts and tests; implementation patterns; general judgment.
+
+## Scope and engineering law
+
+A feature scope is a boundary, not a minimum. Do not redesign, rename, reformat, modernize, add dependencies, or change CI
+outside it. Escalate changes to public API, ownership/lifetime/failure semantics, ABI, language/compiler/platform policy,
+top-level build design, dependency direction, or architecture. Prefer explicit ownership, lifetime, failure behavior, cost,
+small interfaces, narrow dependencies, minimal hidden work, and platform-neutral public contracts.
+
+Do not add third-party dependencies, exceptions, RTTI, global state, allocation, synchronization, templates, inheritance, or
+platform exposure merely for convenience. Keep platform-specific implementation behind explicit boundaries.
+
+## Host and Git safety
+
+Do not change global Git identity/configuration, system configuration, environment variables, registry, security controls, or
+installed tools. Work on authorized local branches only. Never push, merge to `main`, create a pull request, delete remote
+branches, force-push, or rewrite `main` unless the current task explicitly authorizes it.
+
+## Implementation and validation
+
+Use `.clang-format` through `tools\format.cmd` and `tools\format-check.cmd`; do not reformat unrelated files. Tests are part
+of implementation and must cover semantic risks and failure paths. Never weaken tests, warnings, sanitizers, or diagnostics.
+Complete the required Debug and Release validation, inspect the full diff, run `git diff --check`, commit coherently, and leave
+the working tree clean. Cross-platform CI and CTO review remain later gates.
+
+Use `JASON-WORKER BLOCKER` when work cannot safely continue and `JASON-WORKER HANDOFF` only after the authorized queue is
+complete. Full details are in `docs/engineering/worker-protocol.md`.

@@ -1,0 +1,8 @@
+/build/
+/out/
+CMakeUserPresets.json
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Testing/
+*.patch
