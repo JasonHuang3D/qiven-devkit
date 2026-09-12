@@ -40,9 +40,11 @@ The platform-neutral core can also be called with CMake script mode; see `tools/
 tools\sync-repo.cmd D:\JasonWork\qiven-math
 ```
 
-Generation records SHA-256 hashes in `.qiven/generated-state.cmake`. Sync renders the new managed snapshot, compares every
-file as `OLD_GENERATED`, `CURRENT_REPO`, and `NEW_GENERATED`, and modifies nothing if any consumer/Devkit conflict exists.
-Bootstrap-only files are never considered or changed. Successful updates leave normal reviewable Git diffs.
+Generation records state schema 2 in `.qiven/generated-state.cmake`: the complete managed path set plus a SHA-256 hash for
+each generated path. Sync preflights the union of old and new managed paths, safely handling additions, removals, and renames
+as well as content updates. It modifies nothing if any consumer/Devkit conflict exists. Bootstrap-only files are never
+considered or changed. After success, `repo.json` and generated state report the same current template version. Successful
+updates leave normal reviewable Git diffs. Schema changes require an explicit migration before sync accepts older state.
 
 ## Test
 

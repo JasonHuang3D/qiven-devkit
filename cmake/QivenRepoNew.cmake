@@ -22,9 +22,11 @@ endif()
 file(MAKE_DIRECTORY "${stage}")
 
 foreach(relative IN LISTS QIVEN_MANAGED_FILES)
+    qiven_validate_managed_path("${relative}")
     qiven_render("${template}/managed/${relative}.in" "${stage}/${relative}")
 endforeach()
 foreach(relative IN LISTS QIVEN_BOOTSTRAP_FILES)
+    qiven_validate_managed_path("${relative}")
     qiven_render("${template}/bootstrap-only/${relative}.in" "${stage}/${relative}")
 endforeach()
 
