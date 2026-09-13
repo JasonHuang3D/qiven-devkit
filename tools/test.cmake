@@ -208,6 +208,8 @@ if(protection_result EQUAL 0)
 endif()
 assert_contains("${existing}/keep.txt" "do not overwrite")
 
+include("${CMAKE_CURRENT_LIST_DIR}/adoption-test.cmake")
+
 if(WIN32 AND DEFINED QIVEN_TOOLCHAIN_ROOT_TEST AND EXISTS "${QIVEN_TOOLCHAIN_ROOT_TEST}/cmake/bin/cmake.exe")
     set(cmd_repo "${fixtures}/qiven-cmd-example")
     run_expect_success("${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"

@@ -1,6 +1,6 @@
 # Qiven Devkit
 
-Qiven Devkit defines how a Qiven repository is created and kept aligned with shared engineering conventions.
+Qiven Devkit defines how a Qiven repository is created, safely adopted, and kept aligned with shared engineering conventions.
 
 ## Responsibility boundaries
 
@@ -33,6 +33,42 @@ Arguments are destination, repository name, CMake project name, CMake target nam
 and optional Visual Studio solution name (defaults to the repository name). The destination must be absent or empty.
 
 The platform-neutral core can also be called with CMake script mode; see `tools/test.cmake` for a complete invocation.
+
+## Adopt an existing C++ library repository
+
+Adoption is an explicit two-phase operation. First inspect the complete deterministic plan without changing the target:
+
+```bat
+tools\adopt-cpp-library.cmd check ^
+  D:\JasonWork\qiven-foundation ^
+  qiven-foundation ^
+  qiven-foundation ^
+  qiven-foundation ^
+  qiven::foundation ^
+  qiven ^
+  QIVEN_BUILD_TESTS ^
+  qiven-foundation
+```
+
+If the check reports no conflicts, apply the same plan:
+
+```bat
+tools\adopt-cpp-library.cmd apply ^
+  D:\JasonWork\qiven-foundation ^
+  qiven-foundation ^
+  qiven-foundation ^
+  qiven-foundation ^
+  qiven::foundation ^
+  qiven ^
+  QIVEN_BUILD_TESTS ^
+  qiven-foundation
+```
+
+The target must be the clean root of an existing Git repository with a HEAD commit and no `.qiven` ownership state. `check`
+is read-only with respect to the target. Both modes classify every managed path as `EXACT`, `MISSING`, or `CONFLICT`; any
+conflict prevents application and leaves the repository untouched. A successful apply preserves exact files, creates only
+missing managed files, and then writes `.qiven/repo.json` and `.qiven/generated-state.cmake`. Adoption never overwrites a
+divergent managed file and never changes bootstrap-only or unrelated domain files. Once adopted, use `sync-repo` for updates.
 
 ## Synchronize managed files
 
