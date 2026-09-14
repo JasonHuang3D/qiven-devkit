@@ -25,6 +25,8 @@ Devkit owns the Operator runtime and shared mechanisms. Individual repositories 
 
 The runtime is intentionally Python-standard-library-only in Phase 1 so a repository does not acquire a package-manager bootstrap dependency merely to validate itself.
 
+Phase 1 requires Python 3.9 or newer. `tools\\qiven.cmd` honors an explicit `QIVEN_PYTHON` first and validates its version. Without an override it probes `python` first, then uses `py -3` only as a compatibility fallback; each implicit candidate must successfully execute the same Python 3.9+ version probe before it is selected.
+
 ## Command surface
 
 `tools\\qiven.cmd` is the Windows entry point. It uses `setlocal`, invokes `tools/qiven.py`, and preserves the Python exit code. `tools/qiven.py` delegates to the managed `tools/qiven_operator.py` runtime.
