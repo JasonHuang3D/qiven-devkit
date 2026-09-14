@@ -90,6 +90,16 @@ def parallel_code(me: Path, other: Path) -> str:
     )
 
 
+def assert_no_repo_bytecode(repo: Path) -> None:
+    artifacts = sorted(
+        str(path.relative_to(repo))
+        for path in repo.rglob("*")
+        if path.is_file() and (path.suffix == ".pyc" or "__pycache__" in path.parts)
+    )
+    if artifacts:
+        raise AssertionError(f"Operator execution wrote Python bytecode into repository: {artifacts}")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="qiven-operator-test-") as temp:
         repo = Path(temp) / "repo"
@@ -127,6 +137,7 @@ def main() -> int:
         assert payload["repository"] == "operator-fixture"
         assert payload["head"] == head
         assert "[ RUN]" not in info.stdout and "[ OK ]" not in info.stdout
+        assert_no_repo_bytecode(repo)
 
         config_path = repo / ".qiven" / "operator.json"
         config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -233,6 +244,7 @@ def main() -> int:
             "fixture-parallel-a",
             "fixture-parallel-b",
         }
+        assert_no_repo_bytecode(repo)
 
         operator = load_operator(repo)
         operator.HEARTBEAT_SECONDS = 0.05
