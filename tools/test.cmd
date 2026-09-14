@@ -89,15 +89,15 @@ call :print_summary "devkit-regression" "!STATUS_REGRESSION!"
 if !FAILURES! GTR 0 (
     echo.
     echo === FAILED SUITE LOGS ===
-    if "!STATUS_CMD!"=="FAIL" call :print_log "cmd-control-flow" "%LOG_ROOT%\cmd-control-flow.log"
-    if "!STATUS_MISSING!"=="FAIL" call :print_log "adoption-missing-sync" "%LOG_ROOT%\adoption-missing-sync.log"
-    if "!STATUS_REGRESSION!"=="FAIL" call :print_log "devkit-regression" "%LOG_ROOT%\devkit-regression.log"
+    if "!STATUS_CMD!"=="FAIL" call :print_log "cmd-control-flow" "%LOG_ROOT%\cmd-control-flow.log" "FAIL"
+    if "!STATUS_MISSING!"=="FAIL" call :print_log "adoption-missing-sync" "%LOG_ROOT%\adoption-missing-sync.log" "FAIL"
+    if "!STATUS_REGRESSION!"=="FAIL" call :print_log "devkit-regression" "%LOG_ROOT%\devkit-regression.log" "FAIL"
 ) else if /I "%QIVEN_TEST_VERBOSE%"=="1" (
     echo.
     echo === VERBOSE SUITE LOGS ===
-    call :print_log "cmd-control-flow" "%LOG_ROOT%\cmd-control-flow.log"
-    call :print_log "adoption-missing-sync" "%LOG_ROOT%\adoption-missing-sync.log"
-    call :print_log "devkit-regression" "%LOG_ROOT%\devkit-regression.log"
+    call :print_log "cmd-control-flow" "%LOG_ROOT%\cmd-control-flow.log" "OK"
+    call :print_log "adoption-missing-sync" "%LOG_ROOT%\adoption-missing-sync.log" "OK"
+    call :print_log "devkit-regression" "%LOG_ROOT%\devkit-regression.log" "OK"
 )
 
 echo.
@@ -120,8 +120,10 @@ if "%~2"=="PASS" (
 exit /b 0
 
 :print_log
+set "DETAIL_TAG=!TAG_FAIL!"
+if /I "%~3"=="OK" set "DETAIL_TAG=!TAG_OK!"
 echo.
-echo !TAG_FAIL! %~1 detailed output
+echo !DETAIL_TAG! %~1 detailed output
 echo ------------------------------------------------------------------------
 type "%~2"
 echo ------------------------------------------------------------------------
