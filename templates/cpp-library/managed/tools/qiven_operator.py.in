@@ -59,10 +59,10 @@ class Result:
 
 
 class Console:
-    def __init__(self, *, json_mode: bool = False, verbose: bool = False) -> None:
+    def __init__(self, *, json_mode: bool = False, verbose: bool = False, no_color: bool = False) -> None:
         self.json_mode = json_mode
         self.verbose = verbose
-        self.color = _color_enabled() and not json_mode
+        self.color = _color_enabled() and not json_mode and not no_color
         self._lock = threading.Lock()
 
     def _paint(self, text: str, color: str) -> str:
@@ -189,7 +189,12 @@ def _run_process(name: str, spec: dict[str, Any], console: Console) -> Result:
         log_path = Path(handle.name)
     try:
         with log_path.open("w", encoding="utf-8", errors="replace") as log:
-            process = subprocess.Popen(argv, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, text=True)
+            try:
+                process = subprocess.Popen(argv, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, text=True)
+            except OSError as exc:
+                detail = f"could not start process: {exc}"
+                console.emit("fail", f"{name}: {detail}")
+                return Result(name, "fail", 2, time.monotonic() - started, detail=detail)
             next_heartbeat = time.monotonic() + HEARTBEAT_SECONDS
             while True:
                 returncode = process.poll()
@@ -321,6 +326,22 @@ def _head() -> str:
     return completed.stdout.strip()
 
 
+def _remote_branch_head(branch: str) -> str:
+    ref = f"refs/heads/{branch}"
+    completed = _git("ls-remote", "--heads", "origin", ref)
+    if completed.returncode:
+        raise OperatorError(f"cannot resolve remote branch origin/{branch}")
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        if not lines:
+            raise OperatorError(f"remote branch origin/{branch} does not exist")
+        raise OperatorError(f"remote branch origin/{branch} resolved ambiguously")
+    parts = lines[0].split()
+    if len(parts) != 2 or parts[1] != ref:
+        raise OperatorError(f"unexpected ls-remote result for origin/{branch}")
+    return parts[0]
+
+
 def _ci_start(config: dict[str, Any], profile: str, console: Console) -> dict[str, Any]:
     ci = config.get("ci", {})
     spec = ci.get(profile) if isinstance(ci, dict) else None
@@ -337,17 +358,31 @@ def _ci_start(config: dict[str, Any], profile: str, console: Console) -> dict[st
     branch = _current_branch()
     head = _head()
     repo = _remote_repo()
+    console.emit("run", f"ci:{profile}: verify origin/{branch} exact HEAD")
+    remote_head = _remote_branch_head(branch)
+    if remote_head != head:
+        raise OperatorError(
+            f"CI dispatch requires origin/{branch} to match local HEAD: local={head} remote={remote_head}"
+        )
+    console.emit("ok", f"ci:{profile}: origin/{branch} matches {head}")
     argv = ["gh", "workflow", "run", workflow, "--repo", repo, "--ref", branch]
     for key, value in inputs.items():
         argv.extend(["-f", f"{key}={value}"])
     console.emit("run", f"ci:{profile}: dispatch {workflow} on {branch}")
     completed = _run_capture(argv)
     if completed.returncode:
-        console.emit("fail", f"ci:{profile}: dispatch failed")
         console.block(completed.stdout)
-        raise OperatorError("CI dispatch failed")
+        raise OperatorError(f"ci:{profile}: dispatch failed")
     console.emit("ok", f"ci:{profile}: dispatch accepted; remote job continues asynchronously")
-    return {"profile": profile, "workflow": workflow, "repository": repo, "branch": branch, "head": head, "status": "dispatched"}
+    return {
+        "profile": profile,
+        "workflow": workflow,
+        "repository": repo,
+        "branch": branch,
+        "head": head,
+        "remote_head": remote_head,
+        "status": "dispatched",
+    }
 
 
 def _print_json(payload: dict[str, Any]) -> None:
@@ -358,6 +393,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="qiven", description="Qiven local engineering operator")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument("--verbose", action="store_true", help="show logs for successful tasks")
+    parser.add_argument("--no-color", action="store_true", help="disable ANSI terminal color")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("info", help="show repository/operator metadata")
     gate = sub.add_parser("gate", help="run the configured local validation gate")
@@ -375,7 +411,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    console = Console(json_mode=args.json, verbose=args.verbose)
+    console = Console(json_mode=args.json, verbose=args.verbose, no_color=args.no_color)
     try:
         config = _load_config()
         if args.command == "info":
@@ -422,12 +458,19 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if failed else 0
 
         if args.command == "run":
+            started = time.monotonic()
             sequence: list[Any] = [list(args.tasks)] if args.parallel else list(args.tasks)
             results = _run_sequence(sequence, tasks, console, None)
             failed = [result for result in results if result.returncode]
-            payload = {"status": "fail" if failed else "pass", "results": [asdict(result) for result in results]}
+            payload = {
+                "status": "fail" if failed else "pass",
+                "duration_seconds": round(time.monotonic() - started, 3),
+                "results": [asdict(result) for result in results],
+            }
             if args.json:
                 _print_json(payload)
+            else:
+                console.emit("fail" if failed else "ok", f"run: {payload['status'].upper()}")
             return 1 if failed else 0
 
         if args.command == "ci" and args.ci_command == "start":
@@ -435,7 +478,13 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 _print_json(payload)
             elif not console.json_mode:
-                console.block(f"      repository: {payload['repository']}\n      branch:     {payload['branch']}\n      head:       {payload['head']}\n      workflow:   {payload['workflow']}")
+                console.block(
+                    f"      repository:  {payload['repository']}\n"
+                    f"      branch:      {payload['branch']}\n"
+                    f"      head:        {payload['head']}\n"
+                    f"      remote-head: {payload['remote_head']}\n"
+                    f"      workflow:    {payload['workflow']}"
+                )
             return 0
 
         raise OperatorError("unsupported command")
