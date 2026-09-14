@@ -1,4 +1,4 @@
-set(QIVEN_TEMPLATE_VERSION "0.1.2")
+set(QIVEN_TEMPLATE_VERSION "0.1.3")
 set(QIVEN_FILE_CLASS managed)
 set(QIVEN_MANAGED_FILES
     .clang-format
@@ -6,6 +6,7 @@ set(QIVEN_MANAGED_FILES
     .gitattributes
     CMakePresets.json
     AGENTS.md
+    .qiven/operator.json
     docs/engineering/README.md
     docs/engineering/implementation-standard.md
     docs/engineering/testing-standard.md
@@ -17,6 +18,9 @@ set(QIVEN_MANAGED_FILES
     tools/gen-vs2022-x64.cmd
     tools/apply-jason-brother.cmd
     tools/delete-all-branches-but-main.cmd
+    tools/qiven.cmd
+    tools/qiven.py
+    tools/qiven_operator.py
 )
 set(QIVEN_FILE_CLASS bootstrap-only)
 set(QIVEN_BOOTSTRAP_FILES
