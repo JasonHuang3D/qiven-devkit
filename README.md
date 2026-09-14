@@ -34,15 +34,21 @@ Machine consumers can request JSON by placing the global flag before the command
 tools\qiven.cmd --json gate --expect-head <sha>
 ```
 
+Human output can retain the stable state layout while disabling ANSI color:
+
+```bat
+tools\qiven.cmd --no-color gate --expect-head <sha>
+```
+
 CI dispatch is explicitly asynchronous:
 
 ```bat
 tools\qiven.cmd ci start full
 ```
 
-The command validates the local Git context, dispatches the configured workflow through `gh`, reports the branch and exact HEAD it submitted, and returns immediately. It does not use hard-coded sleeps, discover a "latest" run, or poll merely to make a remote asynchronous job look synchronous.
+The command validates the local Git context, requires the named `origin` branch to point at the exact local HEAD, dispatches the configured workflow through `gh`, reports the branch and exact HEAD it submitted, and returns immediately. It does not use hard-coded sleeps, discover a "latest" run, or poll merely to make a remote asynchronous job look synchronous.
 
-Shared mechanism is managed by Devkit; repository policy lives in `.qiven/operator.json`. See `docs/operator-design.md`.
+Each Operator task runs in a separate child process rooted at the repository, so task-local environment or working-directory changes do not leak into sibling tasks or the interactive CMD prompt. Shared mechanism is managed by Devkit; repository policy lives in `.qiven/operator.json`. See `docs/operator-design.md`.
 
 ## Managed and bootstrap-only files
 
@@ -120,4 +126,4 @@ updates leave normal reviewable Git diffs. Schema changes require an explicit mi
 tools\test.cmd
 ```
 
-Tests use disposable fixture directories only. The suite includes Operator generation, machine-readable output, fail-fast sequencing, exact-HEAD validation, and real clean-tree gate coverage.
+Tests use disposable fixture directories only. The suite includes Operator generation, JSON/human output separation, heartbeat/no-color behavior, task environment and working-directory isolation, fail-fast sequencing, parallel execution, exact-HEAD validation, real clean-tree gates, and asynchronous CI exact-remote-head dispatch preconditions.
