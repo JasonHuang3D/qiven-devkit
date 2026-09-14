@@ -5,18 +5,50 @@ Qiven Devkit defines how a Qiven repository is created, safely adopted, and kept
 ## Responsibility boundaries
 
 - **qiven-toolchain-win** owns pinned executable build tools such as CMake and clang-format.
-- **qiven-devkit** owns repository templates, shared engineering conventions, and explicit bootstrap/synchronization tooling.
+- **qiven-devkit** owns repository templates, shared engineering conventions, explicit bootstrap/synchronization tooling, and the shared Qiven Operator runtime.
 - **qiven-workspace** may later own ecosystem version composition and multi-repository orchestration; it does not exist yet.
-- Runtime repositories such as **qiven-foundation** own their APIs, implementation, tests, and domain architecture.
+- Runtime repositories such as **qiven-foundation** own their APIs, implementation, tests, domain architecture, and repository-specific Operator policy.
 
-Devkit materializes an ordinary snapshot into each generated repository. Generated repositories contain their own scripts and
-engineering protocol and never call back into a Devkit checkout. They remain independently usable after generation.
+Devkit materializes an ordinary snapshot into each generated repository. Generated repositories contain their own scripts,
+engineering protocol, and Operator runtime and never call back into a Devkit checkout. They remain independently usable after generation.
+
+## Qiven Operator
+
+Qiven Operator is the Python orchestration layer behind human-facing engineering commands. Windows CMD is intentionally a thin entry point; Python owns process execution, layout/color, buffered logs, heartbeat output, parallel task groups, fail-fast gates, exact Git validation, and asynchronous CI dispatch semantics.
+
+A generated repository can run its default local gate with:
+
+```bat
+tools\qiven.cmd gate
+```
+
+An exact candidate gate can require the expected HEAD:
+
+```bat
+tools\qiven.cmd gate --expect-head <sha>
+```
+
+Machine consumers can request JSON by placing the global flag before the command:
+
+```bat
+tools\qiven.cmd --json gate --expect-head <sha>
+```
+
+CI dispatch is explicitly asynchronous:
+
+```bat
+tools\qiven.cmd ci start full
+```
+
+The command validates the local Git context, dispatches the configured workflow through `gh`, reports the branch and exact HEAD it submitted, and returns immediately. It does not use hard-coded sleeps, discover a "latest" run, or poll merely to make a remote asynchronous job look synchronous.
+
+Shared mechanism is managed by Devkit; repository policy lives in `.qiven/operator.json`. See `docs/operator-design.md`.
 
 ## Managed and bootstrap-only files
 
 Managed files are shared conventions. `tools/sync-repo.cmd` can update them after an all-or-nothing hash preflight. The list is
 stored in `templates/cpp-library/managed-files.cmake` and includes formatting/editor policy, presets, local developer tools,
-`AGENTS.md`, and the engineering protocol.
+Qiven Operator, `AGENTS.md`, and the engineering protocol.
 
 Bootstrap-only files are starting points expected to diverge: `.gitignore`, `README.md`, `CMakeLists.txt`, and
 `.github/workflows/ci.yml`. Synchronization never overwrites them.
@@ -88,4 +120,4 @@ updates leave normal reviewable Git diffs. Schema changes require an explicit mi
 tools\test.cmd
 ```
 
-Tests use disposable fixture directories only.
+Tests use disposable fixture directories only. The suite includes Operator generation, machine-readable output, fail-fast sequencing, exact-HEAD validation, and real clean-tree gate coverage.
