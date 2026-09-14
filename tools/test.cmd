@@ -113,9 +113,9 @@ exit /b 0
 
 :print_summary
 if "%~2"=="PASS" (
-    echo !TAG_OK! %-24~1 %~2
+    echo !TAG_OK! %~1: %~2
 ) else (
-    echo !TAG_FAIL! %-24~1 %~2
+    echo !TAG_FAIL! %~1: %~2
 )
 exit /b 0
 
