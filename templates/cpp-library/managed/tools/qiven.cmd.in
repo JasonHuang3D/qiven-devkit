@@ -1,0 +1,19 @@
+@echo off
+setlocal
+set "QIVEN_OPERATOR_PY=%~dp0qiven.py"
+if defined QIVEN_PYTHON (
+    "%QIVEN_PYTHON%" "%QIVEN_OPERATOR_PY%" %*
+    exit /b %errorlevel%
+)
+where py >nul 2>nul
+if not errorlevel 1 (
+    py -3 "%QIVEN_OPERATOR_PY%" %*
+    exit /b %errorlevel%
+)
+where python >nul 2>nul
+if not errorlevel 1 (
+    python "%QIVEN_OPERATOR_PY%" %*
+    exit /b %errorlevel%
+)
+echo [FAIL] Qiven Operator requires Python 3. Set QIVEN_PYTHON or install a Python launcher.
+exit /b 2
