@@ -38,18 +38,33 @@ jobs:
             echo "$unit=$value" >> "$GITHUB_OUTPUT"
           done
 
-  validate:
-    name: ${{ matrix.name }}
+  windows:
+    name: Windows MSVC x64
     needs: plan
-    if: ${{ (matrix.id == 'windows' && needs.plan.outputs.windows == 'true') || (matrix.id == 'linux' && needs.plan.outputs.linux == 'true') || (matrix.id == 'macos' && needs.plan.outputs.macos == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { id: windows, name: Windows MSVC x64, os: windows-2022 }
-          - { id: linux, name: Linux GCC x64, os: ubuntu-24.04 }
-          - { id: macos, name: macOS AppleClang arm64, os: macos-15 }
-    runs-on: ${{ matrix.os }}
+    if: ${{ needs.plan.outputs.windows == 'true' }}
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+      - run: cmake -S . -B build -D@TEST_OPTION_NAME@=ON
+      - run: cmake --build build --config Debug --parallel
+      - run: ctest --test-dir build -C Debug --output-on-failure
+
+  linux:
+    name: Linux GCC x64
+    needs: plan
+    if: ${{ needs.plan.outputs.linux == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - run: cmake -S . -B build -D@TEST_OPTION_NAME@=ON
+      - run: cmake --build build --config Debug --parallel
+      - run: ctest --test-dir build -C Debug --output-on-failure
+
+  macos:
+    name: macOS AppleClang arm64
+    needs: plan
+    if: ${{ needs.plan.outputs.macos == 'true' }}
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
       - run: cmake -S . -B build -D@TEST_OPTION_NAME@=ON
@@ -59,13 +74,17 @@ jobs:
   ci-gate:
     name: CI Gate
     if: ${{ always() }}
-    needs: [plan, validate]
+    needs: [plan, windows, linux, macos]
     runs-on: ubuntu-24.04
     steps:
       - shell: bash
         env:
           PLAN: ${{ needs.plan.result }}
-          VALIDATE: ${{ needs.validate.result }}
+          WINDOWS: ${{ needs.windows.result }}
+          LINUX: ${{ needs.linux.result }}
+          MACOS: ${{ needs.macos.result }}
         run: |
           [[ "$PLAN" == success ]]
-          [[ "$VALIDATE" == success || "$VALIDATE" == skipped ]]
+          [[ "$WINDOWS" == success || "$WINDOWS" == skipped ]]
+          [[ "$LINUX" == success || "$LINUX" == skipped ]]
+          [[ "$MACOS" == success || "$MACOS" == skipped ]]
