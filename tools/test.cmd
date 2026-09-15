@@ -40,6 +40,7 @@ if errorlevel 1 (
 set /a FAILURES=0
 set "STATUS_CMD=NOT-RUN"
 set "STATUS_MISSING=NOT-RUN"
+set "STATUS_OPERATOR=NOT-RUN"
 set "STATUS_REGRESSION=NOT-RUN"
 
 echo !TAG_RUN! qiven-devkit test suites
@@ -69,6 +70,31 @@ if errorlevel 1 (
     echo !TAG_OK! adoption-missing-sync
 )
 
+echo !TAG_RUN! operator
+set "QIVEN_OPERATOR_TEST_PYTHON="
+where py >nul 2>nul
+if not errorlevel 1 set "QIVEN_OPERATOR_TEST_PYTHON=py -3"
+if not defined QIVEN_OPERATOR_TEST_PYTHON (
+    where python >nul 2>nul
+    if not errorlevel 1 set "QIVEN_OPERATOR_TEST_PYTHON=python"
+)
+if not defined QIVEN_OPERATOR_TEST_PYTHON (
+    set "STATUS_OPERATOR=FAIL"
+    set /a FAILURES+=1
+    echo Python 3 was not found. >"%LOG_ROOT%\operator.log"
+    echo !TAG_FAIL! operator
+) else (
+    %QIVEN_OPERATOR_TEST_PYTHON% "%~dp0operator-test.py" >"%LOG_ROOT%\operator.log" 2>&1
+    if errorlevel 1 (
+        set "STATUS_OPERATOR=FAIL"
+        set /a FAILURES+=1
+        echo !TAG_FAIL! operator
+    ) else (
+        set "STATUS_OPERATOR=PASS"
+        echo !TAG_OK! operator
+    )
+)
+
 echo !TAG_RUN! devkit-regression
 "%QIVEN_CMAKE%" -DDEVKIT_ROOT="%REPO_ROOT%" -DQIVEN_TOOLCHAIN_ROOT_TEST="%QIVEN_TOOLCHAIN_ROOT%" -P "%~dp0test.cmake" >"%LOG_ROOT%\devkit-regression.log" 2>&1
 if errorlevel 1 (
@@ -84,6 +110,7 @@ echo.
 echo === TEST SUMMARY ===
 call :print_summary "cmd-control-flow" "!STATUS_CMD!"
 call :print_summary "adoption-missing-sync" "!STATUS_MISSING!"
+call :print_summary "operator" "!STATUS_OPERATOR!"
 call :print_summary "devkit-regression" "!STATUS_REGRESSION!"
 
 if !FAILURES! GTR 0 (
@@ -91,12 +118,14 @@ if !FAILURES! GTR 0 (
     echo === FAILED SUITE LOGS ===
     if "!STATUS_CMD!"=="FAIL" call :print_log "cmd-control-flow" "%LOG_ROOT%\cmd-control-flow.log" "FAIL"
     if "!STATUS_MISSING!"=="FAIL" call :print_log "adoption-missing-sync" "%LOG_ROOT%\adoption-missing-sync.log" "FAIL"
+    if "!STATUS_OPERATOR!"=="FAIL" call :print_log "operator" "%LOG_ROOT%\operator.log" "FAIL"
     if "!STATUS_REGRESSION!"=="FAIL" call :print_log "devkit-regression" "%LOG_ROOT%\devkit-regression.log" "FAIL"
 ) else if /I "%QIVEN_TEST_VERBOSE%"=="1" (
     echo.
     echo === VERBOSE SUITE LOGS ===
     call :print_log "cmd-control-flow" "%LOG_ROOT%\cmd-control-flow.log" "OK"
     call :print_log "adoption-missing-sync" "%LOG_ROOT%\adoption-missing-sync.log" "OK"
+    call :print_log "operator" "%LOG_ROOT%\operator.log" "OK"
     call :print_log "devkit-regression" "%LOG_ROOT%\devkit-regression.log" "OK"
 )
 

@@ -6,6 +6,7 @@ set(QIVEN_MANAGED_FILES
     .gitattributes
     CMakePresets.json
     AGENTS.md
+    .qiven/operator.json
     docs/engineering/README.md
     docs/engineering/implementation-standard.md
     docs/engineering/testing-standard.md
@@ -16,6 +17,9 @@ set(QIVEN_MANAGED_FILES
     tools/format-check.cmd
     tools/gen-vs2022-x64.cmd
     tools/apply-jason-brother.cmd
+    tools/qiven.cmd
+    tools/qiven.py
+    tools/qiven_operator.py
     tools/delete-all-branches-but-main.cmd
 )
 set(QIVEN_FILE_CLASS bootstrap-only)

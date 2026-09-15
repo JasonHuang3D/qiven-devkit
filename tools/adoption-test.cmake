@@ -236,12 +236,13 @@ commit_adoption_fixture("${non_regular}")
 run_adoption(check "${non_regular}" non_regular_result non_regular_output)
 assert_adoption_rejected("${non_regular_result}" "${non_regular_output}" "non-regular managed path")
 
-# Foundation-shaped regression: 3 exact paths and all other current managed paths conflicting.
+# Foundation-shaped regression: 3 exact paths, Operator policy missing, all other managed paths conflicting.
 set(foundation_shape "${fixtures}/adopt-foundation-shape")
 make_adoption_fixture("${foundation_shape}" qiven-foundation)
 set(foundation_exact .editorconfig .gitattributes tools/delete-all-branches-but-main.cmd)
+set(foundation_missing .qiven/operator.json)
 foreach(path IN LISTS QIVEN_MANAGED_FILES)
-    if(NOT path IN_LIST foundation_exact)
+    if(NOT path IN_LIST foundation_exact AND NOT path IN_LIST foundation_missing)
         file(APPEND "${foundation_shape}/${path}" "\nFoundation-shaped managed drift\n")
     endif()
 endforeach()
