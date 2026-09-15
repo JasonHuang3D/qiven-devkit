@@ -18,13 +18,14 @@ Before modifying code, read:
 
 1. this `AGENTS.md`;
 2. `docs/engineering/README.md`;
-3. `docs/engineering/implementation-standard.md`;
-4. `docs/engineering/testing-standard.md`;
-5. `docs/engineering/worker-protocol.md`;
-6. `docs/engineering/feature-spec.md`;
-7. the complete current CTO feature specification;
-8. applicable repository architecture documents;
-9. any deeper `AGENTS.md` governing files expected to change.
+3. `docs/engineering/build-system-standard.md`;
+4. `docs/engineering/implementation-standard.md`;
+5. `docs/engineering/testing-standard.md`;
+6. `docs/engineering/worker-protocol.md`;
+7. `docs/engineering/feature-spec.md`;
+8. the complete current CTO feature specification;
+9. applicable repository architecture documents;
+10. any deeper `AGENTS.md` governing files expected to change.
 
 Do not begin implementation until the base branch/commit, authorized feature queue, scope, stop conditions, and required validation are understood.
 

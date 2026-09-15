@@ -5,13 +5,13 @@ if(NOT DEFINED DEVKIT_ROOT)
 endif()
 
 set(cmd_templates
-    "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/resolve-toolchain.cmd.in"
-    "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/format.cmd.in"
-    "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/format-check.cmd.in"
-    "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/gen-vs2022-x64.cmd.in"
-    "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/apply-jason-brother.cmd.in"
-    "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/delete-all-branches-but-main.cmd.in"
-    "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/qiven.cmd.in"
+    "${DEVKIT_ROOT}/templates/native-common/managed/tools/resolve-toolchain.cmd.in"
+    "${DEVKIT_ROOT}/templates/native-common/managed/tools/format.cmd.in"
+    "${DEVKIT_ROOT}/templates/native-common/managed/tools/format-check.cmd.in"
+    "${DEVKIT_ROOT}/templates/native-common/managed/tools/gen-vs2022-x64.cmd.in"
+    "${DEVKIT_ROOT}/templates/native-common/managed/tools/apply-jason-brother.cmd.in"
+    "${DEVKIT_ROOT}/templates/native-common/managed/tools/delete-all-branches-but-main.cmd.in"
+    "${DEVKIT_ROOT}/templates/native-common/managed/tools/qiven.cmd.in"
 )
 
 foreach(path IN LISTS cmd_templates)
@@ -24,7 +24,7 @@ foreach(path IN LISTS cmd_templates)
     endif()
 endforeach()
 
-set(qiven_entrypoint "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/qiven.cmd.in")
+set(qiven_entrypoint "${DEVKIT_ROOT}/templates/native-common/managed/tools/qiven.cmd.in")
 file(READ "${qiven_entrypoint}" qiven_content)
 string(REGEX MATCH "exit /b[ \t]+%errorlevel%" unsafe_qiven_errorlevel "${qiven_content}")
 if(NOT unsafe_qiven_errorlevel STREQUAL "")

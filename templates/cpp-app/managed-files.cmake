@@ -11,4 +11,5 @@ set(QIVEN_BOOTSTRAP_FILES
     README.md
     CMakeLists.txt
     .github/workflows/ci.yml
+    app/main.cpp
 )

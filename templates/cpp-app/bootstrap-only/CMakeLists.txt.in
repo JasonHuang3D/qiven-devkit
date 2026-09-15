@@ -7,10 +7,9 @@ qiven_project_defaults()
 
 option(@TEST_OPTION_NAME@ "Build @REPOSITORY_NAME@ tests" ON)
 
-# Bootstrap-only: declare the final repository target graph after architecture is approved.
-add_library(@CMAKE_TARGET_NAME@ INTERFACE)
-add_library(@CMAKE_ALIAS@ ALIAS @CMAKE_TARGET_NAME@)
-qiven_target_defaults(@CMAKE_TARGET_NAME@ SCOPE INTERFACE)
+add_executable(@CMAKE_TARGET_NAME@ app/main.cpp)
+add_executable(@CMAKE_ALIAS@ ALIAS @CMAKE_TARGET_NAME@)
+qiven_target_defaults(@CMAKE_TARGET_NAME@ SCOPE PRIVATE FOLDER "Applications")
 
 if(@TEST_OPTION_NAME@)
     enable_testing()

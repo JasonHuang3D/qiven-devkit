@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "template": "cpp-app",
+  "template_version": "@QIVEN_TEMPLATE_VERSION@",
+  "repository_name": "@REPOSITORY_NAME@",
+  "cmake_project_name": "@CMAKE_PROJECT_NAME@",
+  "cmake_target_name": "@CMAKE_TARGET_NAME@",
+  "cmake_alias": "@CMAKE_ALIAS@",
+  "cpp_namespace": "@CPP_NAMESPACE@",
+  "test_option_name": "@TEST_OPTION_NAME@",
+  "vs_solution_name": "@VS_SOLUTION_NAME@"
+}

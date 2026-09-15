@@ -6,6 +6,7 @@ Repository architecture remains repository-owned. These documents define **how**
 
 ## Documents
 
+- `build-system-standard.md` — Devkit-owned native CMake mechanism, repository-owned build graph, and dependency rules.
 - `implementation-standard.md` — implementation quality, scope discipline, C++ design, dependency, portability, and review rules.
 - `testing-standard.md` — semantic test design, validation profiles, and local evidence requirements.
 - `worker-protocol.md` — Work-mode branch, batch, commit, validation, stopping, blocker, and handoff procedure.

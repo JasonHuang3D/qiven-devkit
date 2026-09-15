@@ -76,7 +76,7 @@ Repository `.clang-format` is authoritative. Use `tools\format.cmd` and `tools\f
 
 ## 12. Build configuration
 
-CMake is the build-system source of truth for the generated C++ library template. Do not hand-maintain divergent IDE configuration when CMake should express the setting. Use existing targets, presets, and conventions; do not restructure top-level build architecture for aesthetics during unrelated work.
+CMake is the native build-system source of truth. Shared build mechanism and compiler policy come from the Devkit-managed `cmake/qiven/` snapshot; repositories own their semantic target/source/dependency graph. Do not duplicate shared warning flags, language policy, source-dependency resolution, or common test policy in repository CMake. Improve Devkit when shared mechanism is missing, then sync the managed snapshot. Do not hand-maintain divergent IDE configuration when CMake should express the setting.
 
 ## 13. Performance and concurrency
 

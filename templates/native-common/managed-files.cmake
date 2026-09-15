@@ -1,0 +1,28 @@
+set(QIVEN_NATIVE_MANAGED_FILES
+    .clang-format
+    .editorconfig
+    .gitattributes
+    CMakePresets.json
+    AGENTS.md
+    .qiven/operator.json
+    cmake/qiven/QivenBuild.cmake
+    cmake/qiven/QivenProject.cmake
+    cmake/qiven/QivenTarget.cmake
+    cmake/qiven/QivenDependency.cmake
+    cmake/qiven/QivenTest.cmake
+    docs/engineering/README.md
+    docs/engineering/build-system-standard.md
+    docs/engineering/implementation-standard.md
+    docs/engineering/testing-standard.md
+    docs/engineering/worker-protocol.md
+    docs/engineering/feature-spec.md
+    tools/resolve-toolchain.cmd
+    tools/format.cmd
+    tools/format-check.cmd
+    tools/gen-vs2022-x64.cmd
+    tools/apply-jason-brother.cmd
+    tools/qiven.cmd
+    tools/qiven.py
+    tools/qiven_operator.py
+    tools/delete-all-branches-but-main.cmd
+)

@@ -278,3 +278,43 @@ if(WIN32 AND DEFINED QIVEN_TOOLCHAIN_ROOT_TEST AND EXISTS "${QIVEN_TOOLCHAIN_ROO
         fail("Windows wrapper accepted non-exact mode spelling")
     endif()
 endif()
+# Application-profile adoption uses the same managed-surface engine and preserves template identity.
+function(run_app_adoption mode repo_path result_variable output_variable)
+    execute_process(COMMAND "${CMAKE_COMMAND}"
+        -DDEVKIT_ROOT=${DEVKIT_ROOT} -DTEMPLATE_KIND=cpp-app -DMODE=${mode} -DREPOSITORY=${repo_path}
+        -DREPOSITORY_NAME=adopt-app -DCMAKE_PROJECT_NAME=adopt-app
+        -DCMAKE_TARGET_NAME=adopt-app -DCMAKE_ALIAS=qiven::example-app
+        -DCPP_NAMESPACE=qiven::example_app -DTEST_OPTION_NAME=QIVEN_EXAMPLE_APP_BUILD_TESTS
+        -DVS_SOLUTION_NAME=adopt-app -P "${DEVKIT_ROOT}/cmake/QivenRepoAdopt.cmake"
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    set(${result_variable} "${result}" PARENT_SCOPE)
+    set(${output_variable} "${output}\n${error}" PARENT_SCOPE)
+endfunction()
+
+set(adopt_app "${fixtures}/adopt-app")
+generate_app_repo("${DEVKIT_ROOT}" "${adopt_app}" adopt-app)
+file(REMOVE_RECURSE "${adopt_app}/.qiven")
+commit_adoption_fixture("${adopt_app}")
+run_app_adoption(check "${adopt_app}" app_check_result app_check_output)
+if(NOT app_check_result EQUAL 0)
+    fail("cpp-app adoption check failed: ${app_check_output}")
+endif()
+run_app_adoption(apply "${adopt_app}" app_apply_result app_apply_output)
+if(NOT app_apply_result EQUAL 0)
+    fail("cpp-app adoption apply failed: ${app_apply_output}")
+endif()
+file(READ "${adopt_app}/.qiven/repo.json" app_adopt_metadata)
+string(JSON app_adopt_template GET "${app_adopt_metadata}" template)
+if(NOT app_adopt_template STREQUAL "cpp-app")
+    fail("cpp-app adoption wrote wrong template identity: ${app_adopt_template}")
+endif()
+
+if(WIN32 AND DEFINED QIVEN_TOOLCHAIN_ROOT_TEST AND EXISTS "${QIVEN_TOOLCHAIN_ROOT_TEST}/cmake/bin/cmake.exe")
+    set(app_wrapper_repo "${fixtures}/adopt app wrapper")
+    generate_app_repo("${DEVKIT_ROOT}" "${app_wrapper_repo}" adopt-app-wrapper)
+    file(REMOVE_RECURSE "${app_wrapper_repo}/.qiven")
+    commit_adoption_fixture("${app_wrapper_repo}")
+    run_expect_success("${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
+        cmd /c "${DEVKIT_ROOT}/tools/adopt-cpp-app.cmd" check "${app_wrapper_repo}" adopt-app-wrapper adopt-app-wrapper
+        adopt-app-wrapper qiven::example-app qiven::example_app QIVEN_EXAMPLE_APP_BUILD_TESTS adopt-app-wrapper)
+endif()

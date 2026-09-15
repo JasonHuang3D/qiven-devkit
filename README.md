@@ -5,7 +5,7 @@ Qiven Devkit defines how a Qiven repository is created, safely adopted, and kept
 ## Responsibility boundaries
 
 - **qiven-toolchain-win** owns pinned executable build tools such as CMake and clang-format.
-- **qiven-devkit** owns repository templates, shared engineering conventions, explicit bootstrap/synchronization tooling, and the shared Qiven Operator runtime.
+- **qiven-devkit** owns repository templates, the Qiven native build-system mechanism, shared engineering conventions, explicit bootstrap/synchronization tooling, and the shared Qiven Operator runtime.
 - **qiven-workspace** may later own ecosystem version composition and multi-repository orchestration; it does not exist yet.
 - Runtime repositories such as **qiven-foundation** own their APIs, implementation, tests, domain architecture, and repository-specific Operator policy.
 
@@ -52,12 +52,9 @@ Each Operator task runs in a separate child process rooted at the repository, so
 
 ## Managed and bootstrap-only files
 
-Managed files are shared conventions. `tools/sync-repo.cmd` can update them after an all-or-nothing hash preflight. The list is
-stored in `templates/cpp-library/managed-files.cmake` and includes formatting/editor policy, presets, local developer tools,
-Qiven Operator, `AGENTS.md`, and the engineering protocol.
+Native repository profiles compose a shared managed surface from `templates/native-common/managed/` with a repo-kind bootstrap profile such as `cpp-library` or `cpp-app`. The common surface includes `cmake/qiven/`, formatting/editor policy, presets, local developer tools, Qiven Operator, `AGENTS.md`, and the engineering protocol. `tools/sync-repo.cmd` updates managed files only after an all-or-nothing hash preflight.
 
-Bootstrap-only files are starting points expected to diverge: `.gitignore`, `README.md`, `CMakeLists.txt`, and
-`.github/workflows/ci.yml`. Synchronization never overwrites them.
+Repo-kind manifests own template metadata and bootstrap-only seeds. Bootstrap-only files such as `.gitignore`, `README.md`, `CMakeLists.txt`, CI workflow, and app/library starter sources are expected to diverge and are never overwritten by synchronization. Adding another native repo kind must reuse the common managed surface rather than copy the build system or engineering protocol.
 
 ## Generate a C++ library repository
 
@@ -71,6 +68,16 @@ Arguments are destination, repository name, CMake project name, CMake target nam
 and optional Visual Studio solution name (defaults to the repository name). The destination must be absent or empty.
 
 The platform-neutral core can also be called with CMake script mode; see `tools/test.cmake` for a complete invocation.
+
+## Generate a C++ application repository
+
+Use `tools\new-cpp-app.cmd` with the same metadata shape as the library generator. The app profile reuses the native-common managed surface and owns only app-specific bootstrap seeds such as `app/main.cpp` and an executable target graph.
+
+```bat
+tools\new-cpp-app.cmd D:\JasonWork\qiven-dcr-win qiven-dcr-win qiven-dcr-win qiven-dcr-win qiven::dcr_win qiven::dcr_win QIVEN_DCR_WIN_BUILD_TESTS qiven-dcr-win
+```
+
+Existing application repositories use `tools\adopt-cpp-app.cmd check|apply ...`; adoption has the same exact/missing/conflict and clean-root guarantees as library adoption.
 
 ## Adopt an existing C++ library repository
 
@@ -126,4 +133,4 @@ updates leave normal reviewable Git diffs. Schema changes require an explicit mi
 tools\test.cmd
 ```
 
-Tests use disposable fixture directories only. The suite includes Operator generation, JSON/human output separation, heartbeat/no-color behavior, task environment and working-directory isolation, fail-fast sequencing, parallel execution, exact-HEAD validation, real clean-tree gates, and asynchronous CI exact-remote-head dispatch preconditions.
+Tests use disposable fixture directories only. The suite covers library/app generation and adoption, native-common managed-surface lifecycle, real generated-repository configure/build dogfood, build-system API coexistence and incompatibility, dependency-option scoping, strict CMake argument handling, Operator generation, JSON/human output separation, heartbeat/no-color behavior, task environment and working-directory isolation, fail-fast sequencing, parallel execution, exact-HEAD validation, real clean-tree gates, and asynchronous CI exact-remote-head dispatch preconditions.
