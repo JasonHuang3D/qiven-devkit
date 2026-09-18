@@ -30,6 +30,9 @@
     },
     "clean-tree": {
       "builtin": "git_clean_tree"
+    },
+    "apply-patch": {
+      "argv": ["{python}", "tools/apply_patch.py"]
     }
   },
   "gates": {

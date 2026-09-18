@@ -16,7 +16,7 @@ set(QIVEN_MANAGED_FILES
     tools/format.cmd
     tools/format-check.cmd
     tools/gen-vs2022-x64.cmd
-    tools/apply-jason-brother.cmd
+    tools/apply_patch.py
     tools/qiven.cmd
     tools/qiven.py
     tools/qiven_operator.py

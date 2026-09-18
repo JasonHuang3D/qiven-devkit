@@ -9,7 +9,6 @@ set(cmd_templates
     "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/format.cmd.in"
     "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/format-check.cmd.in"
     "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/gen-vs2022-x64.cmd.in"
-    "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/apply-jason-brother.cmd.in"
     "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/delete-all-branches-but-main.cmd.in"
     "${DEVKIT_ROOT}/templates/cpp-library/managed/tools/qiven.cmd.in"
 )

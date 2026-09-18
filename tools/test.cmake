@@ -66,7 +66,7 @@ generate_repo("${DEVKIT_ROOT}" "${repo}" qiven-example)
 
 foreach(relative IN ITEMS .clang-format .editorconfig .gitattributes CMakePresets.json AGENTS.md
         tools/resolve-toolchain.cmd tools/format.cmd tools/format-check.cmd tools/gen-vs2022-x64.cmd
-        tools/apply-jason-brother.cmd tools/delete-all-branches-but-main.cmd docs/engineering/README.md
+        tools/apply_patch.py tools/delete-all-branches-but-main.cmd docs/engineering/README.md
         .gitignore README.md CMakeLists.txt .github/workflows/ci.yml .qiven/repo.json .qiven/generated-state.cmake)
     assert_exists("${repo}/${relative}")
 endforeach()
@@ -218,6 +218,10 @@ if(WIN32 AND DEFINED QIVEN_TOOLCHAIN_ROOT_TEST AND EXISTS "${QIVEN_TOOLCHAIN_ROO
         qiven-cmd-example qiven::cmd qiven::cmd QIVEN_CMD_BUILD_TESTS qiven-cmd-example)
     run_expect_success("${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
         cmd /c "${DEVKIT_ROOT}/tools/sync-repo.cmd" "${cmd_repo}")
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(NOT Python3_EXECUTABLE)
+        fail("python 3 is required to exercise the apply-patch task")
+    endif()
 
     # The generated patch tool must pass its patch-exists branch and complete the full workflow.
     # Stub solution generation so this control-flow test does not depend on a host Visual Studio installation.
@@ -226,19 +230,19 @@ if(WIN32 AND DEFINED QIVEN_TOOLCHAIN_ROOT_TEST AND EXISTS "${QIVEN_TOOLCHAIN_ROO
     run_expect_success(git -C "${cmd_repo}" add --all)
     run_expect_success(git -C "${cmd_repo}" -c user.name=QivenFixture -c user.email=fixture@example.invalid commit -m baseline)
     file(APPEND "${cmd_repo}/README.md" "\npatched successfully\n")
-    execute_process(COMMAND git -C "${cmd_repo}" diff -- README.md OUTPUT_FILE "${cmd_repo}/jason-brother.patch" RESULT_VARIABLE patch_create_result)
+    execute_process(COMMAND git -C "${cmd_repo}" diff -- README.md OUTPUT_FILE "${cmd_repo}/candidate.patch" RESULT_VARIABLE patch_create_result)
     if(NOT patch_create_result EQUAL 0)
         fail("could not create harmless patch fixture")
     endif()
     run_expect_success(git -C "${cmd_repo}" checkout -- README.md)
     run_expect_success("${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
-        cmd /c "${cmd_repo}/tools/apply-jason-brother.cmd")
+        "${Python3_EXECUTABLE}" "${cmd_repo}/tools/apply_patch.py")
     assert_contains("${cmd_repo}/README.md" "patched successfully")
-    if(EXISTS "${cmd_repo}/jason-brother.patch")
+    if(EXISTS "${cmd_repo}/candidate.patch")
         fail("successful generated patch tool did not remove the patch")
     endif()
     execute_process(COMMAND "${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
-        cmd /c "${cmd_repo}/tools/apply-jason-brother.cmd" RESULT_VARIABLE missing_patch_result)
+        "${Python3_EXECUTABLE}" "${cmd_repo}/tools/apply_patch.py" RESULT_VARIABLE missing_patch_result)
     if(missing_patch_result EQUAL 0)
         fail("generated patch tool succeeded without a patch")
     endif()
