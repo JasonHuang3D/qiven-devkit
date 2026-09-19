@@ -1,4 +1,4 @@
-set(QIVEN_TEMPLATE_VERSION "0.1.3")
+set(QIVEN_TEMPLATE_VERSION "0.1.4")
 set(QIVEN_FILE_CLASS managed)
 set(QIVEN_MANAGED_FILES
     .clang-format
@@ -12,15 +12,14 @@ set(QIVEN_MANAGED_FILES
     docs/engineering/testing-standard.md
     docs/engineering/worker-protocol.md
     docs/engineering/feature-spec.md
-    tools/resolve-toolchain.cmd
-    tools/format.cmd
-    tools/format-check.cmd
-    tools/gen-vs2022-x64.cmd
-    tools/apply-jason-brother.cmd
+    tools/toolchain.py
+    tools/check_toolchain.py
+    tools/format_sources.py
+    tools/apply_patch.py
     tools/qiven.cmd
     tools/qiven.py
     tools/qiven_operator.py
-    tools/delete-all-branches-but-main.cmd
+    tools/delete_all_branches.py
 )
 set(QIVEN_FILE_CLASS bootstrap-only)
 set(QIVEN_BOOTSTRAP_FILES
