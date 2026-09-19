@@ -65,16 +65,16 @@ set(repo "${fixtures}/qiven-example")
 generate_repo("${DEVKIT_ROOT}" "${repo}" qiven-example)
 
 foreach(relative IN ITEMS .clang-format .editorconfig .gitattributes CMakePresets.json AGENTS.md
-        tools/resolve-toolchain.cmd tools/format.cmd tools/format-check.cmd tools/gen-vs2022-x64.cmd
-        tools/apply_patch.py tools/delete-all-branches-but-main.cmd docs/engineering/README.md
+        tools/toolchain.py tools/check_toolchain.py tools/format_sources.py
+        tools/apply_patch.py tools/delete_all_branches.py docs/engineering/README.md
         .gitignore README.md CMakeLists.txt .github/workflows/ci.yml .qiven/repo.json .qiven/generated-state.cmake)
     assert_exists("${repo}/${relative}")
 endforeach()
 assert_contains("${repo}/CMakePresets.json" "QIVEN_EXAMPLE_BUILD_TESTS")
 assert_not_contains("${repo}/CMakePresets.json" "QIVEN_BUILD_TESTS")
-assert_contains("${repo}/tools/resolve-toolchain.cmd" "..\\..\\qiven-toolchain-win")
-assert_contains("${repo}/tools/gen-vs2022-x64.cmd" "qiven-example.sln")
-assert_contains("${repo}/.qiven/generated-state.cmake" "0.1.3")
+assert_contains("${repo}/tools/toolchain.py" "qiven-toolchain-win")
+assert_contains("${repo}/.qiven/operator.json" "check-toolchain")
+assert_contains("${repo}/.qiven/generated-state.cmake" "0.1.4")
 
 file(GLOB_RECURSE generated_files LIST_DIRECTORIES false "${repo}/*" "${repo}/.*")
 foreach(path IN LISTS generated_files)
@@ -93,15 +93,15 @@ set(devkit_copy "${fixtures}/devkit-copy")
 file(COPY "${DEVKIT_ROOT}/" DESTINATION "${devkit_copy}" PATTERN ".git" EXCLUDE)
 file(APPEND "${devkit_copy}/templates/cpp-library/managed/.editorconfig.in" "\n# fixture-template-update\n")
 file(READ "${devkit_copy}/templates/cpp-library/managed-files.cmake" manifest)
-string(REPLACE "0.1.3" "0.1.4-test" manifest "${manifest}")
+string(REPLACE "0.1.4" "0.1.5-test" manifest "${manifest}")
 file(WRITE "${devkit_copy}/templates/cpp-library/managed-files.cmake" "${manifest}")
 run_expect_success("${CMAKE_COMMAND}" -DDEVKIT_ROOT=${devkit_copy} -DREPOSITORY=${repo} -P "${devkit_copy}/cmake/QivenRepoSync.cmake")
 assert_contains("${repo}/.editorconfig" "fixture-template-update")
-assert_contains("${repo}/.qiven/generated-state.cmake" "0.1.4-test")
+assert_contains("${repo}/.qiven/generated-state.cmake" "0.1.5-test")
 file(READ "${repo}/.qiven/repo.json" synced_metadata)
 string(JSON synced_repo_version GET "${synced_metadata}" template_version)
 include("${repo}/.qiven/generated-state.cmake")
-if(NOT synced_repo_version STREQUAL "0.1.4-test" OR NOT QIVEN_TEMPLATE_VERSION STREQUAL synced_repo_version)
+if(NOT synced_repo_version STREQUAL "0.1.5-test" OR NOT QIVEN_TEMPLATE_VERSION STREQUAL synced_repo_version)
     fail("repo metadata and generated state template versions are inconsistent")
 endif()
 
@@ -128,8 +128,11 @@ assert_contains("${repo}/.github/workflows/ci.yml" "consumer ci edit")
 set(add_devkit "${fixtures}/add-devkit")
 file(COPY "${DEVKIT_ROOT}/" DESTINATION "${add_devkit}" PATTERN ".git" EXCLUDE)
 file(READ "${add_devkit}/templates/cpp-library/managed-files.cmake" add_manifest)
-string(REPLACE "0.1.3" "0.1.4-add" add_manifest "${add_manifest}")
-string(REPLACE "    tools/delete-all-branches-but-main.cmd\n)" "    tools/delete-all-branches-but-main.cmd\n    docs/engineering/new-managed.md\n)" add_manifest "${add_manifest}")
+string(REPLACE "0.1.4" "0.1.5-add" add_manifest "${add_manifest}")
+string(REPLACE "    tools/delete_all_branches.py
+)" "    tools/delete_all_branches.py
+    docs/engineering/new-managed.md
+)" add_manifest "${add_manifest}")
 file(WRITE "${add_devkit}/templates/cpp-library/managed-files.cmake" "${add_manifest}")
 file(WRITE "${add_devkit}/templates/cpp-library/managed/docs/engineering/new-managed.md.in" "# Newly managed\n")
 
@@ -156,7 +159,7 @@ assert_contains("${collision_repo}/docs/engineering/new-managed.md" "consumer-ow
 set(remove_devkit "${fixtures}/remove-devkit")
 file(COPY "${DEVKIT_ROOT}/" DESTINATION "${remove_devkit}" PATTERN ".git" EXCLUDE)
 file(READ "${remove_devkit}/templates/cpp-library/managed-files.cmake" remove_manifest)
-string(REPLACE "0.1.3" "0.1.4-remove" remove_manifest "${remove_manifest}")
+string(REPLACE "0.1.4" "0.1.5-remove" remove_manifest "${remove_manifest}")
 string(REPLACE "    .gitattributes\n" "" remove_manifest "${remove_manifest}")
 file(WRITE "${remove_devkit}/templates/cpp-library/managed-files.cmake" "${remove_manifest}")
 
@@ -179,7 +182,10 @@ assert_contains("${remove_conflict_repo}/.gitattributes" "consumer edit")
 set(old_devkit "${fixtures}/old-devkit")
 file(COPY "${DEVKIT_ROOT}/" DESTINATION "${old_devkit}" PATTERN ".git" EXCLUDE)
 file(READ "${old_devkit}/templates/cpp-library/managed-files.cmake" old_manifest)
-string(REPLACE "    tools/delete-all-branches-but-main.cmd\n)" "    tools/delete-all-branches-but-main.cmd\n    docs/engineering/old-name.md\n)" old_manifest "${old_manifest}")
+string(REPLACE "    tools/delete_all_branches.py
+)" "    tools/delete_all_branches.py
+    docs/engineering/old-name.md
+)" old_manifest "${old_manifest}")
 file(WRITE "${old_devkit}/templates/cpp-library/managed-files.cmake" "${old_manifest}")
 file(WRITE "${old_devkit}/templates/cpp-library/managed/docs/engineering/old-name.md.in" "# Renamed content\n")
 set(rename_repo "${fixtures}/rename-repo")
@@ -187,7 +193,7 @@ generate_repo("${old_devkit}" "${rename_repo}" rename-repo)
 set(rename_devkit "${fixtures}/rename-devkit")
 file(COPY "${old_devkit}/" DESTINATION "${rename_devkit}")
 file(READ "${rename_devkit}/templates/cpp-library/managed-files.cmake" rename_manifest)
-string(REPLACE "0.1.3" "0.1.4-rename" rename_manifest "${rename_manifest}")
+string(REPLACE "0.1.4" "0.1.5-rename" rename_manifest "${rename_manifest}")
 string(REPLACE "docs/engineering/old-name.md" "docs/engineering/new-name.md" rename_manifest "${rename_manifest}")
 file(WRITE "${rename_devkit}/templates/cpp-library/managed-files.cmake" "${rename_manifest}")
 file(RENAME "${rename_devkit}/templates/cpp-library/managed/docs/engineering/old-name.md.in" "${rename_devkit}/templates/cpp-library/managed/docs/engineering/new-name.md.in")
@@ -209,23 +215,21 @@ if(protection_result EQUAL 0)
 endif()
 assert_contains("${existing}/keep.txt" "do not overwrite")
 
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(NOT Python3_EXECUTABLE)
+    fail("python 3 is required for the devkit wrapper and apply-patch tests")
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/adoption-test.cmake")
 
 if(WIN32 AND DEFINED QIVEN_TOOLCHAIN_ROOT_TEST AND EXISTS "${QIVEN_TOOLCHAIN_ROOT_TEST}/cmake/bin/cmake.exe")
     set(cmd_repo "${fixtures}/qiven-cmd-example")
-    run_expect_success("${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
-        cmd /c "${DEVKIT_ROOT}/tools/new-cpp-library.cmd" "${cmd_repo}" qiven-cmd-example qiven-cmd-example
+    run_expect_success("${Python3_EXECUTABLE}" "${DEVKIT_ROOT}/tools/new_cpp_library.py" "${cmd_repo}" qiven-cmd-example qiven-cmd-example
         qiven-cmd-example qiven::cmd qiven::cmd QIVEN_CMD_BUILD_TESTS qiven-cmd-example)
-    run_expect_success("${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
-        cmd /c "${DEVKIT_ROOT}/tools/sync-repo.cmd" "${cmd_repo}")
-    find_package(Python3 QUIET COMPONENTS Interpreter)
-    if(NOT Python3_EXECUTABLE)
-        fail("python 3 is required to exercise the apply-patch task")
-    endif()
+    run_expect_success("${Python3_EXECUTABLE}" "${DEVKIT_ROOT}/tools/sync_repo.py" "${cmd_repo}")
 
-    # The generated patch tool must pass its patch-exists branch and complete the full workflow.
-    # Stub solution generation so this control-flow test does not depend on a host Visual Studio installation.
-    file(WRITE "${cmd_repo}/tools/gen-vs2022-x64.cmd" "@echo off\r\nexit /b 0\r\n")
+    # The generated apply-patch task must pass its patch-exists branch.
+    # Formatting and solution regeneration belong to the Operator local gate, not this task.
     run_expect_success(git -C "${cmd_repo}" init -b main)
     run_expect_success(git -C "${cmd_repo}" add --all)
     run_expect_success(git -C "${cmd_repo}" -c user.name=QivenFixture -c user.email=fixture@example.invalid commit -m baseline)
@@ -235,8 +239,7 @@ if(WIN32 AND DEFINED QIVEN_TOOLCHAIN_ROOT_TEST AND EXISTS "${QIVEN_TOOLCHAIN_ROO
         fail("could not create harmless patch fixture")
     endif()
     run_expect_success(git -C "${cmd_repo}" checkout -- README.md)
-    run_expect_success("${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
-        "${Python3_EXECUTABLE}" "${cmd_repo}/tools/apply_patch.py")
+    run_expect_success("${Python3_EXECUTABLE}" "${cmd_repo}/tools/apply_patch.py")
     assert_contains("${cmd_repo}/README.md" "patched successfully")
     if(EXISTS "${cmd_repo}/candidate.patch")
         fail("successful generated patch tool did not remove the patch")
@@ -262,8 +265,7 @@ if(WIN32 AND DEFINED QIVEN_TOOLCHAIN_ROOT_TEST AND EXISTS "${QIVEN_TOOLCHAIN_ROO
     run_expect_success(git -C "${branch_repo}" branch merged-one)
     run_expect_success(git -C "${branch_repo}" branch nested/merged-two)
     run_expect_success(git -C "${branch_repo}" push origin main:refs/heads/nested/merged-remote)
-    run_expect_success("${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
-        cmd /c "${branch_repo}/tools/delete-all-branches-but-main.cmd")
+    run_expect_success("${Python3_EXECUTABLE}" "${branch_repo}/tools/delete_all_branches.py")
     foreach(ref IN ITEMS refs/heads/merged-one refs/heads/nested/merged-two refs/remotes/origin/nested/merged-remote)
         execute_process(COMMAND git -C "${branch_repo}" show-ref --verify --quiet "${ref}" RESULT_VARIABLE ref_result)
         if(ref_result EQUAL 0)
@@ -275,8 +277,7 @@ if(WIN32 AND DEFINED QIVEN_TOOLCHAIN_ROOT_TEST AND EXISTS "${QIVEN_TOOLCHAIN_ROO
     endforeach()
     run_expect_success(git -C "${branch_repo}" symbolic-ref -q refs/remotes/origin/HEAD)
     # Run again with no local or remote candidates to catch fake empty deletion attempts.
-    run_expect_success("${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
-        cmd /c "${branch_repo}/tools/delete-all-branches-but-main.cmd")
+    run_expect_success("${Python3_EXECUTABLE}" "${branch_repo}/tools/delete_all_branches.py")
 
     run_expect_success(git -C "${branch_repo}" switch -c unmerged/local)
     file(WRITE "${branch_repo}/unmerged.txt" "unmerged\n")
@@ -286,8 +287,7 @@ if(WIN32 AND DEFINED QIVEN_TOOLCHAIN_ROOT_TEST AND EXISTS "${QIVEN_TOOLCHAIN_ROO
     run_expect_success(git -C "${branch_repo}" switch main)
     run_expect_success(git -C "${branch_repo}" branch merged-must-survive)
     run_expect_success(git -C "${branch_repo}" push origin main:refs/heads/merged-must-survive)
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E env "QIVEN_TOOLCHAIN_ROOT=${QIVEN_TOOLCHAIN_ROOT_TEST}"
-        cmd /c "${branch_repo}/tools/delete-all-branches-but-main.cmd" RESULT_VARIABLE blocked_cleanup_result)
+    execute_process(COMMAND "${Python3_EXECUTABLE}" "${branch_repo}/tools/delete_all_branches.py" RESULT_VARIABLE blocked_cleanup_result)
     if(blocked_cleanup_result EQUAL 0)
         fail("branch cleanup accepted unmerged candidates")
     endif()

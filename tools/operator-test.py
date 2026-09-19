@@ -16,7 +16,9 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 CMAKE = os.environ.get("QIVEN_CMAKE")
 if not CMAKE:
-    raise SystemExit("QIVEN_CMAKE is required")
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from toolchain import resolve
+    CMAKE = resolve()["cmake"]
 
 
 def run(
