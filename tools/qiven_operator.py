@@ -264,12 +264,17 @@ def _builtin(name: str, spec: dict[str, Any], console: Console, expect_head: str
 def _run_task(name: str, tasks: dict[str, Any], console: Console, expect_head: str | None) -> Result:
     spec = tasks.get(name)
     if not isinstance(spec, dict):
-        detail = f"unknown task: {name}"
+        detail = _unknown_task_error(name, tasks)
         console.emit("fail", detail)
         return Result(name, "fail", 2, detail=detail)
     if "builtin" in spec:
         return _builtin(name, spec, console, expect_head)
     return _run_process(name, spec, console)
+
+
+def _unknown_task_error(name: str, tasks: dict[str, Any]) -> str:
+    available = ", ".join(sorted(tasks)) if tasks else "none"
+    return f"unknown task: {name} (available: {available})"
 
 
 def _run_sequence(sequence: list[Any], tasks: dict[str, Any], console: Console, expect_head: str | None) -> list[Result]:
@@ -385,33 +390,75 @@ def _ci_start(config: dict[str, Any], profile: str, console: Console) -> dict[st
     }
 
 
+def _common_flags() -> argparse.ArgumentParser:
+    # fresh instance per parser: global flags are accepted both before and
+    # after the subcommand (a repeated odyssey failure was `gate X --json`)
+    flags = argparse.ArgumentParser(add_help=False)
+    flags.add_argument("--json", action="store_true", default=None, help="emit machine-readable JSON")
+    flags.add_argument("--verbose", action="store_true", default=None, help="show logs for successful tasks")
+    flags.add_argument("--no-color", action="store_true", default=None, help="disable ANSI terminal color")
+    return flags
+
+
 def _print_json(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
+LOG_SPILL_THRESHOLD = 4096
+
+
+def _spill_large_logs(payload: dict[str, Any]) -> dict[str, Any]:
+    # machine JSON used to be one unbounded line: buffered suite logs were
+    # unrecoverable the moment it passed through a terminal filter. Beyond the
+    # threshold, the full payload goes to a durable file and stdout stays a
+    # compact summary carrying the log path.
+    total = sum(len(str(result.get("output") or "")) for result in payload.get("results", []))
+    if total <= LOG_SPILL_THRESHOLD:
+        return payload
+    directory = Path(tempfile.gettempdir()) / "qiven-operator"
+    directory.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    name = str(payload.get("gate") or "run")
+    log_file = directory / f"qiven-{name}-{stamp}-{os.getpid()}.json"
+    log_file.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    compact = dict(payload)
+    compact["log_file"] = str(log_file)
+    compact["results"] = [
+        {
+            key: (f"<{len(str(value))} chars; full payload in log_file>" if key == "output" and value else value)
+            for key, value in result.items()
+        }
+        for result in payload["results"]
+    ]
+    return compact
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qiven", description="Qiven local engineering operator")
-    parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
-    parser.add_argument("--verbose", action="store_true", help="show logs for successful tasks")
-    parser.add_argument("--no-color", action="store_true", help="disable ANSI terminal color")
+    parser = argparse.ArgumentParser(
+        prog="qiven", description="Qiven local engineering operator", parents=[_common_flags()]
+    )
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("info", help="show repository/operator metadata")
-    gate = sub.add_parser("gate", help="run the configured local validation gate")
-    gate.add_argument("--name", default=None, help="gate name; defaults to config default_gate")
+    sub.add_parser("info", help="show repository/operator metadata", parents=[_common_flags()])
+    gate = sub.add_parser("gate", help="run the configured local validation gate", parents=[_common_flags()])
+    gate.add_argument("gate", nargs="?", default=None, help="gate name; defaults to config default_gate")
+    gate.add_argument("--name", dest="gate_flag", default=None, help="gate name (alternative to the positional)")
     gate.add_argument("--expect-head", default=None, help="require exact Git HEAD")
-    run = sub.add_parser("run", help="run declared task(s)")
+    run = sub.add_parser("run", help="run declared task(s)", parents=[_common_flags()])
     run.add_argument("tasks", nargs="+", help="task names")
     run.add_argument("--parallel", action="store_true", help="run requested tasks in parallel")
-    ci = sub.add_parser("ci", help="asynchronous CI operations")
+    ci = sub.add_parser("ci", help="asynchronous CI operations", parents=[_common_flags()])
     ci_sub = ci.add_subparsers(dest="ci_command", required=True)
-    ci_start = ci_sub.add_parser("start", help="dispatch CI and return immediately")
+    ci_start = ci_sub.add_parser("start", help="dispatch CI and return immediately", parents=[_common_flags()])
     ci_start.add_argument("profile", help="declared CI profile")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    console = Console(json_mode=args.json, verbose=args.verbose, no_color=args.no_color)
+    console = Console(json_mode=bool(args.json), verbose=bool(args.verbose), no_color=bool(args.no_color))
     try:
         config = _load_config()
         if args.command == "info":
@@ -434,10 +481,11 @@ def main(argv: list[str] | None = None) -> int:
             raise OperatorError("config tasks must be an object")
 
         if args.command == "gate":
-            gate_name = args.name or config.get("default_gate")
+            gate_name = args.gate or args.gate_flag or config.get("default_gate")
             gates = config.get("gates")
             if not isinstance(gates, dict) or not isinstance(gates.get(gate_name), list):
-                raise OperatorError(f"unknown gate: {gate_name}")
+                available = ", ".join(sorted(gates)) if isinstance(gates, dict) else "none"
+                raise OperatorError(f"unknown gate: {gate_name} (available: {available})")
             sequence = list(gates[gate_name])
             if args.expect_head:
                 sequence.insert(0, "exact-head")
@@ -452,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
                 "results": [asdict(result) for result in results],
             }
             if args.json:
-                _print_json(payload)
+                _print_json(_spill_large_logs(payload))
             else:
                 console.emit("fail" if failed else "ok", f"gate:{gate_name}: {payload['status'].upper()}")
             return 1 if failed else 0
@@ -468,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
                 "results": [asdict(result) for result in results],
             }
             if args.json:
-                _print_json(payload)
+                _print_json(_spill_large_logs(payload))
             else:
                 console.emit("fail" if failed else "ok", f"run: {payload['status'].upper()}")
             return 1 if failed else 0
