@@ -32,15 +32,13 @@ working).
 The rules were codified 2026-09-20 after the fact; some existing code
 predates them. Known deviations at codification time:
 
-- `qiven-context-draft`: service methods use `PascalCase` (`Work`,
-  `AcquireGrant`, `WriteToCognition`) while Foundation methods are
-  `snake_case` (`take`, `remaining`). Target rule: Foundation style wins
-  (`snake_case` methods). Remediation: scheduled rename in the draft, one
-  mechanical commit, before Phase 4 closeout.
-- `qiven-context-draft`: constants use the `k`-prefix (`kSerializationVersion`)
-  while Foundation uses named constexpr without the prefix
-  (`fnv1a64_offset_basis`). Target rule: no `k` prefix. Same remediation
-  commit.
+- `qiven-context-draft`: ~~constants use the `k`-prefix~~ — remediated
+  2026-09-20 (V-4 rename; no `k`-prefixed constants remain).
+- `qiven-context-draft`: service methods used `PascalCase` (`Work`,
+  `BuildBundle`, ...) while Foundation methods are `snake_case`. Target rule:
+  Foundation style wins. Remediation landed 2026-09-20 as branch
+  `jason-extended-cognition/naming-remediation` (mechanical rename, draft
+  local gate PASS); remove this entry once that branch is merged.
 
 New code follows the rules immediately; the two renames above are the only
 grandfathered deviations.
