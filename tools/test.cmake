@@ -89,6 +89,27 @@ if(NOT state_before STREQUAL state_after)
     fail("no-op sync changed generated state")
 endif()
 
+# cpp-app family: library + application scaffold, shared managed surface
+set(app_repo "${fixtures}/qiven-example-app")
+run_expect_success("${CMAKE_COMMAND}"
+    -DDEVKIT_ROOT=${DEVKIT_ROOT} -DDESTINATION=${app_repo}
+    -DREPOSITORY_NAME=qiven-example-app -DCMAKE_PROJECT_NAME=qiven-example-app
+    -DCMAKE_TARGET_NAME=qiven-example-app -DCMAKE_ALIAS=qiven::example_app
+    -DCPP_NAMESPACE=qiven::example_app -DTEST_OPTION_NAME=QIVEN_EXAMPLE_APP_BUILD_TESTS
+    -DVS_SOLUTION_NAME=qiven-example-app -DTEMPLATE=cpp-app
+    -P "${DEVKIT_ROOT}/cmake/QivenRepoNew.cmake")
+assert_exists("${app_repo}/app/main.cpp")
+assert_exists("${app_repo}/AGENTS.md")
+assert_contains("${app_repo}/CMakeLists.txt" "add_executable(qiven-example-app-app app/main.cpp)")
+assert_contains("${app_repo}/.qiven/repo.json" "\"template\": \"cpp-app\"")
+assert_contains("${app_repo}/.qiven/generated-state.cmake" "0.1.5")
+file(SHA256 "${app_repo}/.qiven/generated-state.cmake" app_state_before)
+run_expect_success("${CMAKE_COMMAND}" -DDEVKIT_ROOT=${DEVKIT_ROOT} -DREPOSITORY=${app_repo} -P "${DEVKIT_ROOT}/cmake/QivenRepoSync.cmake")
+file(SHA256 "${app_repo}/.qiven/generated-state.cmake" app_state_after)
+if(NOT app_state_before STREQUAL app_state_after)
+    fail("no-op sync changed cpp-app generated state")
+endif()
+
 set(devkit_copy "${fixtures}/devkit-copy")
 file(COPY "${DEVKIT_ROOT}/" DESTINATION "${devkit_copy}" PATTERN ".git" EXCLUDE)
 file(APPEND "${devkit_copy}/templates/cpp-library/managed/.editorconfig.in" "\n# fixture-template-update\n")

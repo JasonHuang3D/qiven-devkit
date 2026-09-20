@@ -4,11 +4,17 @@ Applies to every `qiven-*` C++ repository.
 
 ## Targets
 
-- Library target: `qiven::<name>` namespaced alias over a raw `<name>` target
-  (`qiven::foundation` over `foundation`).
+- Library target: raw target `qiven-<name>` with a `qiven::<snake_name>`
+  namespaced alias. The alias component uses snake_case, never dashes
+  (`qiven::foundation` over `qiven-foundation`, `qiven::dcr_win` over
+  `qiven-dcr-win`). (Corrected 2026-09-21: the earlier text required a bare
+  unprefixed raw target, which no repository followed; the reference
+  implementation, qiven-foundation, is normative.)
 - Test executables: `qiven-<repo>-<topic>` (`qiven-foundation-byte-cursor`,
   `qiven-context-draft-persistence`).
-- App executables: `qiven-<repo>-<app-purpose>` (`qiven-context-draft-loop`).
+- App executables: `qiven-<repo>` when the app is the repository's primary
+  product (`qiven-host`), `qiven-<repo>-app` when an app ships beside a
+  library (`qiven-dcr-win-app`). App aliases use `qiven::<name>_app`.
 
 ## CTest names
 
