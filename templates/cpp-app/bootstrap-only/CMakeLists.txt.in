@@ -15,7 +15,7 @@ add_library(@CMAKE_ALIAS@ ALIAS @CMAKE_TARGET_NAME@)
 target_compile_features(@CMAKE_TARGET_NAME@ INTERFACE cxx_std_20)
 
 add_executable(@CMAKE_TARGET_NAME@-app app/main.cpp)
-add_library(@CMAKE_ALIAS@_app ALIAS @CMAKE_TARGET_NAME@-app)
+add_executable(@CMAKE_ALIAS@_app ALIAS @CMAKE_TARGET_NAME@-app)
 set_target_properties(
     @CMAKE_TARGET_NAME@-app
     PROPERTIES
