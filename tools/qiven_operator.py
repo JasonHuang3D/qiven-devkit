@@ -237,6 +237,29 @@ def _builtin(name: str, spec: dict[str, Any], console: Console, expect_head: str
             detail = f"expected {expected}, got {actual or '<unresolved>'}"
             console.emit("fail", f"{name}: {detail}")
             return Result(name, "fail", 1, time.monotonic() - started, detail=detail, output=completed.stdout)
+    elif kind == "gate_proof":
+        # pit P-53: merge-class publication requires a recorded full-gate
+        # PASS for the EXACT head being published; a missing or stale receipt
+        # fails closed (the A3 masking class: scoped gates are not the gate)
+        gate_name = str(spec.get("gate") or "")
+        head = _git("rev-parse", "HEAD").stdout.strip()
+        receipt_file = _receipt_path(gate_name, head)
+        if not gate_name:
+            detail = "gate_proof builtin requires a 'gate' name"
+            console.emit("fail", f"{name}: {detail}")
+            return Result(name, "fail", 1, time.monotonic() - started, detail=detail)
+        if not receipt_file.is_file():
+            detail = f"no {gate_name} PASS receipt for exact head {head[:12]}"
+            console.emit("fail", f"{name}: {detail}")
+            return Result(name, "fail", 1, time.monotonic() - started, detail=detail)
+        receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+        if receipt.get("status") != "pass" or receipt.get("head") != head:
+            detail = f"receipt for {head[:12]} is not a matching PASS"
+            console.emit("fail", f"{name}: {detail}")
+            return Result(name, "fail", 1, time.monotonic() - started, detail=detail)
+        console.emit("ok", f"{name}: {gate_name} PASS @ {head[:12]} "
+                           f"({receipt.get('timestamp')})")
+        return Result(name, "pass", 0, time.monotonic() - started)
     elif kind == "git_diff_check":
         base = str(spec.get("base", "origin/main"))
         completed = _git("diff", "--check", f"{base}...HEAD")
@@ -275,6 +298,39 @@ def _run_task(name: str, tasks: dict[str, Any], console: Console, expect_head: s
 def _unknown_task_error(name: str, tasks: dict[str, Any]) -> str:
     available = ", ".join(sorted(tasks)) if tasks else "none"
     return f"unknown task: {name} (available: {available})"
+
+
+def _receipt_path(gate: str, head: str) -> Path:
+    # receipts are proof-of-PASS for an exact head, not evidence archives;
+    # they live in the repo-local git-ignored temp area per the
+    # generated-temp convention (tool subtree: operator/receipts)
+    return ROOT / ".generated-temp" / "operator" / "receipts" / f"{gate}-{head}.json"
+
+
+def _write_gate_receipt(payload: dict[str, Any]) -> None:
+    if payload.get("status") != "pass":
+        return
+    try:
+        path = _receipt_path(str(payload.get("gate")), str(payload.get("head")))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        receipt = {
+            "gate": payload.get("gate"),
+            "head": payload.get("head"),
+            "status": payload.get("status"),
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "tasks": [
+                {"name": r.get("name"), "status": r.get("status")}
+                for r in payload.get("results", [])
+            ],
+        }
+        path.write_text(
+            json.dumps(receipt, ensure_ascii=False, sort_keys=True, indent=1),
+            encoding="utf-8",
+        )
+    except OSError:
+        # a receipt that cannot be written degrades to no-proof-at-merge-time
+        # (merge-proof then fails), which is the fail-closed direction
+        pass
 
 
 def _run_sequence(sequence: list[Any], tasks: dict[str, Any], console: Console, expect_head: str | None) -> list[Result]:
@@ -499,6 +555,7 @@ def main(argv: list[str] | None = None) -> int:
                 "duration_seconds": round(time.monotonic() - started, 3),
                 "results": [asdict(result) for result in results],
             }
+            _write_gate_receipt(payload)
             if args.json:
                 _print_json(_spill_large_logs(payload))
             else:

@@ -10,3 +10,4 @@ Testing/
 # python bytecode
 __pycache__/
 *.pyc
+.generated-temp/
