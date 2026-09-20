@@ -26,6 +26,7 @@ working).
 | [naming-scripts.md](naming-scripts.md) | Batch (.cmd/.bat), shell (.sh), and Python tool scripts: files, flags, exit codes |
 | [naming-cmake.md](naming-cmake.md) | CMake: targets, presets, options, functions, test registration |
 | [cmake-usage.md](cmake-usage.md) | CMake usage law: presets as the only entry, toolchain pinning, forbidden invocations |
+| [agent-entry.md](agent-entry.md) | AGENTS.md policy: pointer-only entry files, hard size limit, authority stays canonical |
 
 ## Known deviations (tracked, not hidden)
 
