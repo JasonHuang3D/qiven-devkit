@@ -7,19 +7,41 @@
       "builtin": "exact_head"
     },
     "check-toolchain": {
-      "argv": ["{python}", "tools/check_toolchain.py"]
+      "argv": [
+        "{python}",
+        "tools/check_toolchain.py"
+      ]
     },
     "cmd-control-flow": {
-      "argv": ["{cmake}", "-DDEVKIT_ROOT={root}", "-P", "tools/cmd-control-flow-test.cmake"]
+      "argv": [
+        "{cmake}",
+        "-DDEVKIT_ROOT={root}",
+        "-P",
+        "tools/cmd-control-flow-test.cmake"
+      ]
     },
     "adoption-missing-sync": {
-      "argv": ["{cmake}", "-DDEVKIT_ROOT={root}", "-P", "tools/adoption-missing-sync-test.cmake"]
+      "argv": [
+        "{cmake}",
+        "-DDEVKIT_ROOT={root}",
+        "-P",
+        "tools/adoption-missing-sync-test.cmake"
+      ]
     },
     "operator-tests": {
-      "argv": ["{python}", "tools/operator-test.py"]
+      "argv": [
+        "{python}",
+        "tools/operator-test.py"
+      ]
     },
     "devkit-regression": {
-      "argv": ["{cmake}", "-DDEVKIT_ROOT={root}", "-DQIVEN_TOOLCHAIN_ROOT_TEST={toolchain_root}", "-P", "tools/test.cmake"]
+      "argv": [
+        "{cmake}",
+        "-DDEVKIT_ROOT={root}",
+        "-DQIVEN_TOOLCHAIN_ROOT_TEST={toolchain_root}",
+        "-P",
+        "tools/test.cmake"
+      ]
     },
     "diff-check": {
       "builtin": "git_diff_check",
@@ -27,6 +49,12 @@
     },
     "clean-tree": {
       "builtin": "git_clean_tree"
+    },
+    "commit-subjects": {
+      "argv": [
+        "{python}",
+        "tools/check_commit_subjects.py"
+      ]
     }
   },
   "gates": {
@@ -35,6 +63,7 @@
       "cmd-control-flow",
       "adoption-missing-sync",
       "operator-tests",
+      "commit-subjects",
       "devkit-regression",
       "diff-check",
       "clean-tree"
