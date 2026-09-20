@@ -1,0 +1,31 @@
+cmake_minimum_required(VERSION 3.28)
+project(@CMAKE_PROJECT_NAME@ VERSION 0.1.0 LANGUAGES CXX)
+
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+if(MSVC)
+    set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "CMake")
+endif()
+
+option(@TEST_OPTION_NAME@ "Build @REPOSITORY_NAME@ tests" ${PROJECT_IS_TOP_LEVEL})
+
+# Bootstrap-only: the library starts INTERFACE; choose the final structure
+# and linkage after domain design is approved (reference: qiven-foundation).
+add_library(@CMAKE_TARGET_NAME@ INTERFACE)
+add_library(@CMAKE_ALIAS@ ALIAS @CMAKE_TARGET_NAME@)
+target_compile_features(@CMAKE_TARGET_NAME@ INTERFACE cxx_std_20)
+
+add_executable(@CMAKE_TARGET_NAME@-app app/main.cpp)
+add_library(@CMAKE_ALIAS@_app ALIAS @CMAKE_TARGET_NAME@-app)
+set_target_properties(
+    @CMAKE_TARGET_NAME@-app
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+        FOLDER "Apps"
+        VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:@CMAKE_TARGET_NAME@-app>"
+)
+target_link_libraries(@CMAKE_TARGET_NAME@-app PRIVATE @CMAKE_ALIAS@)
+target_compile_features(@CMAKE_TARGET_NAME@-app PRIVATE cxx_std_20)
+
+if(@TEST_OPTION_NAME@)
+    enable_testing()
+endif()

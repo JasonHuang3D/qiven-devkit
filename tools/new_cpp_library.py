@@ -26,6 +26,7 @@ def main(argv: list[str]) -> int:
             "CMAKE_ALIAS", "CPP_NAMESPACE", "TEST_OPTION_NAME")
     values = dict(zip(keys, argv[:7]))
     values["VS_SOLUTION_NAME"] = argv[7] if len(argv) > 7 else argv[1]
+    values["TEMPLATE"] = argv[8] if len(argv) > 8 else "cpp-library"
     devkit = Path(__file__).resolve().parent.parent
     command = [resolve()["cmake"], f"-DDEVKIT_ROOT={devkit}"]
     command += [f"-D{key}={value}" for key, value in values.items()]

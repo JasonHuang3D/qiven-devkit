@@ -38,6 +38,22 @@ If a configuration is missing, add a preset — do not improvise one-off flags.
 - Options gate optional builds (`QIVEN_BUILD_TESTS`) and default sensibly
   when the repository is consumed as a subproject.
 
+## Header visibility law (VS2022 / human-friendly IDE view)
+
+The reference implementation is `qiven-foundation`. Every C++ repository:
+
+- lists its public headers explicitly (`QIVEN_<NAME>_PUBLIC_HEADERS`) and
+  registers them with `target_sources(... PUBLIC FILE_SET HEADERS ...)`;
+- for `Visual Studio` generators, organizes them with
+  `source_group(TREE <include-dir> PREFIX "Header Files" ...)` (and the
+  source tree under `"Source Files"`) so headers appear as a browsable
+  tree inside the project in the IDE;
+- sets `USE_FOLDERS ON` globally and `PREDEFINED_TARGETS_FOLDER "CMake"`
+  on MSVC.
+
+A repository whose headers are invisible in the solution explorer is in
+violation, not merely unpolished (owner directive 2026-09-21).
+
 ## Gates
 
 - A repository's Operator gate (`.qiven/operator.json`) is the only blessed
