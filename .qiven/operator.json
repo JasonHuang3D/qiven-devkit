@@ -55,6 +55,10 @@
         "{python}",
         "tools/check_commit_subjects.py"
       ]
+    },
+    "merge-proof": {
+      "builtin": "gate_proof",
+      "gate": "local"
     }
   },
   "gates": {
