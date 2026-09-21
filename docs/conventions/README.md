@@ -27,6 +27,7 @@ working).
 | [naming-cmake.md](naming-cmake.md) | CMake: targets, presets, options, functions, test registration |
 | [cmake-usage.md](cmake-usage.md) | CMake usage law: presets as the only entry, toolchain pinning, forbidden invocations |
 | [build-performance.md](build-performance.md) | Build-performance policy: measurement duty, PCH//MP levers, linker notes, banned list, revisit triggers |
+| [operator-usage.md](operator-usage.md) | Qiven Operator canonical usage: gate/run/ci/exec, exit codes, hang-contract execution path |
 | [agent-entry.md](agent-entry.md) | AGENTS.md policy: pointer-only entry files, hard size limit, authority stays canonical |
 
 ## Known deviations (tracked, not hidden)
