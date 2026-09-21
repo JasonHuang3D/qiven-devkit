@@ -115,6 +115,226 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return _run_capture(["git", *args])
 
 
+# ---------------------------------------------------------------------------
+# exec: supervised detached execution for LLM-invoked commands (the hang
+# contract's mechanical answer). The child runs in its own process group,
+# detached, writing to a durable log; the operator heartbeats while it
+# supervises and bounds ITS OWN wait (--timeout). If the operator's caller
+# dies — or the operator times out — the child keeps running; exec status
+# re-attaches cheaply. An exit code no living supervisor observed is
+# reported as indeterminate, never guessed.
+# ---------------------------------------------------------------------------
+EXEC_DEFAULT_TIMEOUT_SECONDS = 120.0
+EXEC_EXIT_STILL_RUNNING = 124
+
+
+def _exec_dir() -> Path:
+    return ROOT / ".generated-temp" / "operator" / "exec"
+
+
+def _new_exec_id() -> str:
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    return f"{stamp}-{os.getpid():08d}-{os.urandom(3).hex()}"
+
+
+def _exec_record_path(exec_id: str) -> Path:
+    return _exec_dir() / f"{exec_id}.json"
+
+
+def _exec_log_path(exec_id: str) -> Path:
+    return _exec_dir() / f"{exec_id}.log"
+
+
+def _process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return code.value == STILL_ACTIVE
+            return False
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _write_exec_record(record: dict[str, Any]) -> None:
+    path = _exec_record_path(str(record.get("id")))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, ensure_ascii=False, sort_keys=True, indent=1), encoding="utf-8")
+
+
+def _read_exec_record(exec_id: str) -> dict[str, Any]:
+    path = _exec_record_path(exec_id)
+    if not path.is_file():
+        raise OperatorError(f"unknown exec id: {exec_id} (no record at {path})")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise OperatorError(f"corrupt exec record: {path}") from exc
+
+
+def _exec_snapshot(record: dict[str, Any]) -> dict[str, Any]:
+    pid = int(record.get("pid") or 0)
+    alive = _process_alive(pid)
+    log_path = Path(str(record.get("log") or ""))
+    log_size = log_path.stat().st_size if log_path.is_file() else 0
+    exit_code = record.get("exit_code")
+    if exit_code is None:
+        if record.get("status") == "stopped":
+            state = "stopped"
+        elif alive:
+            state = "running"
+        else:
+            # no supervisor observed the exit: the code is genuinely unknown
+            state = "indeterminate"
+    else:
+        state = "done"
+    return {
+        "id": record.get("id"),
+        "pid": pid,
+        "state": state,
+        "exit_code": exit_code,
+        "argv": record.get("argv"),
+        "log": str(log_path),
+        "log_bytes": log_size,
+        "started_utc": record.get("started_utc"),
+        "finished_utc": record.get("finished_utc"),
+    }
+
+
+def _tail_text(path: Path, limit_bytes: int) -> str:
+    if not path.is_file():
+        return ""
+    size = path.stat().st_size
+    with path.open("rb") as handle:
+        if size > limit_bytes:
+            handle.seek(-limit_bytes, os.SEEK_END)
+        data = handle.read(limit_bytes)
+    return data.decode("utf-8", errors="replace")
+
+
+def _exec_supervise(argv: list[str], timeout_seconds: float, console: Console) -> tuple[dict[str, Any], int]:
+    if not argv:
+        raise OperatorError("exec requires a command after --")
+    exec_id = _new_exec_id()
+    log_path = _exec_log_path(exec_id)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    creationflags = 0
+    popen_kwargs: dict[str, Any] = {}
+    if os.name == "nt":
+        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_BREAKAWAY_FROM_JOB
+        popen_kwargs["creationflags"] = creationflags
+    else:
+        popen_kwargs["start_new_session"] = True
+
+    started = time.monotonic()
+    try:
+        with log_path.open("wb") as log:
+            try:
+                process = subprocess.Popen(argv, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **popen_kwargs)
+            except OSError as exc:
+                # CREATE_BREAKAWAY_FROM_JOB fails outright when the ancestor
+                # job forbids breakaway; retry without it — survival of the
+                # child across CALLER death is best-effort, never a lie.
+                popen_kwargs.pop("creationflags", None)
+                if os.name == "nt":
+                    popen_kwargs["creationflags"] = creationflags & ~subprocess.CREATE_BREAKAWAY_FROM_JOB
+                try:
+                    process = subprocess.Popen(argv, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **popen_kwargs)
+                except OSError as second:
+                    detail = f"could not start exec process: {second}"
+                    console.emit("fail", detail)
+                    return {"status": "error", "error": detail, "argv": argv}, 2
+
+            record = {
+                "id": exec_id,
+                "argv": argv,
+                "pid": process.pid,
+                "log": str(log_path),
+                "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "timeout_seconds": timeout_seconds,
+            }
+            _write_exec_record(record)
+
+            console.emit("run", f"exec {exec_id}: pid {process.pid}, log {log_path}")
+            next_heartbeat = time.monotonic() + HEARTBEAT_SECONDS
+            while True:
+                returncode = process.poll()
+                if returncode is not None:
+                    break
+                now = time.monotonic()
+                if now - started >= timeout_seconds:
+                    snapshot = _exec_snapshot(record)
+                    console.emit(
+                        "wait",
+                        f"exec {exec_id}: still running after {timeout_seconds:.0f}s "
+                        f"(log {snapshot['log_bytes']} bytes); operator returns, child continues",
+                    )
+                    payload = dict(snapshot, status="still-running")
+                    return payload, EXEC_EXIT_STILL_RUNNING
+                if now >= next_heartbeat:
+                    log_bytes = log_path.stat().st_size if log_path.is_file() else 0
+                    console.emit("wait", f"exec {exec_id}: running for {now - started:.0f}s, log {log_bytes} bytes")
+                    next_heartbeat = now + HEARTBEAT_SECONDS
+                time.sleep(POLL_SECONDS)
+
+            duration = time.monotonic() - started
+            record["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            record["exit_code"] = returncode
+            _write_exec_record(record)
+            snapshot = _exec_snapshot(record)
+            snapshot["duration_seconds"] = round(duration, 3)
+            console.emit("ok" if returncode == 0 else "fail", f"exec {exec_id}: exit {returncode} ({duration:.2f}s)")
+            payload = dict(snapshot, status="done")
+            return payload, returncode
+    finally:
+        pass
+
+
+def _exec_stop(record: dict[str, Any], console: Console) -> tuple[dict[str, Any], int]:
+    pid = int(record.get("pid") or 0)
+    if not _process_alive(pid):
+        snapshot = _exec_snapshot(record)
+        snapshot["status"] = "not-running"
+        return snapshot, 0
+    if os.name == "nt":
+        completed = _run_capture(["taskkill", "/T", "/F", "/PID", str(pid)])
+    else:
+        try:
+            import signal
+
+            os.killpg(pid, signal.SIGTERM)
+            completed_returncode = 0
+        except OSError:
+            completed_returncode = 1
+        from types import SimpleNamespace
+
+        completed = SimpleNamespace(returncode=completed_returncode, stdout="")
+    if completed.returncode == 0:
+        record["status"] = "stopped"
+        record["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        _write_exec_record(record)
+    snapshot = _exec_snapshot(record)
+    snapshot["status"] = "stopped" if completed.returncode == 0 else "stop-failed"
+    console.emit("ok" if completed.returncode == 0 else "fail", f"exec stop {record.get('id')}: {snapshot['status']}")
+    return snapshot, 0 if completed.returncode == 0 else 1
+
+
 def _toolchain() -> dict[str, str]:
     root = Path(os.environ.get("QIVEN_TOOLCHAIN_ROOT", ROOT.parent / "qiven-toolchain-win")).resolve()
     manifest = root / "toolchain.json"
@@ -448,11 +668,16 @@ def _ci_start(config: dict[str, Any], profile: str, console: Console) -> dict[st
 
 def _common_flags() -> argparse.ArgumentParser:
     # fresh instance per parser: global flags are accepted both before and
-    # after the subcommand (a repeated odyssey failure was `gate X --json`)
+    # after the subcommand (a repeated odyssey failure was `gate X --json`).
+    # SUPPRESS defaults are the load-bearing part: a subparser parsing the
+    # same flag with default=None OVERWRITES a value the top-level parser
+    # already set (`--json info` silently lost the flag); with SUPPRESS an
+    # absent flag sets nothing and the earlier value survives. main() reads
+    # the flags with getattr fallbacks for the absent case.
     flags = argparse.ArgumentParser(add_help=False)
-    flags.add_argument("--json", action="store_true", default=None, help="emit machine-readable JSON")
-    flags.add_argument("--verbose", action="store_true", default=None, help="show logs for successful tasks")
-    flags.add_argument("--no-color", action="store_true", default=None, help="disable ANSI terminal color")
+    flags.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="emit machine-readable JSON")
+    flags.add_argument("--verbose", action="store_true", default=argparse.SUPPRESS, help="show logs for successful tasks")
+    flags.add_argument("--no-color", action="store_true", default=argparse.SUPPRESS, help="disable ANSI terminal color")
     return flags
 
 
@@ -509,12 +734,31 @@ def _parser() -> argparse.ArgumentParser:
     ci_sub = ci.add_subparsers(dest="ci_command", required=True)
     ci_start = ci_sub.add_parser("start", help="dispatch CI and return immediately", parents=[_common_flags()])
     ci_start.add_argument("profile", help="declared CI profile")
+    exec_parser = sub.add_parser(
+        "exec", help="supervised detached command execution (hang-contract answer)", parents=[_common_flags()]
+    )
+    exec_sub = exec_parser.add_subparsers(dest="exec_command", required=True)
+    exec_start = exec_sub.add_parser("start", help="run a command detached with heartbeat; bounded supervision", parents=[_common_flags()])
+    exec_start.add_argument("--timeout", type=float, default=EXEC_DEFAULT_TIMEOUT_SECONDS, help="operator supervision ceiling in seconds (the child survives past it)")
+    exec_start.add_argument("command_args", nargs=argparse.REMAINDER, help="command after '--' to execute")
+    exec_status = exec_sub.add_parser("status", help="snapshot one run: state, liveness, log tail", parents=[_common_flags()])
+    exec_status.add_argument("run_id", help="exec run id")
+    exec_status.add_argument("--tail", type=int, default=2000, help="log tail bytes to include")
+    exec_stop = exec_sub.add_parser("stop", help="terminate a run's process tree", parents=[_common_flags()])
+    exec_stop.add_argument("run_id", help="exec run id")
+    exec_list = exec_sub.add_parser("list", help="list known runs with state", parents=[_common_flags()])
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    console = Console(json_mode=bool(args.json), verbose=bool(args.verbose), no_color=bool(args.no_color))
+    json_mode = bool(getattr(args, "json", False))
+    verbose_mode = bool(getattr(args, "verbose", False))
+    no_color_mode = bool(getattr(args, "no_color", False))
+    args.json = json_mode
+    args.verbose = verbose_mode
+    args.no_color = no_color_mode
+    console = Console(json_mode=json_mode, verbose=verbose_mode, no_color=no_color_mode)
     try:
         config = _load_config()
         if args.command == "info":
@@ -591,6 +835,61 @@ def main(argv: list[str] | None = None) -> int:
                     f"      workflow:    {payload['workflow']}"
                 )
             return 0
+
+        if args.command == "exec":
+            if args.exec_command == "start":
+                command = list(args.command_args)
+                if command and command[0] == "--":
+                    command = command[1:]
+                if not command:
+                    raise OperatorError("exec start requires a command after '--'")
+                payload, exit_code = _exec_supervise(command, float(args.timeout), console)
+                if args.json:
+                    _print_json(payload)
+                return exit_code
+            if args.exec_command == "status":
+                record = _read_exec_record(args.run_id)
+                snapshot = _exec_snapshot(record)
+                tail = _tail_text(Path(snapshot["log"]), max(0, int(args.tail)))
+                payload = dict(snapshot, status=snapshot["state"], tail=tail)
+                if args.json:
+                    _print_json(payload)
+                else:
+                    console.emit(
+                        "ok" if snapshot["state"] == "done" else "wait",
+                        f"exec {snapshot['id']}: {snapshot['state']}"
+                        + (f", exit {snapshot['exit_code']}" if snapshot["exit_code"] is not None else "")
+                        + f", log {snapshot['log_bytes']} bytes",
+                    )
+                    if tail:
+                        console.block(tail)
+                return 0
+            if args.exec_command == "stop":
+                record = _read_exec_record(args.run_id)
+                payload, exit_code = _exec_stop(record, console)
+                if args.json:
+                    _print_json(payload)
+                return exit_code
+            if args.exec_command == "list":
+                runs = []
+                directory = _exec_dir()
+                if directory.is_dir():
+                    for record_path in sorted(directory.glob("*.json")):
+                        try:
+                            runs.append(_exec_snapshot(json.loads(record_path.read_text(encoding="utf-8"))))
+                        except (json.JSONDecodeError, OSError):
+                            continue
+                payload = {"status": "ok", "runs": runs}
+                if args.json:
+                    _print_json(payload)
+                else:
+                    for snapshot in runs:
+                        console.emit(
+                            "wait" if snapshot["state"] == "running" else "ok",
+                            f"exec {snapshot['id']}: {snapshot['state']}"
+                            + (f", exit {snapshot['exit_code']}" if snapshot["exit_code"] is not None else ""),
+                        )
+                return 0
 
         raise OperatorError("unsupported command")
     except OperatorError as exc:

@@ -262,6 +262,105 @@ def main() -> int:
         assert "[ OK ] run: PASS" in rendered
         assert "\x1b[" not in rendered, "--no-color emitted ANSI escapes"
 
+        # --- exec: supervised detached execution (hang-contract mechanics) ---
+        quick = run(
+            [
+                sys.executable,
+                "tools/qiven.py",
+                "--json",
+                "exec",
+                "start",
+                "--timeout",
+                "30",
+                "--",
+                sys.executable,
+                "-c",
+                "print('exec-marker')",
+            ],
+            cwd=repo,
+        )
+        quick_payload = json.loads(quick.stdout)
+        assert quick_payload["status"] == "done"
+        assert quick_payload["exit_code"] == 0
+        assert quick_payload["log_bytes"] > 0
+
+        child_code = (
+            "import time\n"
+            "start = time.time()\n"
+            f"while time.time() - start < {15.0!r}:\n"
+            "    print('beat', flush=True)\n"
+            "    time.sleep(0.2)\n"
+        )
+
+        # operator timeout returns still-running (exit 124); the child is
+        # NOT killed by the operator returning
+        slow = run(
+            [
+                sys.executable,
+                "tools/qiven.py",
+                "--json",
+                "exec",
+                "start",
+                "--timeout",
+                "1",
+                "--",
+                sys.executable,
+                "-c",
+                child_code,
+            ],
+            cwd=repo,
+            expect=124,
+        )
+        slow_payload = json.loads(slow.stdout)
+        assert slow_payload["status"] == "still-running"
+        run_id = str(slow_payload["id"])
+
+        # the orphaned child keeps producing; status re-attaches cheaply
+        time.sleep(0.8)
+        snap = run([sys.executable, "tools/qiven.py", "--json", "exec", "status", run_id], cwd=repo)
+        snap_payload = json.loads(snap.stdout)
+        assert snap_payload["state"] == "running", snap.stdout
+        assert "beat" in snap_payload["tail"]
+
+        listing = run([sys.executable, "tools/qiven.py", "--json", "exec", "list"], cwd=repo)
+        listing_payload = json.loads(listing.stdout)
+        assert any(item["id"] == run_id for item in listing_payload["runs"])
+
+        stop = run([sys.executable, "tools/qiven.py", "--json", "exec", "stop", run_id], cwd=repo)
+        stop_payload = json.loads(stop.stdout)
+        assert stop_payload["status"] == "stopped", stop.stdout
+        final = run([sys.executable, "tools/qiven.py", "--json", "exec", "status", run_id], cwd=repo)
+        final_payload = json.loads(final.stdout)
+        assert final_payload["state"] == "stopped"
+
+        # a child that exits with no living supervisor is INDETERMINATE, and
+        # the operator says so instead of guessing an exit code
+        unobserved = run(
+            [
+                sys.executable,
+                "tools/qiven.py",
+                "--json",
+                "exec",
+                "start",
+                "--timeout",
+                "1",
+                "--",
+                sys.executable,
+                "-c",
+                "import time; time.sleep(2.5)",
+            ],
+            cwd=repo,
+            expect=124,
+        )
+        unobserved_id = str(json.loads(unobserved.stdout)["id"])
+        time.sleep(2.2)
+        unobserved_snap = run(
+            [sys.executable, "tools/qiven.py", "--json", "exec", "status", unobserved_id], cwd=repo
+        )
+        unobserved_payload = json.loads(unobserved_snap.stdout)
+        assert unobserved_payload["state"] == "indeterminate", unobserved_snap.stdout
+        assert unobserved_payload["exit_code"] is None
+
         wrong_head = run(
             [
                 sys.executable,
