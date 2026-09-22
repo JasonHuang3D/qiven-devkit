@@ -112,7 +112,12 @@ if(NOT app_state_before STREQUAL app_state_after)
 endif()
 
 set(devkit_copy "${fixtures}/devkit-copy")
-file(COPY "${DEVKIT_ROOT}/" DESTINATION "${devkit_copy}" PATTERN ".git" EXCLUDE)
+# .generated-temp excluded: regenerable local state, and a detached gate
+# (qiven exec) holds live-locked logs under it — copying them into the
+# fixture fails on the file lock (found 2026-09-23).
+file(COPY "${DEVKIT_ROOT}/" DESTINATION "${devkit_copy}"
+     PATTERN ".git" EXCLUDE
+     PATTERN ".generated-temp" EXCLUDE)
 file(APPEND "${devkit_copy}/templates/cpp-library/managed/.editorconfig.in" "\n# fixture-template-update\n")
 file(READ "${devkit_copy}/templates/cpp-library/managed-files.cmake" manifest)
 string(REPLACE "0.1.7" "0.1.8-test" manifest "${manifest}")
@@ -148,7 +153,9 @@ assert_contains("${repo}/.github/workflows/ci.yml" "consumer ci edit")
 
 # Managed-set evolution: safe addition, addition collision, removal, removal conflict, and rename.
 set(add_devkit "${fixtures}/add-devkit")
-file(COPY "${DEVKIT_ROOT}/" DESTINATION "${add_devkit}" PATTERN ".git" EXCLUDE)
+file(COPY "${DEVKIT_ROOT}/" DESTINATION "${add_devkit}"
+     PATTERN ".git" EXCLUDE
+     PATTERN ".generated-temp" EXCLUDE)
 file(READ "${add_devkit}/templates/cpp-library/managed-files.cmake" add_manifest)
 string(REPLACE "0.1.7" "0.1.8-add" add_manifest "${add_manifest}")
 string(REPLACE "    tools/delete_all_branches.py
@@ -179,7 +186,9 @@ endif()
 assert_contains("${collision_repo}/docs/engineering/new-managed.md" "consumer-owned")
 
 set(remove_devkit "${fixtures}/remove-devkit")
-file(COPY "${DEVKIT_ROOT}/" DESTINATION "${remove_devkit}" PATTERN ".git" EXCLUDE)
+file(COPY "${DEVKIT_ROOT}/" DESTINATION "${remove_devkit}"
+     PATTERN ".git" EXCLUDE
+     PATTERN ".generated-temp" EXCLUDE)
 file(READ "${remove_devkit}/templates/cpp-library/managed-files.cmake" remove_manifest)
 string(REPLACE "0.1.7" "0.1.8-remove" remove_manifest "${remove_manifest}")
 string(REPLACE "    .gitattributes\n" "" remove_manifest "${remove_manifest}")
@@ -202,7 +211,9 @@ endif()
 assert_contains("${remove_conflict_repo}/.gitattributes" "consumer edit")
 
 set(old_devkit "${fixtures}/old-devkit")
-file(COPY "${DEVKIT_ROOT}/" DESTINATION "${old_devkit}" PATTERN ".git" EXCLUDE)
+file(COPY "${DEVKIT_ROOT}/" DESTINATION "${old_devkit}"
+     PATTERN ".git" EXCLUDE
+     PATTERN ".generated-temp" EXCLUDE)
 file(READ "${old_devkit}/templates/cpp-library/managed-files.cmake" old_manifest)
 string(REPLACE "    tools/delete_all_branches.py
 )" "    tools/delete_all_branches.py

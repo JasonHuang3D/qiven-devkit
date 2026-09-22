@@ -214,21 +214,24 @@ digest" — investigate, re-vendor deliberately, or restore.
 "If our own foundation were a third-party library cloned from GitHub —
 would the current CMake consumption be right?" Answered honestly:
 
-- Foundation/draft consumption today = sibling source checkout +
-  in-consumer `add_subdirectory` build + (for the draft) an exact-SHA
-  pin validated at configure. For CO-DEVELOPED first-party layers this
-  is a valid mode ("layer model", ADR-0039/0046): you want the local
-  source, and the layer evolves with its consumers.
+- Foundation/draft consumption = sibling source checkout +
+  in-consumer `add_subdirectory` build + an exact-SHA pin validated at
+  configure. For CO-DEVELOPED first-party layers this is a valid mode
+  ("layer model", ADR-0039/0046): you want the local source, and the
+  layer evolves with its consumers.
 - It is NOT the right model for third-party code: no per-repo
   vendoring (that is what v2 removes), no network at configure, no
   per-repo flag adaptation, and binary reuse questions do not arise
   because classes S/H compile once per consumer build tree by design.
-- Recorded gap (first-party, deliberate): foundation consumption has NO
-  exact-SHA pin (the draft does). Acceptable while layers are
-  co-developed on one workspace; revisit trigger = the first
-  cross-repo semantic-drift incident or any release-class build that
-  must be reproducible from recorded refs alone (then foundation gets
-  the same pin as the draft and the third-party pin).
+- **Pin coverage is MANDATORY for every cross-repo source consumption
+  (owner direction 2026-09-23, closing the v2 gap the same day):**
+  foundation is SHA-pinned by all consumers (runtime, draft, math) with
+  configure-time validation, exactly like the draft and singleton pins.
+  The earlier "revisit on first drift incident" deferral is REJECTED
+  practice: revisit-trigger deferrals for cheap, visible compliance
+  work do not fire (owner: "看到了就做" — see
+  qiven-context MEM-20260923T183500Z-B4C5D6). Moving any pin is an
+  explicit re-pin batch with full gates.
 
 ## Review record
 
