@@ -15,7 +15,10 @@ import time
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parents[1]
+# ADR-0046 shim mode: an external repo may delegate to this operator by
+# setting QIVEN_TARGET_ROOT to its own repository root (workspace shim +
+# pin consumption); unset means this checkout is the target itself.
+ROOT = Path(os.environ.get("QIVEN_TARGET_ROOT", Path(__file__).resolve().parents[1])).resolve()
 CONFIG_PATH = ROOT / ".qiven" / "operator.json"
 HEARTBEAT_SECONDS = 5.0
 POLL_SECONDS = 0.05
