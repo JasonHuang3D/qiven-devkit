@@ -89,6 +89,25 @@ CASES: list[tuple[str, str]] = [
     ("git pull --quiet && tools/qiven.cmd exec status abc", "git-network"),
     ("tools/qiven.cmd exec start -- x && ctest --test-dir b", "long"),
     ("echo a ; vim b.txt", "interactive"),
+    # --- chained exec invocations (OBL-A7B8C9: segments after && arrive ---
+    # --- with leading whitespace; the anchors must tolerate it) -----------
+    ("git status --short && tools\\qiven.cmd exec start --timeout 600 -- cmake --build build", "allow"),
+    ("cd /d/x && tools/qiven.cmd exec start --timeout 60 -- python t.py", "allow"),
+    ("tools/qiven.cmd info && tools/qiven.cmd exec status abc", "allow"),
+    ("git status && tools\\qiven.cmd gate", "gate-class"),
+    ("git status &&    qiven run test-debug", "gate-class"),
+    # --- tree sweeps are long-class (2026-09-23 ghost find.exe incident) --
+    ("find /d/JasonWork -name '*.vcxproj'", "long"),
+    ("find /d/JasonWork/qiven-runtime -type f -name '*.cpp'", "long"),
+    ("find -L /d/JasonWork -name build", "long"),
+    ("find D:\\JasonWork -name build", "long"),
+    ("grep -r pattern .", "long"),
+    ("grep --recursive foo src/", "long"),
+    ("cmd /c dir /s /b", "long"),
+    ("dir build /s", "long"),
+    # the Windows text-FILTER find (slash-flag + quoted needle) stays raw:
+    ("find /i \"marker\" out.log", "allow"),
+    ("find \"needle\" file.txt", "allow"),
     # --- quote-awareness: quoted prose is not a command segment -----------
     ('git commit -m "text; qiven gate tools\\qiven.cmd gate --expect-head x" && git status', "allow"),
     ('git commit -m "mentions ctest inside quotes" && git log -1', "allow"),
