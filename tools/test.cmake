@@ -3,6 +3,16 @@ if(NOT DEFINED DEVKIT_ROOT)
     get_filename_component(DEVKIT_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 endif()
 
+# The CURRENT template version, derived from the manifest — version bumps
+# must not require editing this test (the repeated-pin drift class; the
+# simulated future versions below append suffixes to the derived value).
+file(READ "${DEVKIT_ROOT}/templates/cpp-library/managed-files.cmake" _current_manifest)
+string(REGEX MATCH "QIVEN_TEMPLATE_VERSION \"([0-9]+\\.[0-9]+\\.[0-9]+)\"" _version_match "${_current_manifest}")
+if(NOT _version_match)
+    fail("could not derive the current template version from managed-files.cmake")
+endif()
+set(CURRENT_TEMPLATE_VERSION "${CMAKE_MATCH_1}")
+
 function(fail message_text)
     message(FATAL_ERROR "TEST FAILURE: ${message_text}")
 endfunction()
@@ -74,7 +84,7 @@ assert_contains("${repo}/CMakePresets.json" "QIVEN_EXAMPLE_BUILD_TESTS")
 assert_not_contains("${repo}/CMakePresets.json" "QIVEN_BUILD_TESTS")
 assert_contains("${repo}/tools/toolchain.py" "qiven-toolchain-win")
 assert_contains("${repo}/.qiven/operator.json" "check-toolchain")
-assert_contains("${repo}/.qiven/generated-state.cmake" "0.1.7")
+assert_contains("${repo}/.qiven/generated-state.cmake" "${CURRENT_TEMPLATE_VERSION}")
 
 file(GLOB_RECURSE generated_files LIST_DIRECTORIES false "${repo}/*" "${repo}/.*")
 foreach(path IN LISTS generated_files)
@@ -102,7 +112,7 @@ assert_exists("${app_repo}/app/main.cpp")
 assert_exists("${app_repo}/AGENTS.md")
 assert_contains("${app_repo}/CMakeLists.txt" "add_executable(qiven-example-app-app app/main.cpp)")
 assert_contains("${app_repo}/.qiven/repo.json" "\"template\": \"cpp-app\"")
-assert_contains("${app_repo}/.qiven/generated-state.cmake" "0.1.7")
+assert_contains("${app_repo}/.qiven/generated-state.cmake" "${CURRENT_TEMPLATE_VERSION}")
 run_expect_success("${CMAKE_COMMAND}" --preset vs2022-x64 -S "${app_repo}" -B "${app_repo}/build")
 file(SHA256 "${app_repo}/.qiven/generated-state.cmake" app_state_before)
 run_expect_success("${CMAKE_COMMAND}" -DDEVKIT_ROOT=${DEVKIT_ROOT} -DREPOSITORY=${app_repo} -P "${DEVKIT_ROOT}/cmake/QivenRepoSync.cmake")
@@ -120,15 +130,15 @@ file(COPY "${DEVKIT_ROOT}/" DESTINATION "${devkit_copy}"
      PATTERN ".generated-temp" EXCLUDE)
 file(APPEND "${devkit_copy}/templates/cpp-library/managed/.editorconfig.in" "\n# fixture-template-update\n")
 file(READ "${devkit_copy}/templates/cpp-library/managed-files.cmake" manifest)
-string(REPLACE "0.1.7" "0.1.8-test" manifest "${manifest}")
+string(REPLACE "QIVEN_TEMPLATE_VERSION \"${CURRENT_TEMPLATE_VERSION}\"" "QIVEN_TEMPLATE_VERSION \"${CURRENT_TEMPLATE_VERSION}-test\"" manifest "${manifest}")
 file(WRITE "${devkit_copy}/templates/cpp-library/managed-files.cmake" "${manifest}")
 run_expect_success("${CMAKE_COMMAND}" -DDEVKIT_ROOT=${devkit_copy} -DREPOSITORY=${repo} -P "${devkit_copy}/cmake/QivenRepoSync.cmake")
 assert_contains("${repo}/.editorconfig" "fixture-template-update")
-assert_contains("${repo}/.qiven/generated-state.cmake" "0.1.8-test")
+assert_contains("${repo}/.qiven/generated-state.cmake" "${CURRENT_TEMPLATE_VERSION}-test")
 file(READ "${repo}/.qiven/repo.json" synced_metadata)
 string(JSON synced_repo_version GET "${synced_metadata}" template_version)
 include("${repo}/.qiven/generated-state.cmake")
-if(NOT synced_repo_version STREQUAL "0.1.8-test" OR NOT QIVEN_TEMPLATE_VERSION STREQUAL synced_repo_version)
+if(NOT synced_repo_version STREQUAL "${CURRENT_TEMPLATE_VERSION}-test" OR NOT QIVEN_TEMPLATE_VERSION STREQUAL synced_repo_version)
     fail("repo metadata and generated state template versions are inconsistent")
 endif()
 
@@ -157,7 +167,7 @@ file(COPY "${DEVKIT_ROOT}/" DESTINATION "${add_devkit}"
      PATTERN ".git" EXCLUDE
      PATTERN ".generated-temp" EXCLUDE)
 file(READ "${add_devkit}/templates/cpp-library/managed-files.cmake" add_manifest)
-string(REPLACE "0.1.7" "0.1.8-add" add_manifest "${add_manifest}")
+string(REPLACE "QIVEN_TEMPLATE_VERSION \"${CURRENT_TEMPLATE_VERSION}\"" "QIVEN_TEMPLATE_VERSION \"${CURRENT_TEMPLATE_VERSION}-add\"" add_manifest "${add_manifest}")
 string(REPLACE "    tools/delete_all_branches.py
 )" "    tools/delete_all_branches.py
     docs/engineering/new-managed.md
@@ -190,7 +200,7 @@ file(COPY "${DEVKIT_ROOT}/" DESTINATION "${remove_devkit}"
      PATTERN ".git" EXCLUDE
      PATTERN ".generated-temp" EXCLUDE)
 file(READ "${remove_devkit}/templates/cpp-library/managed-files.cmake" remove_manifest)
-string(REPLACE "0.1.7" "0.1.8-remove" remove_manifest "${remove_manifest}")
+string(REPLACE "QIVEN_TEMPLATE_VERSION \"${CURRENT_TEMPLATE_VERSION}\"" "QIVEN_TEMPLATE_VERSION \"${CURRENT_TEMPLATE_VERSION}-remove\"" remove_manifest "${remove_manifest}")
 string(REPLACE "    .gitattributes\n" "" remove_manifest "${remove_manifest}")
 file(WRITE "${remove_devkit}/templates/cpp-library/managed-files.cmake" "${remove_manifest}")
 
@@ -226,7 +236,7 @@ generate_repo("${old_devkit}" "${rename_repo}" rename-repo)
 set(rename_devkit "${fixtures}/rename-devkit")
 file(COPY "${old_devkit}/" DESTINATION "${rename_devkit}")
 file(READ "${rename_devkit}/templates/cpp-library/managed-files.cmake" rename_manifest)
-string(REPLACE "0.1.7" "0.1.8-rename" rename_manifest "${rename_manifest}")
+string(REPLACE "QIVEN_TEMPLATE_VERSION \"${CURRENT_TEMPLATE_VERSION}\"" "QIVEN_TEMPLATE_VERSION \"${CURRENT_TEMPLATE_VERSION}-rename\"" rename_manifest "${rename_manifest}")
 string(REPLACE "docs/engineering/old-name.md" "docs/engineering/new-name.md" rename_manifest "${rename_manifest}")
 file(WRITE "${rename_devkit}/templates/cpp-library/managed-files.cmake" "${rename_manifest}")
 file(RENAME "${rename_devkit}/templates/cpp-library/managed/docs/engineering/old-name.md.in" "${rename_devkit}/templates/cpp-library/managed/docs/engineering/new-name.md.in")

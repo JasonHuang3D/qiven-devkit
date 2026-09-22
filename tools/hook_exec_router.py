@@ -12,6 +12,12 @@ failure (owner direction 2026-09-23: no ambiguous denials).
 
 Verdicts:
   allow         short read-only work, or operator exec/info
+  heredoc       shell heredoc authoring — ABSOLUTE denial (contract law
+                MEM-20260921T203500Z-D2A7F4; owner direction 2026-09-23:
+                the law was violated again after cold boot, so the hook
+                now enforces it mechanically). Checked FIRST and inside
+                exec payloads too: wrapping a heredoc in `qiven exec`
+                does not launder it.
   long          unconditional long-class (builds, downloads, clone...)
   gate-class    qiven gate/run/ci invoked raw (minutes-class; exec them)
   interactive   suspends the shell awaiting a human
@@ -75,6 +81,16 @@ _INTERACTIVE_CLASS = re.compile(
     re.IGNORECASE,
 )
 
+# Heredoc authoring: `<<` / `<<-` at a command boundary followed by a
+# delimiter word (bare or quoted). Applied to the quote-stripped segment
+# surface, so heredoc SYNTAX matches while quoted PROSE ("use << EOF in
+# docs") does not. Known accepted false positive: a shell bit-shift with
+# a letter variable (`x << n`) — the denial message says to rewrite such
+# expressions; strictness beats leaking heredoc authoring through a hook.
+_HEREDOC = re.compile(
+    r"(?:^|[\s;|&(<])<<-?\s*(?:[\"']\s*[\"']|[A-Za-z_][A-Za-z0-9_]*)"
+)
+
 # Segment-level patterns (each applied to ONE command segment, anchored
 # at its start; see classify() for the splitting law).
 _SEGMENT_PREFIX = r"^(?:cmd\s+/c\s+call\s+|cmd\s+/c\s+|call\s+|python\s+)?"
@@ -109,6 +125,12 @@ _DENY_INTERACTIVE = (
     "and hangs the tool call (2026-09-19 modal incident class). Use the non-interactive\n"
     "form (e.g. apply_patch.py / git add <paths>), or route a bounded non-interactive\n"
     "equivalent through qiven exec."
+)
+_DENY_HEREDOC = (
+    f"{_HOOK_TAG} heredoc authoring DENIED (contract: collaboration/operating-contract.md\n"
+    "File-authoring tool discipline; MEM-20260921T203500Z-D2A7F4; MEM-20260923T183000Z-A1B2C3).\n"
+    "严厉禁止使用 heredoc：文件创作必须使用原生 Read/Write/Edit 工具；请勿尝试绕路。\n"
+    "(A genuine bit-shift expression can match this pattern — rewrite it, e.g. compute via python.)"
 )
 
 
@@ -160,7 +182,7 @@ def _split_segments(command: str) -> list[str]:
     return [segment for segment in segments if segment.strip()]
 
 
-_VERDICT_PRIORITY = ("gate-class", "git-network", "long", "interactive")
+_VERDICT_PRIORITY = ("heredoc", "gate-class", "git-network", "long", "interactive")
 
 
 def _strip_quoted(text: str) -> str:
@@ -184,13 +206,15 @@ def _strip_quoted(text: str) -> str:
 
 def _classify_segment(segment: str) -> str:
     """One command segment (no separators). exec/info segments (the
-    sanctioned operator wrappers — their payload after ' -- ' is the
-    operator's business, not the raw shell's) are exempt; gate/run/ci
-    segments are minutes-class denials; everything else by class,
+    sanctioned operator wrappers) are exempt from ROUTING classes — but
+    not from heredoc: an absolute authoring prohibition cannot be
+    laundered by wrapping it in `qiven exec`. Everything else by class,
     matched against the quote-stripped command surface."""
     if not segment.strip():
         return "allow"
     surface = _strip_quoted(segment)
+    if _HEREDOC.search(surface):
+        return "heredoc"
     if _OPERATOR_EXEC.match(surface):
         return "allow"
     if _GATE_CLASS.match(surface):
@@ -313,6 +337,8 @@ def verdict(command: str, probe_runner=_run_git) -> tuple[int, str]:
     kind = classify(command)
     if kind == "allow":
         return 0, ""
+    if kind == "heredoc":
+        return 2, _DENY_HEREDOC
     if kind == "long":
         return 2, _DENY_LONG
     if kind == "gate-class":
