@@ -1,4 +1,4 @@
-set(QIVEN_TEMPLATE_VERSION "0.1.6")
+set(QIVEN_TEMPLATE_VERSION "0.1.7")
 set(QIVEN_FILE_CLASS managed)
 set(QIVEN_MANAGED_FILES
     .clang-format
@@ -7,11 +7,6 @@ set(QIVEN_MANAGED_FILES
     CMakePresets.json
     AGENTS.md
     .qiven/operator.json
-    docs/engineering/README.md
-    docs/engineering/implementation-standard.md
-    docs/engineering/testing-standard.md
-    docs/engineering/execution-protocol.md
-    docs/engineering/feature-spec.md
     tools/toolchain.py
     tools/check_toolchain.py
     tools/format_sources.py

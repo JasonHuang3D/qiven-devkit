@@ -66,7 +66,7 @@ generate_repo("${DEVKIT_ROOT}" "${repo}" qiven-example)
 
 foreach(relative IN ITEMS .clang-format .editorconfig .gitattributes CMakePresets.json AGENTS.md
         tools/toolchain.py tools/check_toolchain.py tools/format_sources.py
-        tools/apply_patch.py tools/delete_all_branches.py docs/engineering/README.md
+        tools/apply_patch.py tools/delete_all_branches.py
         .gitignore README.md CMakeLists.txt .github/workflows/ci.yml .qiven/repo.json .qiven/generated-state.cmake)
     assert_exists("${repo}/${relative}")
 endforeach()

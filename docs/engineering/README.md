@@ -1,8 +1,10 @@
-# @REPOSITORY_NAME@ Engineering Protocol
+# Qiven Engineering Protocol
 
-This directory contains the shared repository-level engineering protocol.
-It applies to every implementer — human or AI session — unchanged
-(single-session unified engineering, ADR-0044 in `JasonHuang3D/qiven-context`).
+This directory is the SINGLE CANONICAL home of the shared repository-level
+engineering protocol (ADR-0046: repositories do not carry copies; their
+AGENTS.md points here). It applies to every implementer — human or AI
+session — unchanged (single-session unified engineering, ADR-0044 in
+`JasonHuang3D/qiven-context`).
 
 Repository architecture remains repository-owned. These documents define **how** implementation work is performed safely and consistently; they do not replace domain or architectural contracts.
 

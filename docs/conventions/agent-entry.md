@@ -14,8 +14,10 @@ Every managed repository carries exactly one root `AGENTS.md`, and it is a
   per-repo produced six near-identical ~8.5 KB contract copies that every
   repo entry paid for again in tokens, without any repo being able to change
   them correctly alone (2026-09-21 decision).
-- Engineering law lives in this conventions tree and in each repository's
-  `docs/engineering/`; architecture lives in each repository's
+- Engineering law lives in this conventions tree and in the Devkit's
+  `docs/engineering/` (single canonical copy, ADR-0046 2026-09-22 —
+  repositories carry only the AGENTS.md pointer; the former per-repo
+  copies are retired); architecture lives in each repository's
   `docs/architecture/`.
 
 ## Required shape (managed template)
