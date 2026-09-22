@@ -74,14 +74,28 @@ def load_policy(repo: pathlib.Path) -> dict:
     return policy
 
 
+def resolve_singleton(repo: pathlib.Path) -> pathlib.Path | None:
+    """Third-party singleton root (Devkit standard v2): env override ->
+    sibling default -> None (no licenses to collect)."""
+    override = os.environ.get("QIVEN_THIRD_PARTY_ROOT")
+    if override and (pathlib.Path(override) / "packages").is_dir():
+        return pathlib.Path(override)
+    sibling = repo.parent / "qiven-third-party-win"
+    if (sibling / "packages").is_dir():
+        return sibling
+    return None
+
+
 def collect_provenance(repo: pathlib.Path) -> list[dict]:
     """Minimal PROVENANCE reader (name/version/license + LICENSE file) —
-    the authoritative digests stay the third-party-verify task's job."""
-    third_party = repo / "third_party"
+    the authoritative digests stay the singleton's verify task's job.
+    Sources from the workspace singleton (standard v2; per-repo
+    third_party/ no longer exists)."""
+    singleton = resolve_singleton(repo)
     entries: list[dict] = []
-    if not third_party.is_dir():
+    if singleton is None:
         return entries
-    for provenance in sorted(third_party.glob("*/PROVENANCE.yaml")):
+    for provenance in sorted((singleton / "packages").glob("*/PROVENANCE.yaml")):
         name = provenance.parent.name
         version, license_name = "?", "?"
         for line in provenance.read_text(encoding="utf-8").splitlines():
@@ -95,7 +109,7 @@ def collect_provenance(repo: pathlib.Path) -> list[dict]:
                 "name": name,
                 "version": version,
                 "license": license_name,
-                "license_file": str(license_file.relative_to(repo)).replace("\\", "/") if license_file.is_file() else "",
+                "license_file": str(license_file) if license_file.is_file() else "",
             }
         )
     return entries
@@ -135,9 +149,8 @@ def assemble(repo: pathlib.Path, policy: dict, staging: pathlib.Path, version: s
     if repo_license.is_file():
         shutil.copy2(repo_license, licenses / f"{repo.name}-LICENSE")
     for entry in collect_provenance(repo):
-        source = repo / entry["license_file"] if entry["license_file"] else repo / "third_party" / entry["name"] / "LICENSE"
-        if source.is_file():
-            shutil.copy2(source, licenses / f"{entry['name']}-LICENSE")
+        if entry["license_file"]:
+            shutil.copy2(pathlib.Path(entry["license_file"]), licenses / f"{entry['name']}-LICENSE")
     for path in sorted(p for p in staging.rglob("*") if p.is_file()):
         files.append({"path": path.relative_to(staging).as_posix(), "sha256": sha256_file(path)})
     return files

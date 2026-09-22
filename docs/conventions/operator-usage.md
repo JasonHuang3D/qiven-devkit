@@ -99,3 +99,33 @@ Semantics that matter to a caller:
   pass (testing standard §11).
 - Do not run long-class commands through a raw shell when exec exists in
   the repository.
+
+## The hook router (backstop) — 2026-09-23 review
+
+The PreToolUse Bash hook (`tools/hook_exec_router.py`, registered in the
+workspace `.zcode/config.json`) denies RAW long-class and interactive
+commands and prints the exec pattern. It is a backstop, never the
+contract; it fails open on unparseable input and cannot catch
+indirection (`BASE=<tool>; $BASE ...`). Its classification table is
+pinned by `tools/hook_exec_router_test.py` (gate task `router-tests`).
+
+Long classes (each entry earned by an observed incident or by class
+logic — additions need a case in the test table):
+
+- builds/toolchains: cmake `-S/-B/--preset/--build/--install`, ctest,
+  msbuild, devenv, `cl.exe`, `link.exe`, `dotnet build/test`;
+- repo gate/tool entrypoints that sweep or build: `format_sources.py`,
+  the format entrypoints, the pinned formatter binary, `test_all.py`,
+  pytest, `deploy_bundle.py`/`deploy.cmd` (the 2026-09-23 vendored
+  amalgamation format hang is the governing incident);
+- network acquisition: the transfer tools (curl-class and the
+  PowerShell equivalents), `pip install/download`, `npm install/ci/run
+  build`, `git clone`, `git submodule update/sync`, `gh run watch` (the
+  raw transfer-tool slip during the SQLite acquisition is the incident);
+- interactive class (separate verdict; suspends the shell awaiting a
+  human — the 2026-09-19 modal incident class): editors, git
+  interactive/patch modes, `cmake --open`.
+
+`git fetch`/`git pull`/`git push` remain raw by observation (seconds on
+this workspace's remotes); the first slow-remote incident moves them
+into the table — recorded, not silent.
