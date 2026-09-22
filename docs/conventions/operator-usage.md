@@ -51,58 +51,70 @@ dispatches the declared workflow via `gh`, and returns immediately. Qiven
 workflows are `workflow_dispatch`-only — a push never triggers CI
 (`collaboration/session-ci-handoff-contract.md`).
 
-## exec — supervised detached execution (the hang-contract path)
+## exec — supervised detached execution under bounded custody (the hang-contract path)
 
 For any command whose duration class is long or unknown (builds, test
-suites, compiler/linker invocations, long tools), LLM sessions MUST route
-it through exec instead of a raw shell call:
+suites, compiler/linker invocations, long tools, filesystem tree sweeps),
+LLM sessions MUST route it through exec instead of a raw shell call:
 `collaboration/operating-contract.md`, hang-classification rule 5.
 
 ```text
-qiven exec start [--timeout S] -- CMD ARGS...   supervise; default 120s
-qiven exec status ID [--tail N]                 re-attach: state + log tail
+qiven exec start [--timeout S] [--max-lifetime M] -- CMD ARGS...
+                                                 supervise; default 120s / 3600s
+qiven exec status ID [--tail N]                 re-attach: state + custody + log tail
 qiven exec stop ID                              terminate the process tree
-qiven exec list                                 inventory known runs
+qiven exec list                                 inventory known runs with lease
+qiven exec sweep                                terminate expired runs, finalize stale
 ```
 
 Semantics that matter to a caller:
 
-- The child runs DETACHED in its own process group with stdout/stderr to
-  a durable log under `.generated-temp/operator/exec/<id>.log`; a run
-  record (id, pid, argv, spawn_argv, times) sits beside it as `<id>.json`.
-- **Window discipline (2026-09-23 fix)**: on Windows the child is spawned
-  with `CREATE_NO_WINDOW` — a HIDDEN console. Before this fix exec used
-  `DETACHED_PROCESS`, giving the child NO console: any console descendant
-  (cmd.exe batch chains, vcvars, build tools) then allocated a NEW VISIBLE
-  console — popup cmd windows on screen with output going to the popup
-  instead of the run log (empty-log symptom), and console-DLL
-  initialization could fail outright (child exit `0xC0000142`, observed
-  with vcvars64.bat). With `CREATE_NO_WINDOW` every console in the tree is
-  invisible and stdio stays on the redirected handles. `.cmd`/`.bat`
-  targets are spawned through an explicit `cmd.exe /d /c call <abs path>`
-  (no AutoRun registry scripts, deterministic batch dispatch), and a
-  path-like argv[0] is resolved against the repository ROOT before
-  spawning. The operator-tests gate task carries the regression suite
-  (capture, batch chains, grandchild consoles, `qiven.cmd` through exec,
-  UTF-8, large output, stdin-EOF, relative paths, spawn record).
+- **Bounded process custody (v2, 2026-09-23 incident redesign;
+  `docs/design/exec-custody.md`).** Every exec run has a WATCHDOG
+  custodian holding a Windows Job Object (`KILL_ON_JOB_CLOSE`) that
+  contains the ENTIRE run tree. The kernel, not agent discipline,
+  enforces: the tree dies no later than its lease (`--max-lifetime`,
+  default 3600 s, clamped to [10, 86400]); if the watchdog dies for any
+  reason the tree dies with it instantly; and when the primary command
+  exits, surviving tree members (the MSBuild node-reuse leak class) are
+  terminated after a 1.5 s output grace. A session can no longer leave
+  invisible build processes burning CPU behind it — the 2026-09-23
+  incident (dozens of msbuild/cmd orphans + a ghost find.exe surviving
+  the session and the IDE exit) is the governing precedent. Children also
+  run with `MSBUILDDISABLENODEREUSE=1`.
+- The child runs detached with stdout/stderr to a durable log under
+  `.generated-temp/operator/exec/<id>.log`; the run record (`<id>.json`)
+  carries the custody identity: `pid`, `watchdog_pid`, `job_name`,
+  `deadline_utc`, live `heartbeat_utc`, `max_lifetime_seconds`.
+- **Window discipline (2026-09-23 fix, unchanged)**: children are spawned
+  with `CREATE_NO_WINDOW` — a HIDDEN console — never `DETACHED_PROCESS`
+  (popup windows / empty logs / `0xC0000142`). `.cmd`/`.bat` targets run
+  through an explicit `cmd.exe /d /c call <abs path>`, and a path-like
+  argv[0] is resolved against the repository ROOT before spawning. The
+  operator-tests gate task carries the regression suite (capture, batch
+  chains, grandchild consoles, custody laws C1-C10).
 - While supervising, exec heartbeats every ~5s (`running for Ns, log X
   bytes`). Heartbeat is the liveness discriminator — with beats, extending
   the budget deliberately is correct; silence means investigate the log,
   not wait longer.
 - `--timeout` bounds the OPERATOR's own wait, never the command: at the
   ceiling exec returns exit code 124 with status `still-running` and the
-  child CONTINUES. Caller death (shell killed, tool timeout) does not kill
-  the child. Breakaway from a restrictive ancestor job is best-effort with
-  fallback; survival is never overstated.
+  run continues UNDER ITS LEASE under watchdog custody. Caller death
+  (shell killed, tool timeout) does not kill the run before its lease.
 - Exit codes: the child's code when observed; 124 still-running at the
-  operator ceiling; 2 operator error. An exit no living supervisor
-  observed is reported `indeterminate` — the code is genuinely unknown and
-  is never guessed.
+  operator ceiling; 2 operator error; 1 when the run's lease expired
+  (`expired` — the business exit code is unknown and never guessed). An
+  exit no living supervisor observed is reported `indeterminate` — the
+  code is genuinely unknown.
+- **Sweep insurance**: every operator invocation piggybacks a sweep that
+  terminates runs past their lease and finalizes stale records; `qiven
+  exec sweep` runs it explicitly. Dead runs can be listed for postmortem
+  via `exec list`.
 - Typical loop: `exec start --timeout 60 -- <build command>` → if 124,
-  either `exec status ID` (bounded observations per the session contracts
-  — at most three per 60s) or re-invoke start is NOT needed; the run
-  continues — keep checking status until done/indeterminate, then read the
-  log.
+  `exec status ID` (bounded observations per the session contracts — at
+  most three per 60s); the run continues under its lease — keep checking
+  status until done/expired/indeterminate, then read the log. Runs you
+  abandon are still bounded: the lease kills them without any caller.
 
 ## What NOT to do
 
@@ -137,6 +149,10 @@ logic — additions need a case in the test table):
   PowerShell equivalents), `pip install/download`, `npm install/ci/run
   build`, `git clone`, `git submodule update/sync`, `gh run watch` (the
   raw transfer-tool slip during the SQLite acquisition is the incident);
+- filesystem tree sweeps (2026-09-23 ghost find.exe incident): `find`
+  with a path-argument form (`find /d/...`, `find D:\...`, flags then
+  path), `grep -r/--recursive`, `dir /s` — the Windows text-FILTER form
+  (`find /i "text" file`) stays raw;
 - interactive class (separate verdict; suspends the shell awaiting a
   human — the 2026-09-19 modal incident class): editors, git
   interactive/patch modes, `cmake --open`.
@@ -157,7 +173,10 @@ section below (measured per invocation).
 - **`qiven gate/run/ci` invoked raw are denied** with exec guidance
   (minutes-class; they block the session shell); `qiven exec/info/
   status` stay raw. Classification is PER SEGMENT: an exec wrapper in
-  one segment never launders a raw long command in another.
+  one segment never launders a raw long command in another. Segments
+  following `&&`/`;`/`|` arrive with leading whitespace and are
+  lstripped before classification — chained exec invocations classify
+  correctly (OBL-20260923T224500Z-A7B8C9, closed 2026-09-23).
 - **Every denial is prefixed `[qiven-hook]`** with its evidence, so the
   receiving agent can attribute the verdict (no ambiguous denials —
   owner direction: an unattributed denial splits the agent's

@@ -11,6 +11,7 @@ Repository architecture remains repository-owned. These documents define **how**
 ## Documents
 
 - `implementation-standard.md` — implementation quality, scope discipline, C++ design, dependency, portability, and review rules.
+- `python-standard.md` — the Python engineering law for tools, the Operator runtime, and hook scripts: process custody, Windows spawn law, error honesty, concurrency, output discipline, determinism, and tool self-tests (2026-09-23; born from the post-session process-leak incident).
 - `testing-standard.md` — semantic test design, validation profiles, adversarial/concurrency posture, and local evidence requirements.
 - `execution-protocol.md` — branch, batch, commit, validation, publication, stopping, blocker, and escalation procedure.
 - `feature-spec.md` — the specification contract used to define implementation-ready work before implementation begins (owner-authored or session-authored alike).

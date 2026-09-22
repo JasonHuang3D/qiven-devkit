@@ -58,6 +58,15 @@ _LONG_CLASS = re.compile(
     r"|python\s+-m\s+pytest\b"
     r"|deploy_bundle\.py\b"
     r"|\bdeploy\.cmd\b"
+    # filesystem tree sweeps (2026-09-23 incident: a raw Git-Bash `find`
+    # over the workspace survived the session at 20%+ CPU; sweeps are
+    # minutes-class and belong under exec custody). Path-argument forms
+    # (`find /d/...`, `find D:\...`, flags then path) sweep; the Windows
+    # text-FILTER form (`find /i "text" file` — slash-flag then quoted
+    # needle) does not. grep -r/--recursive and `dir /s` same class.
+    r"|\bg?find\s+(?:-[A-Za-z][A-Za-z0-9-]*\s+)*(?:[A-Za-z]:[\\/]|/[A-Za-z0-9_.-]+[\\/])"
+    r"|\bgrep\s+(?:[^&|;]*\s)?(?:-r[A-Za-z]*\b|--recursive\b)"
+    r"|\bdir\s+(?:[^&|;]*\s)?/[sb]\b"
     # network acquisition (downloads can outlive any sane tool timeout)
     r"|\bcurl\b"
     r"|\bwget\b"
@@ -209,10 +218,13 @@ def _classify_segment(segment: str) -> str:
     sanctioned operator wrappers) are exempt from ROUTING classes — but
     not from heredoc: an absolute authoring prohibition cannot be
     laundered by wrapping it in `qiven exec`. Everything else by class,
-    matched against the quote-stripped command surface."""
+    matched against the quote-stripped command surface. Segments are
+    lstripped before matching: a segment following `&&`/`;`/`|` arrives
+    with a leading space and the anchors are `^`-anchored
+    (OBL-20260923T224500Z-A7B8C9: chained exec invocations denied)."""
     if not segment.strip():
         return "allow"
-    surface = _strip_quoted(segment)
+    surface = _strip_quoted(segment.lstrip())
     if _HEREDOC.search(surface):
         return "heredoc"
     if _OPERATOR_EXEC.match(surface):
