@@ -284,6 +284,143 @@ def main() -> int:
         assert quick_payload["exit_code"] == 0
         assert quick_payload["log_bytes"] > 0
 
+        # --- exec regression suite (2026-09-23 window/capture fix) --------
+        # Root cause being pinned here: DETACHED_PROCESS children have NO
+        # console, so console descendants allocate VISIBLE consoles (popup
+        # windows; output lost to the log) or fail console-DLL init
+        # (0xC0000142). The fix is CREATE_NO_WINDOW plus explicit cmd.exe
+        # handling for .cmd/.bat targets.
+
+        def exec_json(*target: str, timeout: str = "60") -> dict:
+            completed = run(
+                [sys.executable, "tools/qiven.py", "--json", "exec", "start",
+                 "--timeout", timeout, "--", *target],
+                cwd=repo,
+            )
+            return json.loads(completed.stdout)
+
+        def exec_expect(expect_code: int, *target: str, timeout: str = "60") -> dict:
+            completed = run(
+                [sys.executable, "tools/qiven.py", "--json", "exec", "start",
+                 "--timeout", timeout, "--", *target],
+                cwd=repo,
+                expect=expect_code,
+            )
+            return json.loads(completed.stdout)
+
+        def exec_log_text(payload: dict) -> str:
+            return Path(str(payload["log"])).read_text(encoding="utf-8", errors="replace")
+
+        # (a) creation-flags law: hidden console, never a detached child
+        if os.name == "nt":
+            flags = operator._exec_creationflags(breakaway=True)
+            assert flags & subprocess.CREATE_NO_WINDOW, "exec must hide the console"
+            assert not flags & subprocess.DETACHED_PROCESS, "DETACHED_PROCESS pops descendant windows"
+            assert flags & subprocess.CREATE_NEW_PROCESS_GROUP
+            retry_flags = operator._exec_creationflags(breakaway=False)
+            assert retry_flags & subprocess.CREATE_NO_WINDOW
+            assert not retry_flags & subprocess.CREATE_BREAKAWAY_FROM_JOB
+        else:
+            assert operator._exec_creationflags(breakaway=True) == 0
+
+        # (b) stdout AND stderr land in the log; exit codes propagate
+        both = exec_expect(
+            3,
+            sys.executable, "-c",
+            "import sys; print('exec-stdout-marker'); "
+            "sys.stderr.write('exec-stderr-marker\\n'); raise SystemExit(3)",
+        )
+        assert both["exit_code"] == 3
+        log_text = exec_log_text(both)
+        assert "exec-stdout-marker" in log_text, log_text
+        assert "exec-stderr-marker" in log_text, log_text
+
+        # (c) UTF-8 output survives the log round trip
+        utf8 = exec_json(sys.executable, "-X", "utf8", "-c", "print('exec-中文-标记')")
+        assert "exec-中文-标记" in exec_log_text(utf8)
+
+        # (d) large output is not truncated or lost (~1.2 MB)
+        big = exec_json(
+            sys.executable, "-c",
+            "for i in range(20000): print(f'exec-big-line-{i:06d}-" + "x" * 40 + "')",
+        )
+        assert big["log_bytes"] >= 1_000_000, big["log_bytes"]
+
+        # (e) a child that reads stdin gets immediate EOF (DEVNULL), no hang
+        stdin_case = exec_expect(42, sys.executable, "-c",
+                                 "import sys; data = sys.stdin.read(); "
+                                 "raise SystemExit(42 if data == '' else 43)")
+        assert stdin_case["exit_code"] == 42
+
+        if os.name == "nt":
+            scratch = repo / ".generated-temp" / "exec-tests"
+            scratch.mkdir(parents=True, exist_ok=True)
+
+            # (f) .cmd through exec: echo + exit code (the class that lost
+            # output to popup consoles before the fix)
+            batch = scratch / "echo-seven.cmd"
+            batch.write_bytes(
+                b"@echo off\r\n"
+                b"echo exec-batch-marker\r\n"
+                b"exit /b 7\r\n"
+            )
+            batch_abs = exec_expect(7, str(batch))
+            assert "exec-batch-marker" in exec_log_text(batch_abs)
+
+            # (g) relative .cmd path resolves against ROOT (WinError 2 class)
+            rel_batch = exec_expect(7, ".generated-temp/exec-tests/echo-seven.cmd")
+            assert "exec-batch-marker" in exec_log_text(rel_batch)
+
+            # (h) batch -> batch (call chain) keeps one log
+            inner = scratch / "inner.cmd"
+            inner.write_bytes(b"@echo off\r\necho exec-inner-marker\r\nexit /b 0\r\n")
+            outer = scratch / "outer.cmd"
+            outer.write_bytes(
+                b"@echo off\r\n"
+                b"echo exec-outer-marker\r\n"
+                b'call "' + str(inner).encode() + b'"\r\n'
+                b"exit /b 0\r\n"
+            )
+            chain = exec_json(str(outer))
+            chain_text = exec_log_text(chain)
+            assert "exec-outer-marker" in chain_text and "exec-inner-marker" in chain_text
+
+            # (i) console grandchildren keep writing to the log (the popup
+            # regression class: cmd -> python -> python)
+            grandchild = scratch / "grandchild.py"
+            grandchild.write_text("print('exec-grandchild-marker')\n", encoding="utf-8")
+            child_py = scratch / "child.py"
+            child_py.write_text(
+                "import subprocess, sys\n"
+                f"subprocess.run([sys.executable, r'{grandchild}'], check=True)\n"
+                "print('exec-child-marker')\n",
+                encoding="utf-8",
+            )
+            console_chain = scratch / "console-chain.cmd"
+            console_chain.write_bytes(
+                b"@echo off\r\n"
+                b'"' + sys.executable.encode() + b'" "' + str(child_py).encode() + b'"\r\n'
+            )
+            deep = exec_json(str(console_chain))
+            deep_text = exec_log_text(deep)
+            assert "exec-child-marker" in deep_text, deep_text
+            assert "exec-grandchild-marker" in deep_text, deep_text
+
+            # (j) qiven.cmd itself through exec (the original v18 failure:
+            # empty log, exit 1) — and the spawn record shows the cmd.exe wrap
+            info_via_cmd = exec_json("tools/qiven.cmd", "--json", "info")
+            assert '"status"' in exec_log_text(info_via_cmd)
+            record_path = repo / ".generated-temp" / "operator" / "exec" / f"{info_via_cmd['id']}.json"
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            assert record["spawn_argv"][0].lower() == "cmd.exe", record["spawn_argv"]
+            assert record["argv"][0] == "tools/qiven.cmd"
+
+            # (k) batch arguments with spaces survive intact
+            args_batch = scratch / "echo-args.cmd"
+            args_batch.write_bytes(b"@echo off\r\necho arg1=%~1\r\nexit /b 0\r\n")
+            spaced = exec_json(str(args_batch), "text with spaces")
+            assert "arg1=text with spaces" in exec_log_text(spaced)
+
         child_code = (
             "import time\n"
             "start = time.time()\n"

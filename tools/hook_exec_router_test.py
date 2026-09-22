@@ -26,6 +26,26 @@ CASES: list[tuple[str, str]] = [
     ("ls -la build/", "allow"),
     ("python tools/third_party_verify.py", "allow"),
     ("echo hello", "allow"),
+    # --- deny: heredoc authoring (absolute prohibition, 2026-09-23) -----
+    ("cat << EOF", "heredoc"),
+    ("cat <<EOF", "heredoc"),
+    ("cat << 'EOF'", "heredoc"),
+    ("cat <<- \"EOF\"", "heredoc"),
+    ("cat << EOF > file.txt", "heredoc"),
+    ("python - << 'PY'", "heredoc"),
+    ("cat << EOF && git status", "heredoc"),
+    # exec never launders a heredoc payload:
+    ("tools/qiven.cmd exec start --timeout 60 -- python - << 'PY'", "heredoc"),
+    # quoted PROSE mentioning heredoc syntax is not heredoc authoring:
+    ('git commit -m "use << EOF style in docs"', "allow"),
+    ("echo 'cat << EOF' explained", "allow"),
+    # residual, same class as gate-class indirection: heredoc inside a
+    # QUOTED bash -c payload is invisible to text matching — the contract
+    # remains the backstop (docstring note):
+    ("bash -c 'cat << EOF'", "allow"),
+    # numeric bit-shift operands do not match (letter operands may —
+    # documented accepted false positive; rewrite such expressions):
+    ("echo $((1 << 4))", "allow"),
     # --- allow: operator exec/info (fast control plane) -------------------
     ("tools\\qiven.cmd exec start --timeout 600 -- cmake --build build", "allow"),
     ("python tools/qiven.py info", "allow"),
@@ -132,11 +152,18 @@ def main() -> int:
             print(f"[FAIL] probe {name}: expected {expected_decision}, got {decision} ({evidence})")
 
     # message provenance: every denial message carries the hook tag
-    for command in ("cmake --build build", "tools/qiven.cmd gate", "vim x", "git push origin main"):
+    for command in ("cmake --build build", "tools/qiven.cmd gate", "vim x", "git push origin main",
+                    "cat << EOF"):
         code, message = router.verdict(command, probe_runner=fake_runner([("origin/main\n", True, True), ("300\n", True, True)]))
         if code != 2 or "[qiven-hook]" not in message:
             failures += 1
             print(f"[FAIL] provenance tag missing in verdict for {command!r}")
+
+    # the heredoc denial names the native-tool law (actionable denial)
+    _, heredoc_message = router.verdict("cat << EOF")
+    if "Read/Write/Edit" not in heredoc_message or "heredoc" not in heredoc_message:
+        failures += 1
+        print("[FAIL] heredoc denial must name the native read/write/edit law")
 
     # gate-inside-exec stays allowed end-to-end
     code, _ = router.verdict("tools/qiven.cmd exec start --timeout 900 -- cmd /c call tools/qiven.cmd gate")

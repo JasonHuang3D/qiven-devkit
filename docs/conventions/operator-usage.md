@@ -69,7 +69,22 @@ Semantics that matter to a caller:
 
 - The child runs DETACHED in its own process group with stdout/stderr to
   a durable log under `.generated-temp/operator/exec/<id>.log`; a run
-  record (id, pid, argv, times) sits beside it as `<id>.json`.
+  record (id, pid, argv, spawn_argv, times) sits beside it as `<id>.json`.
+- **Window discipline (2026-09-23 fix)**: on Windows the child is spawned
+  with `CREATE_NO_WINDOW` — a HIDDEN console. Before this fix exec used
+  `DETACHED_PROCESS`, giving the child NO console: any console descendant
+  (cmd.exe batch chains, vcvars, build tools) then allocated a NEW VISIBLE
+  console — popup cmd windows on screen with output going to the popup
+  instead of the run log (empty-log symptom), and console-DLL
+  initialization could fail outright (child exit `0xC0000142`, observed
+  with vcvars64.bat). With `CREATE_NO_WINDOW` every console in the tree is
+  invisible and stdio stays on the redirected handles. `.cmd`/`.bat`
+  targets are spawned through an explicit `cmd.exe /d /c call <abs path>`
+  (no AutoRun registry scripts, deterministic batch dispatch), and a
+  path-like argv[0] is resolved against the repository ROOT before
+  spawning. The operator-tests gate task carries the regression suite
+  (capture, batch chains, grandchild consoles, `qiven.cmd` through exec,
+  UTF-8, large output, stdin-EOF, relative paths, spawn record).
 - While supervising, exec heartbeats every ~5s (`running for Ns, log X
   bytes`). Heartbeat is the liveness discriminator — with beats, extending
   the budget deliberately is correct; silence means investigate the log,
