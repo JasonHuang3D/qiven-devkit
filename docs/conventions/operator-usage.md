@@ -126,6 +126,34 @@ logic — additions need a case in the test table):
   human — the 2026-09-19 modal incident class): editors, git
   interactive/patch modes, `cmake --open`.
 
-`git fetch`/`git pull`/`git push` remain raw by observation (seconds on
-this workspace's remotes); the first slow-remote incident moves them
-into the table — recorded, not silent.
+`git fetch`/`git pull`/`git push` are NOT blanket classes — see the v3
+section below (measured per invocation).
+
+## v3 (2026-09-23, owner review): measured git, gate routing, provenance
+
+- **Registry of record**: the canonical class list lives in
+  `qiven-context collaboration/long-command-registry.md` (owner-governed
+  thresholds and evidence); this router implements it.
+- **git push/fetch/pull are MEASURED**: the hook probes first (push:
+  upstream ahead-count over 25 → deny; then a `push --dry-run` within a
+  5 s budget. fetch/pull: a `fetch --dry-run`; fast AND changeless →
+  allow). `git clone` stays unconditional (nothing local to probe).
+  Every denial carries the measurement.
+- **`qiven gate/run/ci` invoked raw are denied** with exec guidance
+  (minutes-class; they block the session shell); `qiven exec/info/
+  status` stay raw. Classification is PER SEGMENT: an exec wrapper in
+  one segment never launders a raw long command in another.
+- **Every denial is prefixed `[qiven-hook]`** with its evidence, so the
+  receiving agent can attribute the verdict (no ambiguous denials —
+  owner direction: an unattributed denial splits the agent's
+  reasoning).
+- **Quote-awareness**: segment splitting and class matching ignore
+  quoted spans (commit messages, PR prose). Deliberate trade-off: a
+  payload hidden inside quotes (`bash -c "..."`) is not classified —
+  the operator exec path is the sanctioned wrapper for deliberate
+  long work, and prose false-positives were blocking real authoring.
+- **Operator timers**: every task result appends to
+  `.generated-temp/operator/task-durations.jsonl` and gate receipts
+  carry per-task `duration_seconds` — the evidence base for refining
+  the class split (e.g. re-allowing short `qiven run` tasks) by an
+  owner-recorded registry change, not guesswork.

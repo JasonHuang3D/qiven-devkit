@@ -87,7 +87,7 @@ tree.
 
 | External | Kind | Root var | Pin | Consumers |
 | --- | --- | --- | --- | --- |
-| `qiven-foundation` | first-party layer (source) | `QIVEN_FOUNDATION_ROOT` | none (recorded gap) | runtime, draft, others via their CMake |
+| `qiven-foundation` | first-party layer (source) | `QIVEN_FOUNDATION_ROOT` | exact SHA, configure-validated (mandatory since 2026-09-23) | runtime, draft, math |
 | `qiven-context-draft` | frozen semantic library (source) | `QIVEN_DRAFT_ROOT` | exact SHA, configure-validated | runtime |
 | `qiven-toolchain-win` | pinned executables (env layer) | `QIVEN_TOOLCHAIN_ROOT` | toolchain.py pins | all builds via check-toolchain |
 | `qiven-third-party-win` | third-party singleton | `QIVEN_THIRD_PARTY_ROOT` | exact SHA per consumer | runtime (sqlite3) |

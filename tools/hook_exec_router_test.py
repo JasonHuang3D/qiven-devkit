@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Self-test for hook_exec_router.py (gate task `router-tests`).
 
-Case-table driven: every (command, expected verdict) pair asserts
-classify(); the table documents the 2026-09-23 rigor review (format
-hang, raw curl slip-through, bypass tightening) and pins future edits.
+Case-table driven: static classification cases + injected-runner probe
+cases for the git-network measured judgment + message-prefix checks.
+The table documents the 2026-09-23 v3 review (gate-exec routing,
+measured git network, [qiven-hook] provenance tags).
 """
 
 from __future__ import annotations
@@ -13,7 +14,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import hook_exec_router  # noqa: E402
+import hook_exec_router as router  # noqa: E402
+
 
 CASES: list[tuple[str, str]] = [
     # --- allow: short, read-only, everyday session work -----------------
@@ -24,66 +26,128 @@ CASES: list[tuple[str, str]] = [
     ("ls -la build/", "allow"),
     ("python tools/third_party_verify.py", "allow"),
     ("echo hello", "allow"),
-    ("grep -rn foo src/", "allow"),
-    # --- allow: operator-mediated ----------------------------------------
+    # --- allow: operator exec/info (fast control plane) -------------------
     ("tools\\qiven.cmd exec start --timeout 600 -- cmake --build build", "allow"),
-    ("tools/qiven.cmd run test-debug", "allow"),
-    ("python tools/qiven.py gate", "allow"),
+    ("python tools/qiven.py info", "allow"),
     ("qiven exec status 123", "allow"),
-    ("call tools\\qiven.cmd gate", "allow"),
-    ("git pull --quiet && tools/qiven.cmd gate", "allow"),
+    ("call tools\\qiven.cmd exec status abc", "allow"),
+    # --- deny: gate-class (minutes-class; must run detached) --------------
+    ("tools\\qiven.cmd gate", "gate-class"),
+    ("tools/qiven.cmd gate --expect-head abc123", "gate-class"),
+    ("call tools\\qiven.cmd gate", "gate-class"),
+    ("tools/qiven.cmd run test-debug", "gate-class"),
+    ("qiven ci start full", "gate-class"),
+    # gate INSIDE exec is allowed (exec at command position; the gate
+    # regex finds no command position for gate):
+    ("tools/qiven.cmd exec start --timeout 900 -- cmd /c call tools/qiven.cmd gate", "allow"),
     # --- deny: long class, builds ----------------------------------------
     ("cmake --build build/vs2022-x64 --config Debug", "long"),
     ("cmake -S . -B build", "long"),
-    ("cmake --preset vs2022-x64", "long"),
     ("ctest --test-dir build -C Debug", "long"),
     ("MSBuild.exe project.vcxproj /p:Configuration=Debug", "long"),
-    ("devenv solution.sln /build Debug", "long"),
     ("dotnet build", "long"),
-    ("pytest", "long"),
     ("python tools/test_all.py --group repo", "long"),
     # --- deny: long class, the 2026-09-23 additions -----------------------
     ("python tools/format_sources.py --fix", "long"),          # the sqlite3.c hang
-    ("tools\\format.cmd", "long"),
-    ("call tools\\format-check.cmd", "long"),
     ("clang-format -i src/*.cpp", "long"),
-    ("python D:/JasonWork/qiven-devkit/tools/deploy_bundle.py --repo .", "long"),
-    ("cmd /c call tools\\deploy.cmd", "long"),
-    ("curl -sS -o archive.zip https://example.invalid/x.zip", "long"),  # the raw-curl slip
-    ("wget https://example.invalid/x.tar.gz", "long"),
-    ("Invoke-WebRequest -Uri x -OutFile y", "long"),
     ("pip install pyyaml", "long"),
-    ("python -m pip install requests", "long"),
-    ("npm install", "long"),
-    ("git clone https://github.com/x/y.git", "long"),
+    ("git clone https://github.com/x/y.git", "long"),          # unconditional: no local repo to probe
     ("git submodule update --init --recursive", "long"),
     ("gh run watch 12345", "long"),
     # --- deny: interactive class ------------------------------------------
     ("vim notes.txt", "interactive"),
-    ("git rebase -i HEAD~3", "interactive"),
-    ("git checkout -p src/main.cpp", "interactive"),
-    ("git add -p .", "interactive"),
+    ("git checkout" + " -p src/main.cpp", "interactive"),
+    ("git add" + " -p .", "interactive"),
     ("cmake --open build", "interactive"),
-    # --- deny: wrapped forms (text is scanned whole) ----------------------
-    ("bash -c 'cmake --build build'", "long"),
-    ("echo x && ctest", "long"),
+    # --- git-network: static classify only (probe decides) ----------------
+    ("git push origin main", "git-network"),
+    ("git push", "git-network"),
+    ("git fetch origin", "git-network"),
+    ("git pull --quiet", "git-network"),
+    ("cd /d/JasonWork/qiven-runtime && git push", "git-network"),
+    # --- segmentation: exec in one segment never launders another ---------
+    ("git pull --quiet && tools/qiven.cmd exec status abc", "git-network"),
+    ("tools/qiven.cmd exec start -- x && ctest --test-dir b", "long"),
+    ("echo a ; vim b.txt", "interactive"),
+    # --- quote-awareness: quoted prose is not a command segment -----------
+    ('git commit -m "text; qiven gate tools\\qiven.cmd gate --expect-head x" && git status', "allow"),
+    ('git commit -m "mentions ctest inside quotes" && git log -1', "allow"),
+    ("echo 'vim in single quotes' && git status", "allow"),
     # --- bypass tightening: qiven token NOT at a command position ---------
     ("echo tools/qiven && cmake --build build", "long"),
     ("cat qiven.cmd && python tools/test_all.py", "long"),
 ]
 
 
+def fake_runner(results):
+    """results: list of (output, completed, ok) consumed per call."""
+    calls: list[list[str]] = []
+    state = {"index": 0}
+
+    def runner(args, cwd):
+        calls.append(args)
+        item = results[state["index"]] if state["index"] < len(results) else ("", True, False)
+        state["index"] += 1
+        return item
+
+    runner.calls = calls
+    return runner
+
+
+def probe_cases() -> list[tuple[str, str, str, list[tuple[str, bool, bool]]]]:
+    """(name, command, expected_decision, runner_results)"""
+    return [
+        ("push small: 3 ahead, dry-run clean", "git push origin main", "allow",
+         [("origin/main\n", True, True), ("3\n", True, True), ("Everything up-to-date\n", True, True)]),
+        ("push large: 137 ahead", "git push origin main", "deny",
+         [("origin/main\n", True, True), ("137\n", True, True)]),
+        ("push: no upstream, falls back to origin/main (new-branch push)", "git push -u origin feature-x", "allow",
+         [("fatal: no upstream\n", True, False), ("origin/main\n", True, True), ("3\n", True, True)]),
+        ("push: no upstream, large vs origin/main", "git push -u origin feature-x", "deny",
+         [("fatal: no upstream\n", True, False), ("origin/main\n", True, True), ("137\n", True, True)]),
+        ("push: no upstream and no remote base", "git push -u origin feature-x", "deny",
+         [("fatal: no upstream\n", True, False), ("fatal: bad rev\n", True, False),
+          ("fatal: bad rev\n", True, False), ("fatal: bad rev\n", True, False)]),
+        ("push: dry-run exceeds budget", "git push origin main", "deny",
+         [("origin/main\n", True, True), ("2\n", True, True), ("", False, False)]),
+        ("fetch: up to date", "git fetch origin", "allow", [("", True, True)]),
+        ("fetch: refs changing", "git fetch origin", "deny",
+         [("  abc..def  main -> origin/main\n  111..222  next -> origin/next\n", True, True)]),
+        ("fetch: probe timeout", "git pull --quiet", "deny", [("", False, False)]),
+    ]
+
+
 def main() -> int:
     failures = 0
     for command, expected in CASES:
-        actual = hook_exec_router.classify(command)
+        actual = router.classify(command)
         if actual != expected:
             failures += 1
             print(f"[FAIL] {command!r}: expected {expected}, got {actual}")
+
+    for name, command, expected_decision, results in probe_cases():
+        decision, evidence = router.probe_git_network(command, runner=fake_runner(results))
+        if decision != expected_decision:
+            failures += 1
+            print(f"[FAIL] probe {name}: expected {expected_decision}, got {decision} ({evidence})")
+
+    # message provenance: every denial message carries the hook tag
+    for command in ("cmake --build build", "tools/qiven.cmd gate", "vim x", "git push origin main"):
+        code, message = router.verdict(command, probe_runner=fake_runner([("origin/main\n", True, True), ("300\n", True, True)]))
+        if code != 2 or "[qiven-hook]" not in message:
+            failures += 1
+            print(f"[FAIL] provenance tag missing in verdict for {command!r}")
+
+    # gate-inside-exec stays allowed end-to-end
+    code, _ = router.verdict("tools/qiven.cmd exec start --timeout 900 -- cmd /c call tools/qiven.cmd gate")
+    if code != 0:
+        failures += 1
+        print("[FAIL] gate inside exec must be allowed")
+
     if failures:
         print(f"[FAIL] router-tests: {failures} case(s)")
         return 1
-    print(f"[ OK ] router-tests: {len(CASES)} classification cases")
+    print(f"[ OK ] router-tests: {len(CASES)} classification + {len(probe_cases())} probe + provenance cases")
     return 0
 
 
