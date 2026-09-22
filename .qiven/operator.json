@@ -59,6 +59,12 @@
     "merge-proof": {
       "builtin": "gate_proof",
       "gate": "local"
+    },
+    "router-tests": {
+      "argv": [
+        "{python}",
+        "tools/hook_exec_router_test.py"
+      ]
     }
   },
   "gates": {
@@ -67,6 +73,7 @@
       "cmd-control-flow",
       "adoption-missing-sync",
       "operator-tests",
+      "router-tests",
       "commit-subjects",
       "devkit-regression",
       "diff-check",
