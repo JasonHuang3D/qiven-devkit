@@ -53,7 +53,7 @@ Each Operator task runs in a separate child process rooted at the repository, so
 ## Managed and bootstrap-only files
 
 Managed files are shared conventions. `tools/sync-repo.cmd` can update them after an all-or-nothing hash preflight. The list is
-stored in `templates/cpp-library/managed-files.cmake` and includes formatting/editor policy, presets, local developer tools,
+stored in `templates/cpp-library/managed-files.cmake` and includes formatting/editor policy, presets, local developer tools (engineering standards are Devkit-canonical per ADR-0046 — `docs/engineering/` here — and not part of the managed set),
 Qiven Operator, `AGENTS.md`, and the engineering protocol.
 
 Bootstrap-only files are starting points expected to diverge: `.gitignore`, `README.md`, `CMakeLists.txt`, and
