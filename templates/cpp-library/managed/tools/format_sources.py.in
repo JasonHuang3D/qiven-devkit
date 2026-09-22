@@ -30,6 +30,10 @@ def main() -> int:
         print("[FAIL] git ls-files failed")
         return 1
     files = [line for line in listing.stdout.splitlines() if line.strip()]
+    # Third-party law (docs/engineering/third-party-dependencies.md):
+    # vendored trees are pristine upstream content under provenance
+    # digests — never formatted.
+    files = [name for name in files if not name.startswith("third_party/")]
     mode_args = ["--dry-run", "--Werror"] if mode == "--check" else ["-i"]
     failures = 0
     for name in files:

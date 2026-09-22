@@ -15,6 +15,7 @@ otherwise. Deviation requires an architecture document in the deviating repo.
 | `.qiven/` | operator config (`operator.json`), repo metadata |
 | `docs/` | `architecture/` for durable design, `engineering/` for process (Devkit-managed) |
 | `include/`, `src/`, `tests/`, `apps/`, `tools/` | C++ repositories (see naming-cpp.md) |
+| `third_party/<name>/` | vendored pinned third-party dependencies, only in repositories that carry them (engineering `third-party-dependencies.md` is the law; PROVENANCE.yaml + LICENSE mandatory) |
 
 ## Folder naming
 
