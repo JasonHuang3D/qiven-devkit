@@ -2,9 +2,10 @@
 """Self-test for hook_exec_router.py (gate task `router-tests`).
 
 Case-table driven: static classification cases + injected-runner probe
-cases for the git-network measured judgment + message-prefix checks.
-The table documents the 2026-09-23 v3 review (gate-exec routing,
-measured git network, [qiven-hook] provenance tags).
+cases for the git-network measured judgment + message-prefix checks +
+v4 end-to-end background/guard semantics (ADR-0051: deny -> re-call
+with run_in_background; build/gate classes require the MSBuild
+node-reuse guard; sweeps stay under exec lease custody).
 """
 
 from __future__ import annotations
@@ -51,7 +52,7 @@ CASES: list[tuple[str, str]] = [
     ("python tools/qiven.py info", "allow"),
     ("qiven exec status 123", "allow"),
     ("call tools\\qiven.cmd exec status abc", "allow"),
-    # --- deny: gate-class (minutes-class; must run detached) --------------
+    # --- deny: gate-class (minutes-class; may build -> background+guard) -
     ("tools\\qiven.cmd gate", "gate-class"),
     ("tools/qiven.cmd gate --expect-head abc123", "gate-class"),
     ("call tools\\qiven.cmd gate", "gate-class"),
@@ -60,20 +61,21 @@ CASES: list[tuple[str, str]] = [
     # gate INSIDE exec is allowed (exec at command position; the gate
     # regex finds no command position for gate):
     ("tools/qiven.cmd exec start --timeout 900 -- cmd /c call tools/qiven.cmd gate", "allow"),
-    # --- deny: long class, builds ----------------------------------------
-    ("cmake --build build/vs2022-x64 --config Debug", "long"),
-    ("cmake -S . -B build", "long"),
-    ("ctest --test-dir build -C Debug", "long"),
-    ("MSBuild.exe project.vcxproj /p:Configuration=Debug", "long"),
-    ("dotnet build", "long"),
-    ("python tools/test_all.py --group repo", "long"),
-    # --- deny: long class, the 2026-09-23 additions -----------------------
-    ("python tools/format_sources.py --fix", "long"),          # the sqlite3.c hang
-    ("clang-format -i src/*.cpp", "long"),
-    ("pip install pyyaml", "long"),
-    ("git clone https://github.com/x/y.git", "long"),          # unconditional: no local repo to probe
-    ("git submodule update --init --recursive", "long"),
-    ("gh run watch 12345", "long"),
+    # --- deny: build class (MSBuild node fanout -> background + guard) ---
+    ("cmake --build build/vs2022-x64 --config Debug", "build"),
+    ("cmake -S . -B build", "build"),
+    ("ctest --test-dir build -C Debug", "build"),
+    ("MSBuild.exe project.vcxproj /p:Configuration=Debug", "build"),
+    ("dotnet build", "build"),
+    # --- deny: repo-tool class (minutes-class -> background) --------------
+    ("python tools/test_all.py --group repo", "repo-tool"),
+    ("python tools/format_sources.py --fix", "repo-tool"),   # the sqlite3.c hang
+    ("clang-format -i src/*.cpp", "repo-tool"),
+    # --- deny: network class (acquisition -> background) ------------------
+    ("pip install pyyaml", "network"),
+    ("git clone https://github.com/x/y.git", "network"),     # unconditional: no local repo to probe
+    ("git submodule update --init --recursive", "network"),
+    ("gh run watch 12345", "network"),
     # --- deny: interactive class ------------------------------------------
     ("vim notes.txt", "interactive"),
     ("git checkout" + " -p src/main.cpp", "interactive"),
@@ -87,7 +89,7 @@ CASES: list[tuple[str, str]] = [
     ("cd /d/JasonWork/qiven-runtime && git push", "git-network"),
     # --- segmentation: exec in one segment never launders another ---------
     ("git pull --quiet && tools/qiven.cmd exec status abc", "git-network"),
-    ("tools/qiven.cmd exec start -- x && ctest --test-dir b", "long"),
+    ("tools/qiven.cmd exec start -- x && ctest --test-dir b", "build"),
     ("echo a ; vim b.txt", "interactive"),
     # --- chained exec invocations (OBL-A7B8C9: segments after && arrive ---
     # --- with leading whitespace; the anchors must tolerate it) -----------
@@ -96,15 +98,15 @@ CASES: list[tuple[str, str]] = [
     ("tools/qiven.cmd info && tools/qiven.cmd exec status abc", "allow"),
     ("git status && tools\\qiven.cmd gate", "gate-class"),
     ("git status &&    qiven run test-debug", "gate-class"),
-    # --- tree sweeps are long-class (2026-09-23 ghost find.exe incident) --
-    ("find /d/JasonWork -name '*.vcxproj'", "long"),
-    ("find /d/JasonWork/qiven-runtime -type f -name '*.cpp'", "long"),
-    ("find -L /d/JasonWork -name build", "long"),
-    ("find D:\\JasonWork -name build", "long"),
-    ("grep -r pattern .", "long"),
-    ("grep --recursive foo src/", "long"),
-    ("cmd /c dir /s /b", "long"),
-    ("dir build /s", "long"),
+    # --- tree sweeps are sweep-class: exec lease custody, NOT background --
+    ("find /d/JasonWork -name '*.vcxproj'", "sweep"),
+    ("find /d/JasonWork/qiven-runtime -type f -name '*.cpp'", "sweep"),
+    ("find -L /d/JasonWork -name build", "sweep"),
+    ("find D:\\JasonWork -name build", "sweep"),
+    ("grep -r pattern .", "sweep"),
+    ("grep --recursive foo src/", "sweep"),
+    ("cmd /c dir /s /b", "sweep"),
+    ("dir build /s", "sweep"),
     # the Windows text-FILTER find (slash-flag + quoted needle) stays raw:
     ("find /i \"marker\" out.log", "allow"),
     ("find \"needle\" file.txt", "allow"),
@@ -113,8 +115,8 @@ CASES: list[tuple[str, str]] = [
     ('git commit -m "mentions ctest inside quotes" && git log -1', "allow"),
     ("echo 'vim in single quotes' && git status", "allow"),
     # --- bypass tightening: qiven token NOT at a command position ---------
-    ("echo tools/qiven && cmake --build build", "long"),
-    ("cat qiven.cmd && python tools/test_all.py", "long"),
+    ("echo tools/qiven && cmake --build build", "build"),
+    ("cat qiven.cmd && python tools/test_all.py", "repo-tool"),
 ]
 
 
@@ -156,6 +158,145 @@ def probe_cases() -> list[tuple[str, str, str, list[tuple[str, bool, bool]]]]:
     ]
 
 
+def background_cases() -> list[tuple[str, bool, bool]]:
+    """(name, expect_denied, ...) encoded as closures below; each entry is
+    (description, check) where check() returns an error string or None."""
+    checks = []
+
+    def check(desc, fn):
+        checks.append((desc, fn))
+
+    # raw build: one deny carries BOTH the background instruction and the
+    # guard line (single round-trip teaching, ADR-0051).
+    def raw_build():
+        code, message = router.verdict("cmake --build build/vs2022-x64 --config Release")
+        if code != 2:
+            return "raw build must deny"
+        if "run_in_background: true" not in message:
+            return "raw build denial must instruct the background re-call"
+        if "MSBUILDDISABLENODEREUSE=1" not in message:
+            return "raw build denial must name the node-reuse guard"
+        return None
+
+    check("raw build deny teaches background + guard in one message", raw_build)
+
+    def bg_build_no_guard():
+        code, message = router.verdict(
+            "cmake --build build/vs2022-x64 --config Release", background=True)
+        if code != 2 or "node reuse" not in message:
+            return "backgrounded build without guard must deny on node reuse"
+        return None
+
+    check("background build without guard denies", bg_build_no_guard)
+
+    def bg_build_with_env_guard():
+        code, _ = router.verdict(
+            "MSBUILDDISABLENODEREUSE=1 cmake --build build/vs2022-x64 --config Release",
+            background=True)
+        if code != 0:
+            return "backgrounded build with env-prefix guard must pass"
+        return None
+
+    check("background build with env guard passes", bg_build_with_env_guard)
+
+    def bg_build_with_switch_guard():
+        code, _ = router.verdict(
+            "MSBuild.exe proj.vcxproj /nr:false", background=True)
+        if code != 0:
+            return "/nr:false must satisfy the guard"
+        return None
+
+    check("direct msbuild /nr:false satisfies the guard", bg_build_with_switch_guard)
+
+    def guard_in_quotes_does_not_count():
+        # a quoted -D value mentioning the env var is not a guard on the
+        # command surface (quote-stripped before matching)
+        code, _ = router.verdict(
+            'cmake --build build -DFOO="MSBUILDDISABLENODEREUSE=1"', background=True)
+        if code != 2:
+            return "a guard inside quotes must not satisfy the check"
+        return None
+
+    check("quoted guard text does not satisfy the guard", guard_in_quotes_does_not_count)
+
+    def raw_gate():
+        code, message = router.verdict("tools/qiven.cmd gate --expect-head abc123")
+        if code != 2 or "run_in_background: true" not in message or "MSBUILDDISABLENODEREUSE" not in message:
+            return "raw gate deny must teach background + guard"
+        return None
+
+    check("raw gate deny teaches background + guard", raw_gate)
+
+    def bg_gate_with_guard():
+        code, _ = router.verdict(
+            "MSBUILDDISABLENODEREUSE=1 tools/qiven.cmd gate --expect-head abc123",
+            background=True)
+        if code != 0:
+            return "backgrounded gate with guard must pass"
+        return None
+
+    check("background gate with guard passes", bg_gate_with_guard)
+
+    def raw_network():
+        code, message = router.verdict("pip install pyyaml")
+        if code != 2 or "run_in_background: true" not in message:
+            return "raw network deny must teach the background re-call"
+        if "MSBUILDDISABLENODEREUSE" in message:
+            return "network denial must not demand the node-reuse guard"
+        return None
+
+    check("raw network deny teaches background only", raw_network)
+
+    def bg_network():
+        code, _ = router.verdict("pip install pyyaml", background=True)
+        if code != 0:
+            return "backgrounded network must pass (no guard required)"
+        return None
+
+    check("background network passes without guard", bg_network)
+
+    def bg_repo_tool():
+        code, _ = router.verdict("python tools/test_all.py --group repo", background=True)
+        if code != 0:
+            return "backgrounded repo-tool must pass"
+        return None
+
+    check("background repo-tool passes", bg_repo_tool)
+
+    def sweep_stays_exec_even_background():
+        code, message = router.verdict("grep -r pattern .", background=True)
+        if code != 2:
+            return "sweep must deny even when backgrounded (exec lease custody)"
+        if "qiven.cmd exec start" not in message or "re-issue THIS EXACT command" in message:
+            return "sweep denial must route to exec lease, not a background re-call"
+        return None
+
+    check("sweep denies even backgrounded (exec lease)", sweep_stays_exec_even_background)
+
+    def heredoc_denies_even_background():
+        code, _ = router.verdict("cat << EOF", background=True)
+        if code != 2:
+            return "heredoc is absolute: background must not launder it"
+        return None
+
+    check("heredoc denies even when backgrounded", heredoc_denies_even_background)
+
+    def payload_background_parsing():
+        if not router._background_from({"tool_input": {"run_in_background": True}}):
+            return "tool_input.run_in_background must parse True"
+        if router._background_from({"tool_input": {"run_in_background": False}}):
+            return "tool_input.run_in_background must parse False"
+        if router._background_from({"tool_input": {"command": "x"}}):
+            return "absent flag must parse False"
+        if router._background_from("not-a-dict"):
+            return "non-dict payload must parse False"
+        return None
+
+    check("payload run_in_background parsing", payload_background_parsing)
+
+    return checks
+
+
 def main() -> int:
     failures = 0
     for command, expected in CASES:
@@ -170,13 +311,19 @@ def main() -> int:
             failures += 1
             print(f"[FAIL] probe {name}: expected {expected_decision}, got {decision} ({evidence})")
 
+    for desc, fn in background_cases():
+        error = fn()
+        if error:
+            failures += 1
+            print(f"[FAIL] v4 {desc}: {error}")
+
     # message provenance: every denial message carries the hook tag.
     # Git-network denial is exercised with routing force-enabled: the
     # shipped default is suspension (owner direction 2026-09-24).
     saved_git_flag = router.GIT_NETWORK_ROUTING_ENABLED
     router.GIT_NETWORK_ROUTING_ENABLED = True
     for command in ("cmake --build build", "tools/qiven.cmd gate", "vim x", "git push origin main",
-                    "cat << EOF"):
+                    "cat << EOF", "grep -r pattern ."):
         code, message = router.verdict(command, probe_runner=fake_runner([("origin/main\n", True, True), ("300\n", True, True)]))
         if code != 2 or "[qiven-hook]" not in message:
             failures += 1
@@ -212,7 +359,8 @@ def main() -> int:
     if failures:
         print(f"[FAIL] router-tests: {failures} case(s)")
         return 1
-    print(f"[ OK ] router-tests: {len(CASES)} classification + {len(probe_cases())} probe + provenance cases")
+    print(f"[ OK ] router-tests: {len(CASES)} classification + {len(probe_cases())} probe + "
+          f"{len(background_cases())} v4-background + provenance cases")
     return 0
 
 

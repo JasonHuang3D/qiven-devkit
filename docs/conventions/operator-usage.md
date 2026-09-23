@@ -51,12 +51,18 @@ dispatches the declared workflow via `gh`, and returns immediately. Qiven
 workflows are `workflow_dispatch`-only — a push never triggers CI
 (`collaboration/session-ci-handoff-contract.md`).
 
-## exec — supervised detached execution under bounded custody (the hang-contract path)
+## exec — supervised detached execution under bounded custody (the custody path)
 
-For any command whose duration class is long or unknown (builds, test
-suites, compiler/linker invocations, long tools, filesystem tree sweeps),
-LLM sessions MUST route it through exec instead of a raw shell call:
-`collaboration/operating-contract.md`, hang-classification rule 5.
+ADR-0051 (2026-09-24) scopes exec to CUSTODY classes: filesystem tree
+sweeps (lease-bounded ghost-process class), runs that must survive the
+session (durable receipts, cross-session work), owner-run kits/H1
+packages, work past the harness Bash timeout ceiling (~10 min), and
+unknown-duration work pending measurement. Ordinary in-session long
+work (builds, tests, gates whose consumer is this session) does NOT
+detour through exec: the hook router denies the raw call and instructs
+a `run_in_background: true` re-call — one call, one completion
+notification, zero polling (the deny → exec → status-poll loop is the
+retired anti-pattern; so is foreground sleep+tail).
 
 ```text
 qiven exec start [--timeout S] [--max-lifetime M] -- CMD ARGS...
@@ -110,11 +116,12 @@ Semantics that matter to a caller:
   terminates runs past their lease and finalizes stale records; `qiven
   exec sweep` runs it explicitly. Dead runs can be listed for postmortem
   via `exec list`.
-- Typical loop: `exec start --timeout 60 -- <build command>` → if 124,
-  `exec status ID` (bounded observations per the session contracts — at
-  most three per 60s); the run continues under its lease — keep checking
-  status until done/expired/indeterminate, then read the log. Runs you
-  abandon are still bounded: the lease kills them without any caller.
+- Typical exec loop (custody classes only): `exec start --timeout 60 --
+  <command>` → if 124, `exec status ID` between other work (never a
+  tight poll); the run continues under its lease — re-check when there
+  is something else to do anyway, and read the log at done/expired/
+  indeterminate. Runs you abandon are still bounded: the lease kills
+  them without any caller.
 
 ## What NOT to do
 
@@ -124,17 +131,26 @@ Semantics that matter to a caller:
   clean-tree builtin exists for that).
 - Do not widen a gate, comment a test, or lower a warning to make a run
   pass (testing standard §11).
-- Do not run long-class commands through a raw shell when exec exists in
-  the repository.
+- Do not POLL supervision loops for ordinary long work: no
+  `exec status` round-trips, no foreground `sleep && tail` — the
+  backgrounded re-call notifies once on completion (ADR-0051).
+- Do not re-call a build/gate-class command with `run_in_background`
+  WITHOUT `MSBUILDDISABLENODEREUSE=1` (or `/nr:false`): worker nodes
+  deliberately survive their primary and would strand past the
+  completion notification (ADR-0048 §3 / ADR-0051 §3).
+- Do not run sweep-class commands backgrounded: sweeps need exec's
+  lease custody (ADR-0051 §5).
 
-## The hook router (backstop) — 2026-09-23 review
+## The hook router (backstop) — 2026-09-23 review, v4 semantics 2026-09-24
 
 The PreToolUse Bash hook (`tools/hook_exec_router.py`, registered in the
 workspace `.zcode/config.json`) denies RAW long-class and interactive
-commands and prints the exec pattern. It is a backstop, never the
-contract; it fails open on unparseable input and cannot catch
-indirection (`BASE=<tool>; $BASE ...`). Its classification table is
-pinned by `tools/hook_exec_router_test.py` (gate task `router-tests`).
+commands and, since v4 (ADR-0051), instructs the `run_in_background`
+re-call (with the node-reuse guard for build/gate classes; sweeps still
+get the exec pattern). It is a backstop, never the contract; it fails
+open on unparseable input and cannot catch indirection (`BASE=<tool>;
+$BASE ...`). Its classification table is pinned by
+`tools/hook_exec_router_test.py` (gate task `router-tests`).
 
 Long classes (each entry earned by an observed incident or by class
 logic — additions need a case in the test table):
@@ -191,3 +207,34 @@ section below (measured per invocation).
   carry per-task `duration_seconds` — the evidence base for refining
   the class split (e.g. re-allowing short `qiven run` tasks) by an
   owner-recorded registry change, not guesswork.
+
+## v4 (2026-09-24, ADR-0051): background re-call routing
+
+- **Cost law**: every intermediate LLM round-trip re-sends the live
+  session context. Supervising a long command through polls
+  (`exec status`, foreground `sleep && tail`) costs O(polls × context);
+  the harness's `run_in_background` is one call + one completion
+  notification. The deny → re-call loop costs exactly one cheap denied
+  call — the denial itself is the teacher, delivered as an actionable
+  tool-result instruction.
+- **Routing**: build / gate-class / repo-tool / network classes are
+  denied raw with the exact re-call instruction ("re-issue THIS EXACT
+  command with run_in_background: true"). Build and gate classes
+  additionally require the `MSBUILDDISABLENODEREUSE=1` env prefix (or
+  `/nr:false` / `/nodeReuse:false`) on the re-call — the router denies
+  again until the guard is present (ADR-0048 §3 defense in depth
+  extended to the background path).
+- **Sweeps stay exec**: a background task's session-end lifetime is
+  uncharacterized (ADR-0051 residual R1); the ghost-process class gets
+  the lease. `git clone` remains network-class; measured
+  push/fetch/pull denials now also instruct the background re-call.
+- **Oversized foreground output needs no insurance**: the harness
+  natively persists >~25-30KB tool output to a file and returns a
+  ~2KB preview + path (probed 2026-09-24). PostToolUse hooks cannot
+  rewrite tool results, so this native mechanism is the only sound
+  implementation of that safety net; deliberate `> file` redirection
+  remains good practice for known-chatty commands.
+- **The user-level `run_in_background` block is removed** (it
+  contradicted this routing and the exec detour simultaneously); the
+  global AGENTS.md carries the new law. Hooks load at session start
+  only — the flip is effective for sessions started after the change.
