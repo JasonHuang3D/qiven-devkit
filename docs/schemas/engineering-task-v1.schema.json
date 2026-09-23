@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "qiven-engineering-task-v1.schema.json",
+  "title": "qiven-engineering-task-v1",
+  "description": "CA-0 DRAFT (ADR-0050; roadmap amendment delivery map 6.2): the normalized engineering task envelope. Status: vocabulary frozen for CA-1 consumption; enforcement arrives with CA-2 (Devkit preflight/publication gates). The envelope carries only mechanically derivable facts; judgment-bearing fields stay empty until a fixed normalizer can derive them (acceptance protocol 7.1).",
+  "type": "object",
+  "required": ["schema_version", "task_id", "objective", "phase", "risk"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "task_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-:.]+$" },
+    "objective": { "type": "string", "maxLength": 2000 },
+    "repositories": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^qiven-[a-z-]+$" }
+    },
+    "revisions": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+    },
+    "changed_paths": { "type": "array", "items": { "type": "string" } },
+    "languages": {
+      "type": "array",
+      "items": { "enum": ["cpp", "python", "batch", "shell", "cmake", "markdown", "yaml", "json"] }
+    },
+    "phase": { "enum": ["specify", "design", "implementation", "review", "acceptance"] },
+    "risk": { "enum": ["R0", "R1", "R2", "R3"] },
+    "boundary_kinds": {
+      "description": "Mechanically derivable only (path/language mapping). Empty unless derived; unknown classification defaults UPWARD (governance program 7).",
+      "type": "array",
+      "items": { "enum": ["ownership", "lifetime", "representation", "serialization", "ipc", "persistence", "concurrency", "platform", "external-contract", "security", "process-custody", "filesystem", "git", "cognition", "governance", "tooling", "human-interface"] }
+    },
+    "explicit_ids": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^(ADR|MEM|OBL|TCA|CG)-[0-9A-Za-z.-]+$" }
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "observed": { "type": "boolean" },
+        "claimed_by": { "enum": ["participant", "harness", "owner", "normalizer"] }
+      }
+    },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "additionalProperties": false
+}
