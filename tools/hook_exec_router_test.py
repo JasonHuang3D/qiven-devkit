@@ -170,13 +170,32 @@ def main() -> int:
             failures += 1
             print(f"[FAIL] probe {name}: expected {expected_decision}, got {decision} ({evidence})")
 
-    # message provenance: every denial message carries the hook tag
+    # message provenance: every denial message carries the hook tag.
+    # Git-network denial is exercised with routing force-enabled: the
+    # shipped default is suspension (owner direction 2026-09-24).
+    saved_git_flag = router.GIT_NETWORK_ROUTING_ENABLED
+    router.GIT_NETWORK_ROUTING_ENABLED = True
     for command in ("cmake --build build", "tools/qiven.cmd gate", "vim x", "git push origin main",
                     "cat << EOF"):
         code, message = router.verdict(command, probe_runner=fake_runner([("origin/main\n", True, True), ("300\n", True, True)]))
         if code != 2 or "[qiven-hook]" not in message:
             failures += 1
             print(f"[FAIL] provenance tag missing in verdict for {command!r}")
+
+    router.GIT_NETWORK_ROUTING_ENABLED = saved_git_flag
+
+    # suspension sentinel: at the shipped default (suspended), a raw git
+    # network command passes end-to-end. If this fails after flipping the
+    # default back to True, update this test deliberately.
+    code, message = router.verdict("git push origin main",
+                                   probe_runner=fake_runner([("origin/main\n", True, True), ("3\n", True, True)]))
+    if saved_git_flag:
+        if code != 2:
+            failures += 1
+            print("[FAIL] git-network must deny when routing is enabled")
+    elif code != 0 or message:
+        failures += 1
+        print("[FAIL] git-network must pass raw while routing is suspended (owner direction 2026-09-24)")
 
     # the heredoc denial names the native-tool law (actionable denial)
     _, heredoc_message = router.verdict("cat << EOF")

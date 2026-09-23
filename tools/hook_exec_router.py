@@ -40,6 +40,14 @@ import sys
 PROBE_BUDGET_S = 5.0
 PUSH_COMMIT_THRESHOLD = 25
 
+# Owner direction 2026-09-24: git-network routing is TEMPORARILY SUSPENDED.
+# Raw `git push/fetch/pull` pass this hook unprobed while the exec child's
+# credential path fails headless (GCM dialog auto-cancel + the obsolete
+# 'manager-core' helper name in global gitconfig). The probe logic and its
+# tests are unchanged underneath; flip this flag back to True to reinstate
+# the measured judgment.
+GIT_NETWORK_ROUTING_ENABLED = False
+
 _LONG_CLASS = re.compile(
     # builds / build tools (long or unknown duration; heavy fan-out)
     r"cmake\s+(-S\b|-B\b|--preset\b|--build\b|--install\b)"
@@ -358,6 +366,8 @@ def verdict(command: str, probe_runner=_run_git) -> tuple[int, str]:
     if kind == "interactive":
         return 2, _DENY_INTERACTIVE
     if kind == "git-network":
+        if not GIT_NETWORK_ROUTING_ENABLED:
+            return 0, ""  # suspended (owner direction 2026-09-24) — see flag
         decision, evidence = probe_git_network(command, runner=probe_runner)
         if decision == "allow":
             return 0, ""
