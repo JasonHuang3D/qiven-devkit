@@ -19,6 +19,7 @@ Repository architecture remains repository-owned. These documents define **how**
 - `deployment.md` — workspace-bounded continuous deployment: bundle layout, versioning, digests, docs and licenses, smoke validation (2026-09-23).
 - `h1-kit.md` — executable H1 acceptance packages: tool-built kits (binaries + ready configs + launchers + rollback + generated guide), owner-facing content law, template-trust law (2026-09-23, born from the MVP-4 deny-118 incident).
 - `design-first-workflow.md` — the design-before-code gate for production batches, its required document shape and enumerated exceptions (2026-09-23).
+- `cognition-acceptance-workflow.md` — CA-0 DRAFT (ADR-0050): the engineering task taxonomy (phase/risk/boundary vocabularies), the task envelope schema pointer, and the preflight/falsification/publication workflow that CA-2 will enforce (2026-09-24).
 
 ## The single-session engineering loop
 
