@@ -58,6 +58,12 @@ CASES: list[tuple[str, str]] = [
     ("call tools\\qiven.cmd gate", "gate-class"),
     ("tools/qiven.cmd run test-debug", "gate-class"),
     ("qiven ci start full", "gate-class"),
+    # env-prefixed invocations classify the same (v4.1: the taught guard
+    # re-call form must not escape classification, and neither may an
+    # arbitrary FOO=1 prefix bypass the gate class raw):
+    ("MSBUILDDISABLENODEREUSE=1 tools/qiven.cmd gate", "gate-class"),
+    ("FOO=1 qiven gate", "gate-class"),
+    ("FOO=1 tools\\qiven.cmd run test-debug", "gate-class"),
     # gate INSIDE exec is allowed (exec at command position; the gate
     # regex finds no command position for gate):
     ("tools/qiven.cmd exec start --timeout 900 -- cmd /c call tools/qiven.cmd gate", "allow"),
@@ -236,6 +242,35 @@ def background_cases() -> list[tuple[str, bool, bool]]:
         return None
 
     check("background gate with guard passes", bg_gate_with_guard)
+
+    def env_prefixed_gate_raw_still_denies():
+        # v4.1 regression: an env-prefixed gate call must NOT escape the
+        # class (before the fix `FOO=1 qiven gate` ran raw - the prefix
+        # broke the ^-anchored match and with it the entire teaching).
+        code, message = router.verdict("FOO=1 tools/qiven.cmd gate local")
+        if code != 2 or "run_in_background: true" not in message:
+            return "env-prefixed raw gate must deny with the background teaching"
+        return None
+
+    check("env-prefixed raw gate denies (v4.1)", env_prefixed_gate_raw_still_denies)
+
+    def env_prefixed_gate_bg_without_guard_denies():
+        code, message = router.verdict("FOO=1 tools/qiven.cmd gate local", background=True)
+        if code != 2 or "MSBUILDDISABLENODEREUSE" not in message:
+            return "env-prefixed backgrounded gate without the guard must deny on node reuse"
+        return None
+
+    check("env-prefixed bg gate without guard denies (v4.1)",
+          env_prefixed_gate_bg_without_guard_denies)
+
+    def env_prefixed_operator_exec_stays_raw():
+        # exec/info/status remain raw (no routing class) even env-prefixed
+        code, _ = router.verdict("MSBUILDDISABLENODEREUSE=1 tools/qiven.cmd exec status abc123")
+        if code != 0:
+            return "env-prefixed operator exec/status must stay raw"
+        return None
+
+    check("env-prefixed operator exec stays raw (v4.1)", env_prefixed_operator_exec_stays_raw)
 
     def raw_network():
         code, message = router.verdict("pip install pyyaml")
