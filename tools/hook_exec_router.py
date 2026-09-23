@@ -5,25 +5,43 @@ unmeasured-network raw shell commands away from the session shell
 usage: qiven-devkit/docs/conventions/operator-usage.md; registry of
 record: qiven-context collaboration/long-command-registry.md).
 
+v4 (ADR-0051, 2026-09-24): the default reroute for in-session long work
+is the HARNESS's run_in_background - one re-call, one completion
+notification, zero polling. exec-detour + status-poll loops and
+foreground sleep+tail loops are the anti-pattern being retired. The
+Qiven Operator exec remains the sanctioned path ONLY for custody
+classes: tree sweeps (lease-bounded ghost-process class), runs that
+must survive the session, owner kits, and work past the 10-min Bash
+timeout ceiling.
+
 Every denial is prefixed "[qiven-hook]" and, where a probe ran, states
 the MEASUREMENT ("measured: 137 commits ahead") so the receiving agent
 knows the verdict came from this hook's judgment, not a mystery
 failure (owner direction 2026-09-23: no ambiguous denials).
 
 Verdicts:
-  allow         short read-only work, or operator exec/info
-  heredoc       shell heredoc authoring — ABSOLUTE denial (contract law
+  allow         short read-only work, operator exec/info, or a
+                backgrounded long-class call that satisfied its guard
+  heredoc       shell heredoc authoring - ABSOLUTE denial (contract law
                 MEM-20260921T203500Z-D2A7F4; owner direction 2026-09-23:
                 the law was violated again after cold boot, so the hook
                 now enforces it mechanically). Checked FIRST and inside
                 exec payloads too: wrapping a heredoc in `qiven exec`
                 does not launder it.
-  long          unconditional long-class (builds, downloads, clone...)
-  gate-class    qiven gate/run/ci invoked raw (minutes-class; exec them)
+  gate-class    qiven gate/run/ci invoked raw (minutes-class, may build)
+  build         builds/toolchains - background re-call AND the MSBuild
+                node-reuse guard (ADR-0048 s3 defense in depth extended
+                to the background path by ADR-0051)
+  sweep         filesystem tree sweeps - exec lease custody ONLY (the
+                ghost-process class; background session-end lifetime is
+                uncharacterized, ADR-0051 clause 5)
+  repo-tool     repository gate/tool entrypoints - background re-call
+  network       network acquisition - background re-call
   interactive   suspends the shell awaiting a human
-  git-network   git push/fetch/pull — probed below; allow only when the
+  git-network   git push/fetch/pull - probed below; allow only when the
                 measured transfer is small (owner direction 2026-09-23:
-                pre-judge the network payload; deny oversized to exec)
+                pre-judge the network payload; deny oversized to a
+                backgrounded re-call)
 
 The hook is a backstop, never the contract: fail-open on unparseable
 input. Text matching cannot catch indirection; the contract carries the
@@ -48,7 +66,17 @@ PUSH_COMMIT_THRESHOLD = 25
 # the measured judgment.
 GIT_NETWORK_ROUTING_ENABLED = False
 
-_LONG_CLASS = re.compile(
+# ADR-0051 clause 3: build/gate classes re-called with run_in_background
+# must disable MSBuild node reuse - worker nodes are deliberate survivors
+# of the primary and the completion notification would strand them (the
+# 2026-09-23 leak class). Accept the env prefix or the direct msbuild
+# switches, anywhere in the command surface.
+_NODE_REUSE_GUARD = re.compile(
+    r"MSBUILDDISABLENODEREUSE\s*=" r"|/nr:false" r"|/nodeReuse:false",
+    re.IGNORECASE,
+)
+
+_BUILD_CLASS = re.compile(
     # builds / build tools (long or unknown duration; heavy fan-out)
     r"cmake\s+(-S\b|-B\b|--preset\b|--build\b|--install\b)"
     r"|\bctest\b"
@@ -56,27 +84,39 @@ _LONG_CLASS = re.compile(
     r"|\bdevenv\b"
     r"|\bcl\.exe\b"
     r"|\blink\.exe\b"
-    r"|\bdotnet\s+(build|test)\b"
-    # repository gate/tool entrypoints that sweep or build big trees
-    r"|format_sources\.py\b"
+    r"|\bdotnet\s+(build|test)\b",
+    re.IGNORECASE,
+)
+
+# Filesystem tree sweeps (2026-09-23 incident: a raw Git-Bash `find` over
+# the workspace survived the session at 20%+ CPU; sweeps are minutes-class
+# and belong under exec custody's lease). Path-argument forms (`find
+# /d/...`, `find D:\...`, flags then path) sweep; the Windows text-FILTER
+# form (`find /i "text" file` - slash-flag then quoted needle) does not.
+# grep -r/--recursive and `dir /s` same class.
+_SWEEP_CLASS = re.compile(
+    r"\bg?find\s+(?:-[A-Za-z][A-Za-z0-9-]*\s+)*(?:[A-Za-z]:[\\/]|/[A-Za-z0-9_.-]+[\\/])"
+    r"|\bgrep\s+(?:[^&|;]*\s)?(?:-r[A-Za-z]*\b|--recursive\b)"
+    r"|\bdir\s+(?:[^&|;]*\s)?/[sb]\b",
+    re.IGNORECASE,
+)
+
+# Repository gate/tool entrypoints that sweep or build big trees.
+_REPO_TOOL_CLASS = re.compile(
+    r"format_sources\.py\b"
     r"|\bformat(-check)?\.cmd\b"
     r"|\bclang-format\b"
     r"|test_all\.py\b"
     r"|\bpytest\b"
     r"|python\s+-m\s+pytest\b"
     r"|deploy_bundle\.py\b"
-    r"|\bdeploy\.cmd\b"
-    # filesystem tree sweeps (2026-09-23 incident: a raw Git-Bash `find`
-    # over the workspace survived the session at 20%+ CPU; sweeps are
-    # minutes-class and belong under exec custody). Path-argument forms
-    # (`find /d/...`, `find D:\...`, flags then path) sweep; the Windows
-    # text-FILTER form (`find /i "text" file` — slash-flag then quoted
-    # needle) does not. grep -r/--recursive and `dir /s` same class.
-    r"|\bg?find\s+(?:-[A-Za-z][A-Za-z0-9-]*\s+)*(?:[A-Za-z]:[\\/]|/[A-Za-z0-9_.-]+[\\/])"
-    r"|\bgrep\s+(?:[^&|;]*\s)?(?:-r[A-Za-z]*\b|--recursive\b)"
-    r"|\bdir\s+(?:[^&|;]*\s)?/[sb]\b"
-    # network acquisition (downloads can outlive any sane tool timeout)
-    r"|\bcurl\b"
+    r"|\bdeploy\.cmd\b",
+    re.IGNORECASE,
+)
+
+# Network acquisition (downloads can outlive any sane tool timeout).
+_NETWORK_CLASS = re.compile(
+    r"\bcurl\b"
     r"|\bwget\b"
     r"|Invoke-WebRequest\b"
     r"|\biwr\b"
@@ -93,7 +133,7 @@ _LONG_CLASS = re.compile(
 _INTERACTIVE_CLASS = re.compile(
     r"\b(vim|nano|emacs|notepad)\b"
     r"|git\s+(rebase\s+(-i|-p)|add\s+(-i|-p)|clean\s+-i|checkout\s+-p|reset\s+(-p|--patch)|restore\s+-p|stash\s+(-p|--patch))\b"
-    # GUI launchers (devenv is long-class: its /build form is a build)
+    # GUI launchers (devenv is build-class: its /build form is a build)
     r"|cmake\s+--open\b",
     re.IGNORECASE,
 )
@@ -102,7 +142,7 @@ _INTERACTIVE_CLASS = re.compile(
 # delimiter word (bare or quoted). Applied to the quote-stripped segment
 # surface, so heredoc SYNTAX matches while quoted PROSE ("use << EOF in
 # docs") does not. Known accepted false positive: a shell bit-shift with
-# a letter variable (`x << n`) — the denial message says to rewrite such
+# a letter variable (`x << n`) - the denial message says to rewrite such
 # expressions; strictness beats leaking heredoc authoring through a hook.
 _HEREDOC = re.compile(
     r"(?:^|[\s;|&(<])<<-?\s*(?:[\"']\s*[\"']|[A-Za-z_][A-Za-z0-9_]*)"
@@ -122,20 +162,37 @@ _OPERATOR_EXEC = re.compile(
 _GIT_NETWORK = re.compile(r"git\s+(push|fetch|pull)\b", re.IGNORECASE)
 
 _HOOK_TAG = "[qiven-hook]"
-_DENY_LONG = (
-    f"{_HOOK_TAG} long-class command invoked raw: route it through the Qiven Operator instead --\n"
-    "  tools\\qiven.cmd exec start --timeout 600 -- <your command>\n"
-    "then re-attach with:  tools\\qiven.cmd exec status <run-id>   (or stop <run-id>)\n"
-    "exit 124 = still running (the child continues); see the canonical usage reference:\n"
-    "qiven-devkit/docs/conventions/operator-usage.md  (hang-contract rule 5)"
+
+# ADR-0051: the reroute instruction. One denied call is the entire
+# overhead; the backgrounded re-call returns an output-file path
+# immediately and the harness notifies once on completion.
+_DENY_BG_TEMPLATE = (
+    "{tag} {klass} invoked raw: re-issue THIS EXACT command with run_in_background: true\n"
+    "(Bash tool parameter). It returns an output-file path immediately and notifies you ONCE on\n"
+    "completion - do NOT poll (no exec status loops, no sleep+tail), do NOT detour through qiven\n"
+    "exec (ADR-0051). Oversized output auto-persists to a file with a short preview returned.\n"
 )
-_DENY_GATE = (
-    f"{_HOOK_TAG} qiven gate/run/ci are minutes-class and block the session shell -- run them detached:\n"
-    "  tools\\qiven.cmd exec start --timeout 900 -- cmd /c call tools\\qiven.cmd gate --expect-head <sha>\n"
-    "then poll:  tools\\qiven.cmd exec status <run-id>\n"
-    "(short `qiven run` tasks are still covered by this rule while the per-task timers\n"
-    "accumulate duration evidence in .generated-temp/operator/; the class split will be\n"
-    "refined from that data, not by guesswork)"
+_DENY_BG_GUARD_LINE = (
+    "This class also needs the MSBuild node-reuse guard on the re-call:\n"
+    "  MSBUILDDISABLENODEREUSE=1 <same command>    (with run_in_background: true)"
+)
+# The guard denial (a backgrounded build/gate re-call arrived without it).
+_DENY_BG_GUARD_TEMPLATE = (
+    "{tag} {klass} under run_in_background must ALSO disable MSBuild node reuse - worker nodes\n"
+    "deliberately survive their primary and the completion notification would strand them (the\n"
+    "2026-09-23 leak class; ADR-0048 s3, ADR-0051 s3). Re-issue as:\n"
+    "  MSBUILDDISABLENODEREUSE=1 <same command>    (with run_in_background: true)\n"
+    "(/nr:false or /nodeReuse:false also satisfies the guard for direct msbuild calls)."
+)
+# Sweeps stay under exec lease custody (ADR-0051 clause 5): the ghost-
+# process class survived a session through an uncustodied path, and a
+# background task's session-end lifetime is not yet characterized.
+_DENY_SWEEP_TEMPLATE = (
+    "{tag} filesystem tree sweep: sweeps run under the Qiven Operator lease - custody must not\n"
+    "depend on this session's lifetime (ghost-process class, ADR-0051 s5); run_in_background is\n"
+    "NOT sufficient here. Route it:\n"
+    "  tools\\qiven.cmd exec start --timeout 600 -- <your command>\n"
+    "exit 124 = still running; re-attach then (and only then): tools\\qiven.cmd exec status <run-id>"
 )
 _DENY_INTERACTIVE = (
     f"{_HOOK_TAG} interactive command invoked raw: it suspends the shell awaiting a human\n"
@@ -161,6 +218,18 @@ def _command_from(payload: object) -> str:
             return value
     value = payload.get("command")
     return value if isinstance(value, str) else ""
+
+
+def _background_from(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    tool_input = payload.get("tool_input")
+    if isinstance(tool_input, dict):
+        value = tool_input.get("run_in_background")
+        if isinstance(value, bool):
+            return value
+    value = payload.get("run_in_background")
+    return value if isinstance(value, bool) else False
 
 
 def _split_segments(command: str) -> list[str]:
@@ -199,7 +268,16 @@ def _split_segments(command: str) -> list[str]:
     return [segment for segment in segments if segment.strip()]
 
 
-_VERDICT_PRIORITY = ("heredoc", "gate-class", "git-network", "long", "interactive")
+_VERDICT_PRIORITY = (
+    "heredoc",
+    "gate-class",
+    "git-network",
+    "build",
+    "sweep",
+    "repo-tool",
+    "network",
+    "interactive",
+)
 
 
 def _strip_quoted(text: str) -> str:
@@ -241,8 +319,14 @@ def _classify_segment(segment: str) -> str:
         return "gate-class"
     if _GIT_NETWORK.search(surface):
         return "git-network"
-    if _LONG_CLASS.search(surface):
-        return "long"
+    if _BUILD_CLASS.search(surface):
+        return "build"
+    if _SWEEP_CLASS.search(surface):
+        return "sweep"
+    if _REPO_TOOL_CLASS.search(surface):
+        return "repo-tool"
+    if _NETWORK_CLASS.search(surface):
+        return "network"
     if _INTERACTIVE_CLASS.search(surface):
         return "interactive"
     return "allow"
@@ -260,6 +344,11 @@ def classify(command: str) -> str:
         if candidate in verdicts:
             return candidate
     return "allow"
+
+
+def has_node_reuse_guard(command: str) -> bool:
+    """ADR-0051 clause 3 guard check on the quote-stripped surface."""
+    return bool(_NODE_REUSE_GUARD.search(_strip_quoted(command)))
 
 
 # --- git-network probe (bounded; injectable for tests) -------------------
@@ -345,26 +434,39 @@ def probe_git_network(command: str, runner=_run_git, workdir=None) -> tuple[str,
 
 
 _DENY_GIT_NETWORK_TEMPLATE = (
-    "{tag} git {kind} denied by measured judgment ({evidence}). Route through the operator:\n"
-    "  tools\\qiven.cmd exec start --timeout 300 -- <your git command>\n"
-    "then poll:  tools\\qiven.cmd exec status <run-id>. Small transfers pass this hook raw;\n"
+    "{tag} git {kind} denied by measured judgment ({evidence}). Re-issue with\n"
+    "run_in_background: true (ADR-0051). Small transfers pass this hook raw;\n"
     "only measured-oversized or unmeasurable ones are denied."
 )
 
 
-def verdict(command: str, probe_runner=_run_git) -> tuple[int, str]:
-    """Full decision: (exit_code, stderr_message). 0 = allow."""
+def verdict(command: str, probe_runner=_run_git, background: bool = False) -> tuple[int, str]:
+    """Full decision: (exit_code, stderr_message). 0 = allow.
+
+    `background` mirrors the Bash tool call's run_in_background flag
+    (ADR-0051): the long/gate/network classes are satisfied by a
+    backgrounded re-call; build/gate additionally require the MSBuild
+    node-reuse guard; sweeps always require exec lease custody."""
     kind = classify(command)
     if kind == "allow":
         return 0, ""
     if kind == "heredoc":
         return 2, _DENY_HEREDOC
-    if kind == "long":
-        return 2, _DENY_LONG
-    if kind == "gate-class":
-        return 2, _DENY_GATE
     if kind == "interactive":
         return 2, _DENY_INTERACTIVE
+    if kind == "sweep":
+        return 2, _DENY_SWEEP_TEMPLATE.format(tag=_HOOK_TAG)
+    if kind in ("build", "gate-class"):
+        if not background:
+            message = _DENY_BG_TEMPLATE.format(tag=_HOOK_TAG, klass=kind) + _DENY_BG_GUARD_LINE
+            return 2, message
+        if not has_node_reuse_guard(command):
+            return 2, _DENY_BG_GUARD_TEMPLATE.format(tag=_HOOK_TAG, klass=kind)
+        return 0, ""
+    if kind in ("repo-tool", "network"):
+        if not background:
+            return 2, _DENY_BG_TEMPLATE.format(tag=_HOOK_TAG, klass=kind)
+        return 0, ""
     if kind == "git-network":
         if not GIT_NETWORK_ROUTING_ENABLED:
             return 0, ""  # suspended (owner direction 2026-09-24) — see flag
@@ -382,7 +484,10 @@ def main() -> int:
         payload = json.load(sys.stdin)
     except Exception:
         return 0  # unparseable hook input: allow (fail-open detector)
-    code, message = verdict(_command_from(payload))
+    code, message = verdict(
+        _command_from(payload),
+        background=_background_from(payload),
+    )
     if message:
         sys.stderr.write(message)
     return code
