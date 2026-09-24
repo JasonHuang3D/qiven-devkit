@@ -883,12 +883,16 @@ def emit_adapter(control: Path, repo_id: str, repo_checkout: Path, mode: str,
         )
     merged_checkouts = dict(checkouts)
     merged_checkouts[repo_id] = str(repo_checkout)
-    receipt = _validate_effective(control, manifest, effective, merged_checkouts, workspace_root, mode, trust_policy)
+    # full-graph validation materializes NOTHING beyond the explicit
+    # checkouts (doc 01 section 5: worktrees only for the operation
+    # closure; unrelated sibling checkouts are not this operation's
+    # concern — declarations come from the census/cache)
+    receipt = _validate_effective(control, manifest, effective, merged_checkouts, None, mode, trust_policy)
 
     # rebuild records for the projection walk (validated above; no re-read)
     records: dict[str, tuple[dict, bool]] = {}
     for node_id, node in effective["nodes"].items():
-        checkout = node_checkout(node_id, merged_checkouts, workspace_root)
+        checkout = node_checkout(node_id, merged_checkouts, None)
         record, census_origin = _load_declaration(node_id, node, control, checkout)
         records[node_id] = (record, census_origin)
     projection = _projection_with_records(repo_id, records)
@@ -908,6 +912,10 @@ def emit_adapter(control: Path, repo_id: str, repo_checkout: Path, mode: str,
                 f"provider {provider_id} has no checkout for adapter materialization",
                 node=provider_id,
             )
+        # operation-closure materialization IS verified: exact commit,
+        # clean tree in authoritative mode (doc 01 section 5 step 6)
+        provider_state = _verify_checkout(
+            provider_id, checkout, effective["nodes"][provider_id], mode == "authoritative")
         provider_record = records[provider_id][0]
         contracts = sorted(p["contract"] for p in provider_record.get("provides", []))
         targets = sorted({t for p in provider_record.get("provides", []) for t in p.get("targets", [])})
@@ -917,6 +925,7 @@ def emit_adapter(control: Path, repo_id: str, repo_checkout: Path, mode: str,
             "commit": effective["nodes"][provider_id]["commit"],
             "contracts": contracts,
             "targets": targets,
+            "checkout_state": provider_state["state"],
         })
 
     projection_record = [
