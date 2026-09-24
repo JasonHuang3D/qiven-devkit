@@ -13,7 +13,7 @@ lock transaction + 5 batch-consistency control commits. Within budget.
 
 | Where | What |
 | --- | --- |
-| qiven-devkit `tools/workspace_resolver.py` (+tests R16-R21) | per-node revision overlays (§5.1 WR-3 form: distinct effective generation, order-independent, identity-preserving no-op overlays); `adapter` operation (deterministic CMake resolution file; materialize-once guard; anti-spoof target check; operation-closure-only materialization); `lock-update` (cutover transaction helper; digest+blob-bound control-side declaration cache — full-graph validation with no checkout of every node, Profile A/I) |
+| qiven-devkit `tools/workspace_resolver.py` (+tests R16-R22) | per-node revision overlays (§5.1 WR-3 form: distinct effective generation, order-independent, identity-preserving no-op overlays); `adapter` operation (deterministic CMake resolution file; materialize-once guard; anti-spoof target check; operation-closure-only materialization); `lock-update` (cutover transaction helper; digest+blob-bound control-side declaration cache — full-graph validation with no checkout of every node, Profile A/I) |
 | qiven-workspace `bootstrap/qiven-bootstrap.py` | `gate-configure`: identity-check locked Devkit → resolver adapter → `cmake --preset` with QIVEN_RESOLUTION_FILE (architecture §4: CMake receives resolved roots; preflight CLI form unchanged, B1-B6 contract intact) |
 | qiven-foundation | `.qiven/dependencies.json` (provides `qiven-foundation-v1` → `qiven::foundation`) |
 | qiven-runtime / qiven-context-draft / qiven-math | repository-owned manifests; CMake Foundation blocks (sibling discovery + consumer-local SHA pin + `if(NOT TARGET)` suppression guard) REPLACED by adapter include + `qiven_workspace_materialize`; gate configure tasks rerouted through the bootstrap |
@@ -107,6 +107,12 @@ machine-checkable and recorded above.
 - The context lock node (8914cef) is stale against context main
   (5dadc57+) — disclosed; not needed by any gate in this batch; next
   control movement can advance it (WR-1 precedent class).
+- The lock devkit node (06cf75f, pinned at control HEAD fcfede8)
+  predates devkit main 12dbfce — the self-review fix PRs #43/#44
+  (R21/R22 self-tests, ControlTreeDirty authoritative guard) landed
+  after lock close; the continuation batch advances the devkit lock
+  node to an F3-bearing head (≥ b98e6c4) before any first
+  authoritative consumption, alongside the context node advance.
 - Router classification of the new launcher forms: `qiven-bootstrap.py
   gate-configure` wraps a build-class command — sessions must not type
   it raw; classified-allow today (pre-existing v4.1 scope limit, same
