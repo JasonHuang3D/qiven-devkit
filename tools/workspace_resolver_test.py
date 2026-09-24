@@ -555,6 +555,38 @@ def main() -> int:
             "R21: locked node rebuilt instead of preserved"
         )
 
+        # R22 (F3): authoritative mode with an active trust policy refuses
+        # a DIRTY control working tree — admission is over the control
+        # commit, but the lock and declarations are read from the working
+        # tree, so a dirty tree must never be consumed branded with the
+        # admitted HEAD; shadow mode on the same dirty tree still resolves,
+        # and the authoritative resolve succeeds once the tree is clean.
+        r22_root = root / "r22"
+        r22_root.mkdir()
+        control_22, lock_22 = _fixture_workspace(r22_root)
+        marker_22 = control_22 / "notes.md"  # tracked, never consumed by the resolver
+        marker_22.write_text("fixture marker\n", encoding="utf-8", newline="\n")
+        _git(["add", "-A"], control_22)
+        _git(["commit", "-q", "-m", "fixture marker"], control_22)
+        head_22 = _git(["rev-parse", "HEAD"], control_22)
+        policy_22 = root / "trust-r22.json"
+        policy_22.write_text(json.dumps({
+            "schema": "qiven-workspace-control-trust-v1",
+            "admitted_control_revisions": [head_22],
+        }), encoding="utf-8", newline="\n")
+        marker_22.write_text("uncommitted edit\n", encoding="utf-8", newline="\n")
+        error_22 = _resolve_typed(control_22, mode="authoritative", trust_policy=policy_22)
+        assert error_22.kind == "ControlTreeDirty", f"R22: {error_22.kind}"
+        receipt_22 = wr.resolve(control_22, {}, None, "shadow", None)
+        assert receipt_22["workspace_generation"] == lock_22["generation"], (
+            "R22: shadow must still resolve the dirty control tree"
+        )
+        marker_22.write_text("fixture marker\n", encoding="utf-8", newline="\n")
+        receipt_22b = wr.resolve(control_22, {}, None, "authoritative", policy_22)
+        assert receipt_22b["mode"] == "authoritative", (
+            "R22: clean control at the admitted revision must resolve in authoritative mode"
+        )
+
 
         # R10: preflight end-to-end through the LOCKED devkit resolver binary.
         fixture_devkit = root / "qiven-devkit"
@@ -597,7 +629,7 @@ def main() -> int:
         assert preflight_receipt["workspace_generation"] == lock_r10["generation"], "R10: generation"
         assert preflight_receipt["released"] is True and preflight_receipt["shadow_only"] is True, "R10: release flags"
 
-    print("[ OK ] workspace-resolver self-test (R1-R21)")
+    print("[ OK ] workspace-resolver self-test (R1-R22)")
     return 0
 
 
