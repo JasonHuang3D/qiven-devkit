@@ -71,6 +71,12 @@
         "{python}",
         "tools/workspace_schemas_test.py"
       ]
+    },
+    "workspace-resolver-tests": {
+      "argv": [
+        "{python}",
+        "tools/workspace_resolver_test.py"
+      ]
     }
   },
   "gates": {
@@ -81,6 +87,7 @@
       "operator-tests",
       "router-tests",
       "workspace-schemas-tests",
+      "workspace-resolver-tests",
       "commit-subjects",
       "devkit-regression",
       "diff-check",
