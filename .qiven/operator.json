@@ -77,6 +77,12 @@
         "{python}",
         "tools/workspace_resolver_test.py"
       ]
+    },
+    "workspace-bootstrap-tests": {
+      "argv": [
+        "{python}",
+        "tools/workspace_bootstrap_test.py"
+      ]
     }
   },
   "gates": {
@@ -88,6 +94,7 @@
       "router-tests",
       "workspace-schemas-tests",
       "workspace-resolver-tests",
+      "workspace-bootstrap-tests",
       "commit-subjects",
       "devkit-regression",
       "diff-check",
