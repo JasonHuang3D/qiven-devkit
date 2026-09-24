@@ -169,6 +169,15 @@ def main() -> int:
         workspace_schema,
         "MissingField",
     )
+    _expect_typed(
+        "S14-trailing-newline-sha",
+        # a 40-hex sha followed by a newline must NOT satisfy the commit
+        # pattern: anchors are \\Z (absolute end), never $ (matches before
+        # a trailing newline under Python re semantics)
+        VALID_LOCK.replace(f'"commit": "{Z40}"', f'"commit": "{Z40}\\n"'),
+        lock_schema,
+        "PatternMismatch",
+    )
 
     # S1: the shipped schema documents themselves parse under the strict law.
     for name in (
@@ -207,7 +216,7 @@ def main() -> int:
         )
         assert rc_fail == 1, "S13: CLI fail path did not return 1"
 
-    print("[ OK ] workspace-schemas self-test (S1-S13)")
+    print("[ OK ] workspace-schemas self-test (S1-S14)")
     return 0
 
 
