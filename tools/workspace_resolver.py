@@ -852,7 +852,9 @@ def _adapter_cmake(target_id: str, generation: str, projection_digest: str,
     lines.append(f'set(QIVEN_WORKSPACE_OPERATION_PROJECTION_DIGEST "{projection_digest}")')
     for provider in providers:
         pid = _sanitize_id(provider["id"])
-        lines.append(f'set(QIVEN_WORKSPACE_PROVIDER_ROOT_{pid} "{provider["root"]}")')
+        # forward slashes: CMake string syntax rejects raw backslash escapes
+        root_posix = Path(provider["root"]).as_posix()
+        lines.append(f'set(QIVEN_WORKSPACE_PROVIDER_ROOT_{pid} "{root_posix}")')
         lines.append(f'set(QIVEN_WORKSPACE_PROVIDER_COMMIT_{pid} "{provider["commit"]}")')
         for contract in provider["contracts"]:
             lines.append(f'set(QIVEN_WORKSPACE_PROVIDER_CONTRACT_{pid} "{contract}")')
