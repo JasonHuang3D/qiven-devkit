@@ -708,7 +708,10 @@ def _overlay_node(node_id: str, checkout: Path, strict_clean: bool) -> tuple[dic
 
 def _effective_lock(lock: dict, overlays: dict[str, Path], strict_clean: bool) -> tuple[dict, dict]:
     """Apply candidate overlays onto a deep copy of the lock; return the
-    effective lock and per-overlay checkout states."""
+    effective lock and per-overlay checkout states. An overlay whose
+    checkout is ALREADY at the locked commit is an identity-preserving
+    no-op: the locked node (with its cache-bound declaration) stands
+    unchanged, so a no-op overlay derives the base generation."""
     import copy
     effective = copy.deepcopy(lock)
     overlay_states: dict[str, dict] = {}
@@ -717,9 +720,21 @@ def _effective_lock(lock: dict, overlays: dict[str, Path], strict_clean: bool) -
             raise ResolutionError(
                 "UnknownNode", f"overlay node {node_id} is not a base lock node", node=node_id
             )
-        node, state = _overlay_node(node_id, Path(checkout_path).resolve(), strict_clean)
+        checkout = Path(checkout_path).resolve()
+        head = _git(["rev-parse", "HEAD"], checkout)
+        dirty = _git(["status", "--porcelain"], checkout)
+        if dirty and strict_clean:
+            raise ResolutionError("DirtyDependency", f"{node_id} overlay worktree is dirty", node=node_id)
+        if head == effective["nodes"][node_id]["commit"]:
+            overlay_states[node_id] = {
+                "id": node_id, "state": "dirty-labeled" if dirty else "clean",
+                "commit": head, "overlay_kind": "already-locked",
+            }
+            continue
+        node, _state = _overlay_node(node_id, checkout, strict_clean)
         effective["nodes"][node_id] = node
-        overlay_states[node_id] = {"id": node_id, **state, "commit": node["commit"]}
+        overlay_states[node_id] = {"id": node_id, "state": "dirty-labeled" if dirty else "clean",
+                                   "commit": node["commit"], "overlay_kind": "candidate"}
     return effective, overlay_states
 
 
