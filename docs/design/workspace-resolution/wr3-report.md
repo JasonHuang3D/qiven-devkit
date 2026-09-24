@@ -13,7 +13,7 @@ lock transaction + 5 batch-consistency control commits. Within budget.
 
 | Where | What |
 | --- | --- |
-| qiven-devkit `tools/workspace_resolver.py` (+tests R16-R20) | per-node revision overlays (§5.1 WR-3 form: distinct effective generation, order-independent, identity-preserving no-op overlays); `adapter` operation (deterministic CMake resolution file; materialize-once guard; anti-spoof target check; operation-closure-only materialization); `lock-update` (cutover transaction helper; digest+blob-bound control-side declaration cache — full-graph validation with no checkout of every node, Profile A/I) |
+| qiven-devkit `tools/workspace_resolver.py` (+tests R16-R21) | per-node revision overlays (§5.1 WR-3 form: distinct effective generation, order-independent, identity-preserving no-op overlays); `adapter` operation (deterministic CMake resolution file; materialize-once guard; anti-spoof target check; operation-closure-only materialization); `lock-update` (cutover transaction helper; digest+blob-bound control-side declaration cache — full-graph validation with no checkout of every node, Profile A/I) |
 | qiven-workspace `bootstrap/qiven-bootstrap.py` | `gate-configure`: identity-check locked Devkit → resolver adapter → `cmake --preset` with QIVEN_RESOLUTION_FILE (architecture §4: CMake receives resolved roots; preflight CLI form unchanged, B1-B6 contract intact) |
 | qiven-foundation | `.qiven/dependencies.json` (provides `qiven-foundation-v1` → `qiven::foundation`) |
 | qiven-runtime / qiven-context-draft / qiven-math | repository-owned manifests; CMake Foundation blocks (sibling discovery + consumer-local SHA pin + `if(NOT TARGET)` suppression guard) REPLACED by adapter include + `qiven_workspace_materialize`; gate configure tasks rerouted through the bootstrap |
@@ -31,15 +31,22 @@ lock transaction + 5 batch-consistency control commits. Within budget.
 ## Exit-criteria mapping (doc 02 WR-3)
 
 1. *No active consumer-local Foundation SHA; migrated edges have no
-   shadow-only census origin* — DELIVERED (grep-clean; lock binds
-   repository-manifest declarations with cache).
+   shadow-only census origin* — DELIVERED (grep-clean on the consumer
+   CMake resolution surface only; repo-wide residue remains — qiven-math
+   ci.yml raw `-DQIVEN_FOUNDATION_ROOT=` entries and a
+   qiven-context-draft README reference — named in the CI open row;
+   lock binds repository-manifest declarations with cache).
 2. *Gates pass top-level and nested via Operator gate + approved
    presets; preflight supplies the adapter through the configure
    preset* — DELIVERED locally (receipts above). The CI raw-configure
-   migration is OPEN (explicit-dispatch-only CI; replacement proof
-   needs an owner-dispatched run — declared for the continuation
-   batch; the ci.yml circularity: it must pin the post-transaction
-   control revision, resolved by the routine-advance decision).
+   migration is OPEN for runtime's ci.yml AND qiven-math's ci.yml raw
+   `-DQIVEN_FOUNDATION_ROOT=` entries (same migration class;
+   explicit-dispatch-only CI; replacement proof needs an
+   owner-dispatched run — declared for the continuation batch; the
+   ci.yml circularity: each must pin the post-transaction control
+   revision, resolved by the routine-advance decision); the
+   qiven-context-draft README reference is a docs cleanup, not CI
+   migration.
 3. *No unrelated target can spoof qiven::foundation* — DELIVERED
    (adapter anti-spoof guard; the `if(NOT TARGET)` suppression class
    is mechanically dead in all three consumers).
@@ -72,7 +79,7 @@ runtime run; clean-tree re-run green — recorded, not a code change).
 
 | Counter | Baseline (WR-0) | After WR-3 batch 1 |
 | --- | --- | --- |
-| files read to reconstruct dependency location/version | 3 consumer CMake resolution blocks | 0 (manifest+adapter carry it; grep-verified no QIVEN_FOUNDATION_* remains) |
+| files read to reconstruct dependency location/version | 3 consumer CMake resolution blocks | 0 (manifest+adapter carry it; grep-verified no QIVEN_FOUNDATION_* remains on the consumer CMake surface) |
 | mechanical peer-pin edits per compatible movement | 4 PRs / 4 pin-edit sets / 2 wasted gates | foundation class: 0 (one lock transaction); the REMAINING draft ripple: 1 edit (WR-4 class, honestly counted) |
 | lock updates / owner interventions / elapsed | 4 lock-equivalent updates / 0 / ~2h10m | 6 control commits (1 transaction + 5 batch-internal devkit-version advances; collapse to 1-2 once the devkit branch merges + routine-advance rule lands) / 0 interventions / ~3h for the full four-repo pilot |
 | distinct resolver implementations | 7 | 4 (3 CMake foundation resolvers deleted; bootstrap+resolver, 2 toolchain.py copies, context shim remain for WR-5/6) |
@@ -88,7 +95,7 @@ machine-checkable and recorded above.
 - Shadow transition: all receipts are mode=shadow (labeled). The
   AUTHORITATIVE cutover claim awaits the owner admission of the new
   control revision (trust policy law clause 3) — the standing
-  BaselineConflict (context devkit pin d1d2a3a vs lock bb582e8) is the
+  BaselineConflict (context devkit pin d1d2a3a vs lock 06cf75f) is the
   WR-6 reconciliation target and is reported, not resolved.
 - The census file itself is untouched (WR-0 evidence; hard-removed at
   WR-8). "Retiring the shadow-only census records for these edges" is

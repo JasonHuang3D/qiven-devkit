@@ -2,10 +2,12 @@
 
 Validates the workspace declaration graph and emits resolution receipts.
 Read-only with respect to product repositories: it consumes local Git
-objects (rev-parse / cat-file / status) and the control tree only, and it
-never mutates the workspace lock. Census-wr0 declaration origins are
-shadow-only by construction: a receipt containing any census declaration
-is labeled shadow-only and cannot back an authoritative operation.
+objects (rev-parse / cat-file / status) and the control tree only.
+Resolution and validation never mutate the workspace lock — the explicit
+lock-update --apply operation is the lock's only writer. Census-wr0
+declaration origins are shadow-only by construction: a receipt containing
+any census declaration is labeled shadow-only and cannot back an
+authoritative operation.
 
 Canonicalization is the RFC 8785 subset over the integer/string/bool/null/
 array/object vocabulary (floats are rejected by the schema layer). The
@@ -257,7 +259,8 @@ def _check_generation(manifest: dict, lock: dict) -> str:
     return computed
 
 
-def _check_trust(control: Path, mode: str, trust_policy: Path | None) -> dict:
+def _check_trust(control: Path, mode: str, trust_policy: Path | None,
+                 control_transaction: bool = False) -> dict:
     if mode != "authoritative":
         return {"trusted": False, "reason": "shadow mode"}
     if trust_policy is None:
@@ -284,6 +287,20 @@ def _check_trust(control: Path, mode: str, trust_policy: Path | None) -> dict:
             "UntrustedControlRevision",
             f"control revision {control_head} is not admitted by {trust_policy}",
         )
+    if not control_transaction:
+        # F3: admission is over the control COMMIT, but the lock and the
+        # declarations are read from the working tree — a dirty control
+        # tree must never be consumed branded with the admitted HEAD
+        # (section 11 taxonomy superset; lock-update transactions bypass:
+        # they validate candidate lock content before committing it).
+        dirty = _git(["status", "--porcelain"], control)
+        if dirty:
+            raise ResolutionError(
+                "ControlTreeDirty",
+                f"control working tree is dirty at admitted revision {control_head} "
+                f"({dirty.splitlines()[0]}); lock and declarations are read from "
+                f"the working tree, not from the admitted commit",
+            )
     return {"trusted": True, "control_revision": control_head}
 
 
@@ -740,10 +757,13 @@ def _effective_lock(lock: dict, overlays: dict[str, Path], strict_clean: bool) -
 
 def _validate_effective(control: Path, manifest: dict, effective_lock: dict,
                         checkouts: dict[str, str], workspace_root: Path | None,
-                        mode: str, trust_policy: Path | None) -> dict:
+                        mode: str, trust_policy: Path | None,
+                        control_transaction: bool = False) -> dict:
     """Full-graph validation over the effective lock (shared by overlay /
-    adapter / lock-update): identity, declarations, edges, conflicts."""
-    trust = _check_trust(control, mode, trust_policy)
+    adapter / lock-update): identity, declarations, edges, conflicts.
+    control_transaction=True is the lock-update workflow only: candidate
+    lock content is validated in a deliberately dirty control tree."""
+    trust = _check_trust(control, mode, trust_policy, control_transaction)
     records: dict[str, tuple[dict, bool]] = {}
     node_receipts: list[dict] = []
     strict_clean = mode == "authoritative"
@@ -1025,7 +1045,11 @@ def lock_update(control: Path, moves: dict[str, Path], mode: str,
         cache_files[cache_path] = manifest_text
 
     merged_checkouts = {node_id: str(path) for node_id, path in moves.items()}
-    receipt = _validate_effective(control, manifest, effective, merged_checkouts, None, mode, trust_policy)
+    # control_transaction: the lock-update flow validates the candidate lock
+    # content BEFORE committing it — a deliberately dirty control tree
+    # during the transaction (F3 exempts exactly this path)
+    receipt = _validate_effective(control, manifest, effective, merged_checkouts, None,
+                                  mode, trust_policy, control_transaction=True)
     new_generation = generation_digest(manifest, {k: v for k, v in effective.items() if k != "generation"})
     effective["generation"] = new_generation
 
