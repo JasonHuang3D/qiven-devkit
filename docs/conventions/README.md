@@ -25,7 +25,7 @@ working).
 | [naming-filesystem.md](naming-filesystem.md) | Repository layout, folder purposes, file naming per language, branch naming |
 | [naming-scripts.md](naming-scripts.md) | Batch (.cmd/.bat), shell (.sh), and Python tool scripts: files, flags, exit codes |
 | [naming-cmake.md](naming-cmake.md) | CMake: targets, presets, options, functions, test registration |
-| [cross-repo-cmake.md](cross-repo-cmake.md) | Consuming targets defined outside the consuming repository: the one consumption pattern, external-root registry, pin discipline, and what is deliberately not allowed (2026-09-23) |
+| [cross-repo-cmake.md](cross-repo-cmake.md) | Consuming targets defined outside the consuming repository: the one consumption pattern, external-root registry, pin discipline, and what is deliberately not allowed (2026-09-23; migration stage under ADR-0052 — workspace resolution is the accepted endpoint, see `../design/workspace-resolution.md`) |
 | [cmake-usage.md](cmake-usage.md) | CMake usage law: presets as the only entry, toolchain pinning, forbidden invocations |
 | [build-performance.md](build-performance.md) | Build-performance policy: measurement duty, PCH//MP levers, linker notes, banned list, revisit triggers |
 | [operator-usage.md](operator-usage.md) | Qiven Operator canonical usage: gate/run/ci/exec, exit codes, hang-contract execution path |
