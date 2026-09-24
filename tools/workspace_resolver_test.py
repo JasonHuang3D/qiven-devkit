@@ -289,6 +289,10 @@ def main() -> int:
         error_split = _resolve_typed(control_split, mode="authoritative", trust_policy=policy_split)
         assert error_split.kind == "BaselineConflict", f"R9b: {error_split.kind}"
 
+        # R11: a directory without control data fails typed, not as a traceback.
+        error_nf = _resolve_typed(root / "fixture-provider")
+        assert error_nf.kind == "WorkspaceNotFound", f"R11: {error_nf.kind}"
+
         # R10: preflight end-to-end through the LOCKED devkit resolver binary.
         fixture_devkit = root / "qiven-devkit"
         (fixture_devkit / "tools").mkdir(exist_ok=True)
@@ -330,7 +334,7 @@ def main() -> int:
         assert preflight_receipt["workspace_generation"] == lock_r10["generation"], "R10: generation"
         assert preflight_receipt["released"] is True and preflight_receipt["shadow_only"] is True, "R10: release flags"
 
-    print("[ OK ] workspace-resolver self-test (R1-R10)")
+    print("[ OK ] workspace-resolver self-test (R1-R11)")
     return 0
 
 
