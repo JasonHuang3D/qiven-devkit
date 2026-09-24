@@ -1,9 +1,11 @@
 # Workspace Resolution — Devkit Design Landing
 
-Status: accepted program (ADR-0052, qiven-context 2026-09-24); implementation
-NOT started — WR-0 is the next bounded batch and every authority-touching step
-is owner-gated. This document is the Devkit-side landing of the accepted
-architecture; the normative program documents are the single source of truth:
+Status: accepted program (ADR-0052, qiven-context 2026-09-24); **WR-0
+DELIVERED 2026-09-24, awaiting owner review** (see
+[`workspace-resolution/wr0-report.md`](workspace-resolution/wr0-report.md));
+WR-1+ remains owner-gated. This document is the Devkit-side landing of
+the accepted architecture; the normative program documents are the
+single source of truth:
 
 - qiven-docs `accepted/2026-09-24/00-qiven-workspace-dependency-resolution-program.md`
   (governance laws WG-1..WG-10)

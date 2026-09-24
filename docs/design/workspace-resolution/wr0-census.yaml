@@ -1,0 +1,152 @@
+schema: qiven-wr0-census-v1
+census_date: '2026-09-24'
+authority: 'ADR-0052 (qiven-context, accepted 2026-09-24); program docs qiven-docs accepted/2026-09-24/02-* WR-0'
+inputs_note: >-
+  Reuses the CA-0 source inventory (qiven-context PR #128, 2026-09-24
+  exit report) without reopening it; charges nothing to the CA-1 batch.
+  Every edge below carries live file:line evidence verified 2026-09-24.
+
+nodes:
+  - id: qiven-context
+    head: 82a37c1
+    head_note: 'main after PR #133 (ADR-0051 acceptance); carries devkit_pin d1d2a3a in .qiven/operator.json while devkit main is 94ee01e - the recorded implementation split'
+  - id: qiven-devkit
+    head: 94ee01e
+    head_note: 'main after PR #33 (docs landing); WR-0 artifacts land on top in this batch'
+  - id: qiven-runtime
+    head: fc2d8a9
+  - id: qiven-foundation
+    head: f28b86b
+  - id: qiven-math
+    head: 518e511
+  - id: qiven-context-draft
+    head: ea9af72
+  - id: qiven-toolchain-win
+    head: 9c83093
+    platform: windows
+  - id: qiven-third-party-win
+    head: 3184538
+    platform: windows
+  - id: qiven-docs
+    head: 7fe0df7
+    selection: only-when-referenced
+
+edges:
+  - id: runtime-foundation
+    from: qiven-runtime
+    to: qiven-foundation
+    kind: first-party-source
+    class: semantic dependency
+    mechanism: 'root override -> sibling fallback -> exact-SHA pin check -> add_subdirectory'
+    evidence: 'qiven-runtime/CMakeLists.txt:15-23 (root), :29-43 (pin f28b86b0448c7b08c64f6c4bc11e0c327d240212)'
+    platform: all
+  - id: runtime-draft
+    from: qiven-runtime
+    to: qiven-context-draft
+    kind: first-party-source
+    class: semantic dependency
+    mechanism: 'root override -> sibling fallback -> exact-SHA pin check -> add_subdirectory'
+    evidence: 'qiven-runtime/CMakeLists.txt:53+ (root), :64,:77-80 (pin ea9af72dd53b227a4f17142b0d437dfbb6148dbe)'
+    platform: all
+  - id: runtime-thirdparty-sqlite
+    from: qiven-runtime
+    to: qiven-third-party-win
+    kind: third-party-singleton
+    class: tool dependency
+    mechanism: 'root override -> sibling fallback -> exact-SHA pin check -> add_subdirectory(packages/sqlite3)'
+    evidence: 'qiven-runtime/CMakeLists.txt:92-100 (root), :103,:116-117 (pin 318453834315a68fa85374dffa9a77ff73d6e71c), :123 (materialize)'
+    platform: windows
+    ci_claim: >-
+      Windows-only provider inside a CI matrix that also dispatches
+      linux/macos (qiven-runtime/.github/workflows/ci.yml:55-57); the
+      sqlite3 package links advapi32 unconditionally
+      (qiven-third-party-win/packages/sqlite3/CMakeLists.txt:33).
+  - id: draft-foundation
+    from: qiven-context-draft
+    to: qiven-foundation
+    kind: first-party-source
+    class: semantic dependency
+    mechanism: 'root override -> sibling fallback -> exact-SHA pin check, ALL GATED BEHIND if(NOT TARGET qiven::foundation) - the validation-suppression pattern'
+    evidence: 'qiven-context-draft/CMakeLists.txt:24,:28,:30,:55-56 (pin f28b86b0448c7b08c64f6c4bc11e0c327d240212)'
+    platform: all
+    defect_class: 'target-presence validation suppression (Profile B fixture target)'
+  - id: math-foundation
+    from: qiven-math
+    to: qiven-foundation
+    kind: first-party-source
+    class: semantic dependency
+    mechanism: 'root override -> sibling fallback -> exact-SHA pin check, GATED BEHIND if(NOT TARGET qiven::foundation)'
+    evidence: 'qiven-math/CMakeLists.txt:16,:20,:22,:47-48 (pin f28b86b0448c7b08c64f6c4bc11e0c327d240212)'
+    platform: all
+    defect_class: 'target-presence validation suppression (Profile B fixture target)'
+  - id: context-devkit
+    from: qiven-context
+    to: qiven-devkit
+    kind: tooling
+    class: tool dependency
+    mechanism: 'shim+pin: QIVEN_DEVKIT_ROOT env -> workspace sibling -> import; consumer-local devkit_pin in .qiven/operator.json (separate from discovery)'
+    evidence: 'qiven-context/tools/qiven.py:14-25 (resolution order); .qiven/operator.json devkit_pin d1d2a3a47678 (devkit main is 94ee01e - SPLIT)'
+    platform: all
+  - id: cpp-devkit-operator-snapshots
+    from: [qiven-runtime, qiven-foundation, qiven-math, qiven-context-draft]
+    to: qiven-devkit
+    kind: tooling
+    class: tool dependency
+    mechanism: 'managed operator snapshot (template 0.1.9 rollout, ADR-0048 custody law); operator.json carries tasks/gates only - no devkit_pin field'
+    evidence: '.qiven/operator.json present in all four (schema_version 1; keys ci/default_gate/gates/repository_name/tasks); custody rollout receipts v25 (foundation PR #20, math PR #12, draft PR #40, runtime PR #58)'
+    platform: all
+  - id: builds-toolchain
+    from: [qiven-runtime, qiven-foundation, qiven-devkit-managed-repos]
+    to: qiven-toolchain-win
+    kind: toolchain
+    class: build-only dependency
+    mechanism: 'duplicated per-repo toolchain.py root discovery (env override -> sibling layout)'
+    evidence: 'qiven-runtime/tools/toolchain.py; qiven-foundation/tools/toolchain.py (copy pair)'
+    platform: windows
+  - id: tca-source-closure
+    from: qiven-runtime-tca-activation
+    to: [qiven-context, qiven-devkit, qiven-foundation, qiven-runtime]
+    kind: cognition-source
+    class: cognition-source dependency
+    mechanism: 'accepted CA-1 source-lock contract (commit/tree, path filters, per-file digests); selector manifest exists pending CA-1'
+    evidence: 'qiven-context/runtime/cognition-landing-manifest.yaml; CA-0 exit report (PR #128)'
+    platform: all
+    note: 'not a build edge; WR-7 shadow comparison target only'
+
+entrypoint_integration_surfaces:
+  - id: h1-kit-entrypoints
+    contract: ADR-0049
+    note: >-
+      H1 kit wrappers carry working-directory assumptions; the
+      2026-09-24 kit 0.1.0-g6ebf6ff6 pre-flight incident (CWD-derived
+      host profile default + kit without config/profiles) is governed
+      by the ADR-0049 corrective lane, not a dependency edge. Sealed
+      record: qiven-context evidence/audits/2026-09-24-mvp4-h1-kit-preflight-incident.md.
+  - id: hook-router-anchors
+    contract: 'long-command registry + router v4.1 (ADR-0051 accepted 2026-09-24)'
+    note: >-
+      tools/hook_exec_router.py classifies command TEXT (qiven
+      gate/exec spellings); any WR launcher change re-tests router
+      classification in the same batch. Registration re-enabled
+      2026-09-24T11:43Z (effective for sessions started after).
+  - id: repository-launchers
+    contract: ADR-0052 WG-5
+    note: 'context tools/qiven.py is today a resolver shim (discovery+pin); target state is a thin UX launcher. WR-6 scope.'
+
+pin_table:
+  - {consumer: qiven-runtime, pinned: qiven-foundation, sha: f28b86b0448c7b08c64f6c4bc11e0c327d240212, equals_canonical_main: true}
+  - {consumer: qiven-runtime, pinned: qiven-context-draft, sha: ea9af72dd53b227a4f17142b0d437dfbb6148dbe, equals_canonical_main: true}
+  - {consumer: qiven-runtime, pinned: qiven-third-party-win, sha: 318453834315a68fa85374dffa9a77ff73d6e71c, equals_canonical_main: true}
+  - {consumer: qiven-context-draft, pinned: qiven-foundation, sha: f28b86b0448c7b08c64f6c4bc11e0c327d240212, equals_canonical_main: true}
+  - {consumer: qiven-math, pinned: qiven-foundation, sha: f28b86b0448c7b08c64f6c4bc11e0c327d240212, equals_canonical_main: true}
+  - {consumer: qiven-context, pinned: qiven-devkit, sha: d1d2a3a47678..., equals_canonical_main: false, split_note: 'devkit main 94ee01e; the only stale pin in the workspace'}
+
+baseline_splits:
+  - 'devkit implementation split: context imports d1d2a3a via shim+pin; C++ repos execute template-0.1.9 managed snapshots; devkit main is 94ee01e'
+  - 'all CMake pins verified equal to canonical main HEADs except the context devkit pin (stale by owner choice, bump optional)'
+
+digest_note: >-
+  sha256 of this file (LF, UTF-8, as committed) computed by two
+  independent implementations (python hashlib + certutil) and recorded
+  in wr0-report.md; the census is the WR-1 resolver's first shadow
+  input.
