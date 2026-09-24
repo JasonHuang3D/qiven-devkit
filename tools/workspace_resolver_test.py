@@ -351,6 +351,187 @@ def main() -> int:
         else:
             raise AssertionError("R15: surrogate key accepted")
 
+        # ------------------------------------------------------------------
+        # WR-3 (overlay / adapter / lock-update)
+        # ------------------------------------------------------------------
+
+        def _repo_with_manifest(root_dir: Path, name: str, record: dict) -> Path:
+            files = {".qiven/dependencies.json": json.dumps(record, indent=2) + "\n",
+                     "README.md": f"{name} fixture\n"}
+            repo, _commit, _tree = _make_repo(root_dir, name, files)
+            return repo
+
+        # R16 (sealed WR-3 fixture, doc 02 stage WR-3): runtime accepts
+        # Foundation contract A while draft requires incompatible contract B
+        # -> the GRAPH fails typed before any configure, regardless of which
+        # consumer would have created the provider target first (validation
+        # never consults target presence).
+        r16_root = root / "r16"
+        r16_root.mkdir()
+        control_16, _ = _fixture_workspace(r16_root)
+        a_record = _record("fixture-a", [{"contract": "qiven-a-api-v1"}], [
+            _dep("fixture-provider", "first-party-source", PROVIDER_V1)])
+        b_record = _record("fixture-b", [{"contract": "qiven-b-api-v1"}], [
+            _dep("fixture-provider", "first-party-source", PROVIDER_V2)])
+        a_repo = _repo_with_manifest(r16_root, "overlay-a", a_record)
+        b_repo = _repo_with_manifest(r16_root, "overlay-b", b_record)
+        try:
+            wr.resolve_overlay(control_16, {"fixture-a": a_repo, "fixture-b": b_repo},
+                               "shadow", None, {}, None)
+        except wr.ResolutionError as error:
+            assert error.kind == "DependencyConflict", f"R16: {error.kind}"
+            assert error.consumer_edge == "fixture-b->fixture-provider", "R16: edge"
+        else:
+            raise AssertionError("R16: incompatible contract pair accepted")
+        # order independence: swapping the overlay application order must not
+        # change the verdict (sorted application inside _effective_lock).
+        try:
+            wr.resolve_overlay(control_16, {"fixture-b": b_repo, "fixture-a": a_repo},
+                               "shadow", None, {}, None)
+        except wr.ResolutionError as error:
+            assert error.kind == "DependencyConflict", "R16: order changed the verdict"
+        else:
+            raise AssertionError("R16: order changed the verdict (accepted)")
+
+        # R17: clean overlay of one node -> distinct effective generation,
+        # repository-manifest origin, validated edges; the control lock is
+        # NEVER mutated; an unknown overlay node is typed.
+        r17_root = root / "r17"
+        r17_root.mkdir()
+        control_17, lock_17 = _fixture_workspace(r17_root)
+        a_repo_17 = _repo_with_manifest(r17_root, "overlay-a17", a_record)
+        receipt_17 = wr.resolve_overlay(control_17, {"fixture-a": a_repo_17},
+                                        "shadow", None, {}, None)
+        assert receipt_17["effective_generation"] != receipt_17["base_generation"], (
+            "R17: overlay must derive a distinct effective generation"
+        )
+        node_17 = [n for n in receipt_17["nodes"] if n["id"] == "fixture-a"][0]
+        assert node_17["declaration_origin"] == "repository-manifest", "R17: origin"
+        assert all(edge["validated"] for edge in receipt_17["edges"]), "R17: edges"
+        assert (control_17 / "workspace.lock.json").read_text(encoding="utf-8") == \
+               json.dumps(lock_17, indent=2) + "\n", "R17: overlay mutated the control lock"
+        try:
+            wr.resolve_overlay(control_17, {"fixture-nope": a_repo_17}, "shadow", None, {}, None)
+        except wr.ResolutionError as error:
+            assert error.kind == "UnknownNode", "R17: unknown overlay node"
+        else:
+            raise AssertionError("R17: unknown overlay node accepted")
+
+        # R18: adapter emission — deterministic bytes, resolved roots, the
+        # anti-spoof guard (a provider target existing without the workspace
+        # materialization is FATAL), and typed failure when a projected
+        # provider has no checkout.
+        r18_root = root / "r18"
+        r18_root.mkdir()
+        control_18, _ = _fixture_workspace(r18_root)
+        provider_repo_18 = r18_root / "fixture-provider"  # built by _fixture_workspace
+        a_repo_18 = _repo_with_manifest(r18_root, "overlay-a18", a_record)
+        out_dir_18 = r18_root / "ad"
+        receipt_18 = wr.emit_adapter(
+            control_18, "fixture-a", a_repo_18, "shadow", None,
+            {"fixture-provider": str(provider_repo_18)}, None, out_dir_18)
+        adapter_text = Path(receipt_18["adapter_path"]).read_text(encoding="utf-8")
+        assert wr.ADAPTER_CMAKE_SCHEMA_TAG in adapter_text, "R18: schema tag"
+        assert 'set(QIVEN_WORKSPACE_PROVIDER_ROOT_fixture_provider "' in adapter_text, "R18: root"
+        assert "message(FATAL_ERROR" in adapter_text and "target-presence spoof" in adapter_text, (
+            "R18: anti-spoof guard missing"
+        )
+        assert "EXCLUDE_FROM_ALL" in adapter_text, "R18: singleton materialization"
+        assert "qiven_workspace_materialize" in adapter_text, "R18: guard function"
+        assert receipt_18["operation_projection_digest"].startswith("sha256:"), "R18: digest"
+        assert receipt_18["target_repository"] == "fixture-a", "R18: target"
+        # determinism: identical inputs -> identical adapter bytes
+        receipt_18b = wr.emit_adapter(
+            control_18, "fixture-a", a_repo_18, "shadow", None,
+            {"fixture-provider": str(provider_repo_18)}, None, out_dir_18)
+        assert receipt_18b["adapter_sha256"] == receipt_18["adapter_sha256"], "R18: determinism"
+        # typed failure: projected provider without a checkout
+        try:
+            wr.emit_adapter(control_18, "fixture-a", a_repo_18, "shadow", None, {}, None, out_dir_18)
+        except wr.ResolutionError as error:
+            assert error.kind == "RevisionUnavailable", f"R18: {error.kind}"
+        else:
+            raise AssertionError("R18: missing provider checkout accepted")
+
+        # R19: lock-update — the WR-3 cutover transaction helper. Move the
+        # provider to a repository-manifest revision; the emitted lock +
+        # declaration cache round-trip: written into a control copy, it
+        # re-validates with a matching generation reading the moved node's
+        # declaration from the CACHE (no checkout of that node).
+        r19_root = root / "r19"
+        r19_root.mkdir()
+        control_19, _ = _fixture_workspace(r19_root)
+        provider_record = _record("fixture-provider", [{"contract": PROVIDER_V1}], [])
+        provider_repo_19 = _repo_with_manifest(r19_root, "moved-provider", provider_record)
+        receipt_19 = wr.lock_update(control_19, {"fixture-provider": provider_repo_19},
+                                    "shadow", None)
+        assert receipt_19["new_generation"] != receipt_19["base_generation"], "R19: generation moved"
+        assert receipt_19["changed_nodes"][0]["declaration_origin"] == "repository-manifest", "R19: origin"
+        node_19 = receipt_19["new_lock"]["nodes"]["fixture-provider"]
+        assert node_19["declaration"]["origin"] == "repository-manifest", "R19: lock node origin"
+        assert node_19["declaration"]["shadow_only"] is False, "R19: not shadow"
+        cache_19 = receipt_19["declaration_cache"][0]
+        assert cache_19["path"] == "declarations/fixture-provider.json", "R19: cache path"
+        control_19b = r19_root / "control-copy"
+        import shutil as _shutil
+        _shutil.copytree(control_19, control_19b)
+        (control_19b / "workspace.lock.json").write_text(
+            json.dumps(receipt_19["new_lock"], indent=2, sort_keys=True) + "\n",
+            encoding="utf-8", newline="\n")
+        cache_dir = control_19b / "declarations"
+        cache_dir.mkdir()
+        for cache_path, cache_text in receipt_19["_cache_files"].items():
+            (control_19b / cache_path).write_text(cache_text, encoding="utf-8", newline="\n")
+        _git(["add", "-A"], control_19b)
+        _git(["commit", "-q", "-m", "fixture lock transaction"], control_19b)
+        receipt_19b = wr.resolve(control_19b, {}, None, "shadow", None)
+        assert receipt_19b["workspace_generation"] == receipt_19["new_generation"], (
+            "R19: emitted lock fails its own generation check"
+        )
+        node_19b = [n for n in receipt_19b["nodes"] if n["id"] == "fixture-provider"][0]
+        assert node_19b["declaration_origin"] == "repository-manifest", "R19: cache-loaded origin"
+        # a TAMPERED cache (content != locked blob) fails typed
+        (control_19b / "declarations" / "fixture-provider.json").write_text(
+            json.dumps(provider_record | {"note": "tampered"}, indent=2) + "\n",
+            encoding="utf-8", newline="\n")
+        _git(["add", "-A"], control_19b)
+        _git(["commit", "-q", "-m", "tamper cache"], control_19b)
+        try:
+            wr.resolve(control_19b, {}, None, "shadow", None)
+        except wr.ResolutionError as error:
+            assert error.kind == "DeclarationBlobMismatch", f"R19: tamper {error.kind}"
+        else:
+            raise AssertionError("R19: tampered cache accepted")
+
+        # R20: overlay hygiene — dirty overlay checkout is typed DirtyDependency
+        # in authoritative mode, labeled (not fatal) in shadow; a manifest
+        # declaring the wrong repository is a typed mismatch.
+        r20_root = root / "r20"
+        r20_root.mkdir()
+        control_20, _ = _fixture_workspace(r20_root)
+        a_repo_20 = _repo_with_manifest(r20_root, "overlay-a20", a_record)
+        dirty_file = a_repo_20 / "dirty-marker.txt"
+        dirty_file.write_text("uncommitted\n", encoding="utf-8")
+        receipt_20 = wr.resolve_overlay(control_20, {"fixture-a": a_repo_20},
+                                        "shadow", None, {}, None)
+        assert receipt_20["overlays"]["fixture-a"]["state"] == "dirty-labeled", "R20: shadow label"
+        try:
+            wr.resolve_overlay(control_20, {"fixture-a": a_repo_20}, "authoritative", None, {}, None)
+        except wr.ResolutionError as error:
+            assert error.kind == "DirtyDependency", f"R20: {error.kind}"
+        else:
+            raise AssertionError("R20: dirty authoritative overlay accepted")
+        dirty_file.unlink()
+        wrong_record = _record("fixture-not-a", [{"contract": "qiven-a-api-v1"}], [])
+        wrong_repo = _repo_with_manifest(r20_root, "overlay-wrong", wrong_record)
+        try:
+            wr.resolve_overlay(control_20, {"fixture-a": wrong_repo}, "shadow", None, {}, None)
+        except wr.ResolutionError as error:
+            assert error.kind == "DeclarationRepositoryMismatch", f"R20: {error.kind}"
+        else:
+            raise AssertionError("R20: mismatched repository manifest accepted")
+
+
         # R10: preflight end-to-end through the LOCKED devkit resolver binary.
         fixture_devkit = root / "qiven-devkit"
         (fixture_devkit / "tools").mkdir(exist_ok=True)
@@ -392,7 +573,7 @@ def main() -> int:
         assert preflight_receipt["workspace_generation"] == lock_r10["generation"], "R10: generation"
         assert preflight_receipt["released"] is True and preflight_receipt["shadow_only"] is True, "R10: release flags"
 
-    print("[ OK ] workspace-resolver self-test (R1-R15)")
+    print("[ OK ] workspace-resolver self-test (R1-R20)")
     return 0
 
 
