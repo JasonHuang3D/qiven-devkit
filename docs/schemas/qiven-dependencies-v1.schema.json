@@ -28,7 +28,7 @@
         "properties": {
           "contract": {
             "type": "string",
-            "pattern": "^qiven-[a-z0-9-]+-v[0-9]+$"
+            "pattern": "^qiven-[a-z0-9-]+-v[0-9]+(-[a-z0-9-]+)?$"
           },
           "targets": {
             "type": "array",
@@ -69,7 +69,7 @@
           },
           "contract": {
             "type": "string",
-            "pattern": "^qiven-[a-z0-9-]+-v[0-9]+$"
+            "pattern": "^qiven-[a-z0-9-]+-v[0-9]+(-[a-z0-9-]+)?$"
           },
           "platform": {
             "type": "string",

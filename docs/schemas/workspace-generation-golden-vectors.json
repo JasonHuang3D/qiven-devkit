@@ -1,0 +1,104 @@
+{
+  "schema": "qiven-workspace-generation-golden-vectors-v1",
+  "sealed": "2026-09-25",
+  "law": "WorkspaceGeneration digest = sha256( 'qiven-workspace-generation-v1' + 0x00 + RFC8785-canonical( {'lock': <lock sans generation>, 'manifest': <manifest>} ) ); declaration digest = sha256( 'qiven-dependency-declaration-v1' + 0x00 + canonical(record) ). Expected values below were computed by two independent implementations (hand-rolled serializer vs stdlib json.dumps composition) and cross-checked against certutil for G1; any future implementation must reproduce them byte-exactly.",
+  "jcs_vectors": [
+    { "id": "V1", "value": { "a": 1, "b": null }, "expected": "{\"a\":1,\"b\":null}" },
+    { "id": "V2", "value": { "b": 1, "a": 2 }, "expected": "{\"a\":2,\"b\":1}" },
+    { "id": "V3", "value": { "\uffff": 1, "\ud800\udc00": 2 }, "expected": "{\"𐀀\":2,\"￿\":1}" },
+    { "id": "V4", "value": { "s": "a\"b\\c\nd\te" }, "expected": "{\"s\":\"a\\\"b\\\\c\\nd\\te\"}" },
+    { "id": "V5", "value": { "s": "\u0001" }, "expected": "{\"s\":\"\\u0001\"}" },
+    { "id": "V6", "value": { "k": "é" }, "expected": "{\"k\":\"é\"}" },
+    { "id": "V7", "value": [0, -1, 42], "expected": "[0,-1,42]" },
+    { "id": "V8", "value": { "z": [ { "b": 1, "a": [] } ], "y": {} }, "expected": "{\"y\":{},\"z\":[{\"a\":[],\"b\":1}]}" },
+    { "id": "V9", "value": [true, false, null], "expected": "[true,false,null]" }
+  ],
+  "generation_vectors": [
+    {
+      "id": "G1",
+      "manifest": {
+        "schema": "qiven-workspace-v1",
+        "workspace_id": "fixture",
+        "repositories": { "fixture-a": { "url": "https://github.com/O/fixture-a.git" } }
+      },
+      "lock": {
+        "schema": "qiven-workspace-lock-v1",
+        "workspace_id": "fixture",
+        "nodes": {
+          "fixture-a": {
+            "commit": "0000000000000000000000000000000000000000",
+            "tree": "1111111111111111111111111111111111111111",
+            "declaration": {
+              "origin": "leaf",
+              "digest": "sha256:255a5e8d8c8f54120948c9cf7f1a28c7fde2596d9c22983f391db27564237a0d",
+              "shadow_only": false
+            }
+          }
+        }
+      },
+      "expected_generation": "sha256:ee7f691520fc282077e405c6eea2c4701802a2bf926f4d77ee8145acc6f1b19c"
+    },
+    {
+      "id": "G2-key-order-independence",
+      "manifest": {
+        "repositories": { "fixture-a": { "url": "https://github.com/O/fixture-a.git" } },
+        "workspace_id": "fixture",
+        "schema": "qiven-workspace-v1"
+      },
+      "lock": {
+        "nodes": {
+          "fixture-a": {
+            "declaration": {
+              "shadow_only": false,
+              "digest": "sha256:255a5e8d8c8f54120948c9cf7f1a28c7fde2596d9c22983f391db27564237a0d",
+              "origin": "leaf"
+            },
+            "tree": "1111111111111111111111111111111111111111",
+            "commit": "0000000000000000000000000000000000000000"
+          }
+        },
+        "workspace_id": "fixture",
+        "schema": "qiven-workspace-lock-v1"
+      },
+      "expected_generation": "sha256:ee7f691520fc282077e405c6eea2c4701802a2bf926f4d77ee8145acc6f1b19c"
+    },
+    {
+      "id": "G3-generation-field-excluded",
+      "manifest": {
+        "schema": "qiven-workspace-v1",
+        "workspace_id": "fixture",
+        "repositories": { "fixture-a": { "url": "https://github.com/O/fixture-a.git" } }
+      },
+      "lock": {
+        "schema": "qiven-workspace-lock-v1",
+        "workspace_id": "fixture",
+        "generation": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "nodes": {
+          "fixture-a": {
+            "commit": "0000000000000000000000000000000000000000",
+            "tree": "1111111111111111111111111111111111111111",
+            "declaration": {
+              "origin": "leaf",
+              "digest": "sha256:255a5e8d8c8f54120948c9cf7f1a28c7fde2596d9c22983f391db27564237a0d",
+              "shadow_only": false
+            }
+          }
+        }
+      },
+      "expected_generation": "sha256:ee7f691520fc282077e405c6eea2c4701802a2bf926f4d77ee8145acc6f1b19c"
+    }
+  ],
+  "declaration_vectors": [
+    {
+      "id": "D1-leaf-record",
+      "declaration": {
+        "schema": "qiven-dependencies-v1",
+        "repository": "fixture-a",
+        "supported_platforms": ["windows"],
+        "provides": [],
+        "dependencies": []
+      },
+      "expected_declaration_digest": "sha256:255a5e8d8c8f54120948c9cf7f1a28c7fde2596d9c22983f391db27564237a0d"
+    }
+  ]
+}

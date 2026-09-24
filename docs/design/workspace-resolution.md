@@ -1,10 +1,13 @@
 # Workspace Resolution — Devkit Design Landing
 
-Status: accepted program (ADR-0052, qiven-context 2026-09-24); **WR-0
-DELIVERED 2026-09-24, awaiting owner review** (see
-[`workspace-resolution/wr0-report.md`](workspace-resolution/wr0-report.md));
-WR-1+ remains owner-gated. This document is the Devkit-side landing of
-the accepted architecture; the normative program documents are the
+Status: accepted program (ADR-0052, qiven-context 2026-09-24); WR-0
+DELIVERED and **owner-accepted 2026-09-25 with WR-1 authorized** (see
+[`workspace-resolution/wr0-report.md`](workspace-resolution/wr0-report.md)).
+WR-1 is landing: schema family + strict validator (PR #35), resolver
+with golden vectors (this batch), bootstrap contract test, and the
+qiven-workspace control repository in shadow mode. Authoritative use
+stays gated on the owner-accepted control-repository trust policy
+(doc 02 §2 WR-1 / §7.7). The normative program documents are the
 single source of truth:
 
 - qiven-docs `accepted/2026-09-24/00-qiven-workspace-dependency-resolution-program.md`
