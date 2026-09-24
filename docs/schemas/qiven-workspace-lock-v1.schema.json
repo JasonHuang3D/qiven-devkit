@@ -1,0 +1,78 @@
+{
+  "title": "qiven-workspace-lock-v1",
+  "description": "Workspace lock: one immutable validated revision snapshot (accepted architecture doc 01 section 1.4). The generation digest is computed over the canonical encoding of the manifest plus this lock WITHOUT the generation field (RFC 8785 subset, domain prefix, SHA-256; architecture doc 01 section 10). census-wr0 declarations are shadow-only by construction and can never authorize an authoritative graph receipt or a class cutover.",
+  "type": "object",
+  "const_schema": "qiven-workspace-lock-v1",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "qiven-workspace-lock-v1"
+    },
+    "workspace_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "minLength": 1
+    },
+    "generation": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nodes": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "commit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "tree": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "platform": {
+            "type": "string",
+            "enum": ["windows"]
+          },
+          "declaration": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "enum": ["census-wr0", "repository-manifest", "leaf"]
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "blob": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "shadow_only": {
+                "type": "boolean"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": ["origin", "digest", "shadow_only"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["commit", "tree", "declaration"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["schema", "workspace_id", "generation", "nodes"],
+  "additionalProperties": false
+}

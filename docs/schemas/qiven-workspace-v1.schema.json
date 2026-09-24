@@ -1,0 +1,45 @@
+{
+  "title": "qiven-workspace-v1",
+  "description": "Workspace manifest: the allowed node universe and stable repository identity (accepted architecture doc 01 section 1.3; WR-1 landing per ADR-0052). Edges stay owned by the repositories that require them; this manifest is not an architecture document.",
+  "type": "object",
+  "const_schema": "qiven-workspace-v1",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "qiven-workspace-v1"
+    },
+    "workspace_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "minLength": 1
+    },
+    "repositories": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git$"
+          },
+          "platform": {
+            "type": "string",
+            "enum": ["windows"]
+          },
+          "selection": {
+            "type": "string",
+            "enum": ["only-when-referenced"]
+          }
+        },
+        "required": ["url"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["schema", "workspace_id", "repositories"],
+  "additionalProperties": false
+}

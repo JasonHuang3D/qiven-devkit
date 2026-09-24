@@ -65,6 +65,12 @@
         "{python}",
         "tools/hook_exec_router_test.py"
       ]
+    },
+    "workspace-schemas-tests": {
+      "argv": [
+        "{python}",
+        "tools/workspace_schemas_test.py"
+      ]
     }
   },
   "gates": {
@@ -74,6 +80,7 @@
       "adoption-missing-sync",
       "operator-tests",
       "router-tests",
+      "workspace-schemas-tests",
       "commit-subjects",
       "devkit-regression",
       "diff-check",

@@ -1,0 +1,111 @@
+{
+  "title": "qiven-dependencies-v1",
+  "description": "Repository dependency manifest (.qiven/dependencies.json): provided contracts and required semantic dependency edges at an exact source revision (accepted architecture doc 01 section 1.2). Not local paths, not exact workspace peer commits. A selected provider revision must declare a matching provision; legacy_consumer_pin records WR-0 census evidence only and is not a selection mechanism.",
+  "type": "object",
+  "const_schema": "qiven-dependencies-v1",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "qiven-dependencies-v1"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "supported_platforms": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["windows"]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "provides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "contract": {
+            "type": "string",
+            "pattern": "^qiven-[a-z0-9-]+-v[0-9]+$"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^qiven::[a-z0-9_:.-]+$"
+            },
+            "uniqueItems": true
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            },
+            "uniqueItems": true
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": ["contract"],
+        "additionalProperties": false
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["first-party-source", "tooling", "toolchain", "third-party-singleton"]
+          },
+          "contract": {
+            "type": "string",
+            "pattern": "^qiven-[a-z0-9-]+-v[0-9]+$"
+          },
+          "platform": {
+            "type": "string",
+            "enum": ["windows"]
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            },
+            "uniqueItems": true
+          },
+          "legacy_consumer_pin": {
+            "type": "object",
+            "properties": {
+              "sha": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$"
+              },
+              "equals_lock_node": {
+                "type": "boolean"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": ["sha"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "kind"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["schema", "repository", "supported_platforms", "provides", "dependencies"],
+  "additionalProperties": false
+}
