@@ -10,21 +10,21 @@
     },
     "workspace_id": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]*$",
+      "pattern": "^[a-z][a-z0-9-]*\\Z",
       "minLength": 1
     },
     "repositories": {
       "type": "object",
       "propertyNames": {
         "type": "string",
-        "pattern": "^[a-z][a-z0-9-]*$"
+        "pattern": "^[a-z][a-z0-9-]*\\Z"
       },
       "additionalProperties": {
         "type": "object",
         "properties": {
           "url": {
             "type": "string",
-            "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git$"
+            "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git\\Z"
           },
           "platform": {
             "type": "string",

@@ -67,6 +67,12 @@ not applicable (no CA-1 source lock exists yet), not silently skipped.
   main advanced during WR-2 (PRs E/F); the first lock movement needs
   the owner-ratified advance rule or explicit re-admission. Shadow
   comparison is snapshot-based and unaffected.
+- The lock's qiven-context node is likewise a WR-1-window snapshot
+  (`8914cef`) while context main has since advanced (currently `9dea2f1`);
+  same class of disclosure as the devkit node snapshot above — shadow
+  comparison is snapshot-based and unaffected, and the next context lock
+  movement falls under the same pending routine-advance rule (or explicit
+  re-admission).
 - The `[CONF]` console marker means "not equality" broadly; the
   `no-legacy-selection` verdict is a mechanism-replacement note, not a
   conflict (the JSON verdicts are authoritative).

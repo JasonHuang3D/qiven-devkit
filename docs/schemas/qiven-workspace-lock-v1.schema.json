@@ -10,29 +10,29 @@
     },
     "workspace_id": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]*$",
+      "pattern": "^[a-z][a-z0-9-]*\\Z",
       "minLength": 1
     },
     "generation": {
       "type": "string",
-      "pattern": "^sha256:[0-9a-f]{64}$"
+      "pattern": "^sha256:[0-9a-f]{64}\\Z"
     },
     "nodes": {
       "type": "object",
       "propertyNames": {
         "type": "string",
-        "pattern": "^[a-z][a-z0-9-]*$"
+        "pattern": "^[a-z][a-z0-9-]*\\Z"
       },
       "additionalProperties": {
         "type": "object",
         "properties": {
           "commit": {
             "type": "string",
-            "pattern": "^[0-9a-f]{40}$"
+            "pattern": "^[0-9a-f]{40}\\Z"
           },
           "tree": {
             "type": "string",
-            "pattern": "^[0-9a-f]{40}$"
+            "pattern": "^[0-9a-f]{40}\\Z"
           },
           "platform": {
             "type": "string",
@@ -51,11 +51,11 @@
               },
               "blob": {
                 "type": "string",
-                "pattern": "^[0-9a-f]{40}$"
+                "pattern": "^[0-9a-f]{40}\\Z"
               },
               "digest": {
                 "type": "string",
-                "pattern": "^sha256:[0-9a-f]{64}$"
+                "pattern": "^sha256:[0-9a-f]{64}\\Z"
               },
               "shadow_only": {
                 "type": "boolean"

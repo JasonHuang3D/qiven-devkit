@@ -2,12 +2,22 @@
 
 Runs Workspace Resolution in shadow mode against the control lock, then
 extracts every LEGACY revision selection the consumer repositories
-actually enforce today (CMake pinned-SHA variables, the context
-devkit_pin, managed operator snapshots) and compares them with the lock
-node selections, per dependency class. Emits a machine-readable shadow
-report (doc 02 section 2 WR-2): per-class equality or typed shadow
-conflict — a mismatch fails THAT class's migration gate and never
-invalidates an unrelated legacy operation.
+actually enforce today and compares them with the lock node selections,
+per dependency class. Emits a machine-readable shadow report (doc 02
+section 2 WR-2): per-class equality or typed shadow conflict — a mismatch
+fails THAT class's migration gate and never invalidates an unrelated
+legacy operation.
+
+Extraction scope, recorded honestly: the consumer set is derived from
+the control census (every census node declaring at least one dependency
+edge — never hardcoded); pins are read from each consumer's ROOT
+CMakeLists.txt in the quoted set(VARIABLE "40-hex-sha") form, from the
+.qiven/operator.json devkit_pin, and managed operator snapshots
+(operator.json without a devkit_pin in a managed-snapshot repository).
+Other pin mechanisms (unquoted set forms, non-root files, other config
+systems) are out of scope. A census-declared consumer without a checkout
+under the workspace root is a typed MissingConsumer failure: its pins
+are cutover evidence and must never be silently skipped.
 
 Exit codes: 0 report produced (shadow conflicts are per-class gates,
 not run failures) / 1 typed tool failure / 2 usage or environment error.
@@ -67,14 +77,6 @@ _REPLACEMENT_STAGE = {
     "qiven-docs": "WR-7",
 }
 
-_CONSUMERS = [
-    "qiven-runtime",
-    "qiven-context-draft",
-    "qiven-math",
-    "qiven-context",
-    "qiven-foundation",
-]
-
 
 class ShadowError(Exception):
     def __init__(self, kind: str, message: str) -> None:
@@ -123,13 +125,38 @@ def extract_devkit_pin(repo_root: Path) -> str | None:
     return pin
 
 
-def collect_legacy_selections(workspace_root: Path) -> dict[str, list[dict[str, Any]]]:
+def _census_consumers(control: Path) -> list[str]:
+    """Consumers = every census node declaring at least one dependency edge.
+
+    Derived from the control repository's census declaration (the same
+    document the resolver validates), never from a hardcoded repo list:
+    the shadow evidence set must track the declared graph, not a stale
+    copy of it.
+    """
+    census_path = control / "census" / "wr0-declarations.json"
+    try:
+        census = json.loads(census_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ShadowError("CensusUnreadable", f"{census_path}: {error}") from error
+    nodes = census.get("nodes", {}) if isinstance(census, dict) else {}
+    return sorted(
+        node_id for node_id, record in nodes.items()
+        if isinstance(record, dict) and record.get("dependencies")
+    )
+
+
+def collect_legacy_selections(control: Path, workspace_root: Path) -> dict[str, list[dict[str, Any]]]:
     """provider-id -> list of {consumer, kind, selection} legacy facts."""
     legacy: dict[str, list[dict[str, Any]]] = {}
-    for consumer in _CONSUMERS:
+    for consumer in _census_consumers(control):
         repo_root = workspace_root / consumer
         if not repo_root.is_dir():
-            continue
+            raise ShadowError(
+                "MissingConsumer",
+                f"consumer {consumer} declared in the census has no checkout under "
+                f"{workspace_root}; its legacy selections are cutover evidence "
+                "and cannot be skipped",
+            )
         for provider, sha in extract_cmake_pins(repo_root).items():
             legacy.setdefault(provider, []).append(
                 {"consumer": consumer, "kind": "cmake-pin", "selection": sha}
@@ -212,7 +239,7 @@ def build_report(control: Path, workspace_root: Path) -> dict[str, Any]:
     # no checkout verification (a locator is not needed for pin comparison).
     receipt = wr.resolve(control, {}, None, "shadow", None)
     lock = ws.load_strict(control / "workspace.lock.json")
-    legacy = collect_legacy_selections(workspace_root)
+    legacy = collect_legacy_selections(control, workspace_root)
     classes = compare_classes(lock, legacy)
 
     temporary_records = [

@@ -84,7 +84,13 @@ def _jcs_string(value: str) -> str:
 def _sort_key_utf16(key: str) -> bytes:
     # RFC 8785 sorts property names by their UTF-16 code units, not by
     # code point; utf-16-be byte order reproduces that ordering exactly.
-    return key.encode("utf-16-be")
+    try:
+        return key.encode("utf-16-be")
+    except UnicodeEncodeError as error:
+        raise ResolutionError(
+            "CanonicalEncoding",
+            f"object key is not encodable UTF-16 (surrogate?): {error}",
+        ) from error
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -120,7 +126,8 @@ def canonical_bytes_reference(value: Any) -> bytes:
 
     Required by the golden-vector law: two independently written code paths
     must agree byte-for-byte. This one builds leaves with json.dumps and
-    only owns the UTF-16 key ordering and structural composition itself.
+    owns the UTF-16 key ordering (inlined below, deliberately NOT shared
+    with _sort_key_utf16) and the structural composition itself.
     """
     if value is None or isinstance(value, (bool, int, str)):
         dumps = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -129,7 +136,7 @@ def canonical_bytes_reference(value: Any) -> bytes:
         return b"[" + b",".join(canonical_bytes_reference(item) for item in value) + b"]"
     if isinstance(value, dict):
         parts = []
-        for key in sorted(value, key=_sort_key_utf16):
+        for key in sorted(value, key=lambda k: k.encode("utf-16-be")):
             key_text = json.dumps(key, ensure_ascii=False)
             parts.append(key_text.encode("utf-8") + b":" + canonical_bytes_reference(value[key]))
         return b"{" + b",".join(parts) + b"}"
@@ -206,15 +213,22 @@ def _verify_checkout(node_id: str, checkout: Path, node: dict, strict_clean: boo
 # ---------------------------------------------------------------------------
 
 def _load_validated(control: Path) -> tuple[dict, dict]:
-    try:
-        manifest = schemas.load_strict(control / "workspace.json")
-        lock = schemas.load_strict(control / "workspace.lock.json")
-    except FileNotFoundError as error:
-        raise ResolutionError(
-            "WorkspaceNotFound", f"no workspace control data at {control}: {error}"
-        ) from error
-    except schemas.SchemaError as error:
-        raise ResolutionError(error.error_type, error.message) from error
+    def _load(name: str) -> Any:
+        try:
+            return schemas.load_strict(control / name)
+        except FileNotFoundError as error:
+            raise ResolutionError(
+                "WorkspaceNotFound", f"no workspace control data at {control}: {error}"
+            ) from error
+        except json.JSONDecodeError as error:
+            raise ResolutionError(
+                "SchemaViolation", f"malformed JSON in {name}: {error}"
+            ) from error
+        except schemas.SchemaError as error:
+            raise ResolutionError(error.error_type, error.message) from error
+
+    manifest = _load("workspace.json")
+    lock = _load("workspace.lock.json")
     for instance, schema_name in (
         (manifest, "qiven-workspace-v1.schema.json"),
         (lock, "qiven-workspace-lock-v1.schema.json"),
@@ -524,10 +538,10 @@ def validate_candidate(control: Path, manifest_path: Path) -> dict:
     """Validate a candidate dependency declaration against the base lock.
 
     The base graph must itself validate (its receipt is included); the
-    candidate never reuses the base proof — every incoming edge of the
-    candidate is checked against the lock's nodes and provisions, and a
-    failure produces a candidate-specific typed receipt while the base
-    receipt stays valid.
+    candidate never reuses the base proof — every incoming contract and
+    package edge of the candidate is checked against the lock's nodes and
+    provisions, and a failure produces a candidate-specific typed receipt
+    while the base receipt stays valid.
     """
     base = resolve(control, {}, None, "shadow", None)
     lock = schemas.load_strict(control / "workspace.lock.json")
@@ -560,6 +574,10 @@ def validate_candidate(control: Path, manifest_path: Path) -> dict:
         node_id: {p["contract"] for p in record.get("provides", [])}
         for node_id, record in records.items()
     }
+    provided_packages = {
+        node_id: {pkg for p in record.get("provides", []) for pkg in p.get("packages", [])}
+        for node_id, record in records.items()
+    }
 
     failures: list[dict] = []
     for dep in candidate.get("dependencies", []):
@@ -577,6 +595,12 @@ def validate_candidate(control: Path, manifest_path: Path) -> dict:
                 "message": f"edge {edge}: candidate requires {contract}; "
                            f"provider provides {sorted(provisions[dep['id']]) or ['<nothing>']}",
             })
+        for package in dep.get("packages", []):
+            if package not in provided_packages[dep["id"]]:
+                failures.append({
+                    "type": "DependencyConflict", "consumer_edge": edge, "node": dep["id"],
+                    "message": f"edge {edge}: package {package} not provided by {dep['id']}",
+                })
     return {
         "schema": CANDIDATE_SCHEMA,
         "candidate_repository": candidate["repository"],
@@ -698,6 +722,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except ResolutionError as error:
         payload = {"schema": ERROR_SCHEMA, "error": error.as_dict()}
+        print(json.dumps(payload, sort_keys=True) if args.json else f"[FAIL] {error}")
+        return 1
+    except json.JSONDecodeError as error:
+        # safety net: malformed JSON anywhere in the control tree is typed,
+        # never a bare traceback through the CLI
+        payload = {"schema": ERROR_SCHEMA, "error": {
+            "type": "SchemaViolation", "message": f"malformed JSON: {error}"}}
         print(json.dumps(payload, sort_keys=True) if args.json else f"[FAIL] {error}")
         return 1
     except schemas.SchemaError as error:

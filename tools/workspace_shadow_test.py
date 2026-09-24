@@ -45,9 +45,16 @@ def _record(repository: str, provides: list, dependencies: list) -> dict:
 
 
 def _fixture(root: Path, *, runtime_foundation_pin: str | None = None,
-             context_devkit_pin: str | None = None,
-             managed_snapshots: bool = True) -> Path:
-    """Control repo + consumer repos with real legacy pin artifacts."""
+             devkit_pin: str | None = None,
+             managed_snapshots: bool = True,
+             create_runtime: bool = True) -> Path:
+    """Control repo + consumer repos with real legacy pin artifacts.
+
+    Consumers derive from the census (only qiven-runtime declares a
+    dependency edge), so the operator.json pin artifacts ride on the
+    qiven-runtime consumer checkout. create_runtime=False builds the SH8
+    shape: the census declares the consumer but its checkout is absent.
+    """
     provider_repo, provider_commit, provider_tree = _make_repo(root, "qiven-foundation", {
         "CMakeLists.txt": "cmake_minimum_required(VERSION 3.20)\n",
     })
@@ -60,34 +67,27 @@ def _fixture(root: Path, *, runtime_foundation_pin: str | None = None,
         pin_block = f'set(QIVEN_FOUNDATION_PINNED_SHA "{provider_commit}")\n'
     elif runtime_foundation_pin:
         pin_block = f'set(QIVEN_FOUNDATION_PINNED_SHA "{runtime_foundation_pin}")\n'
-    _make_repo(root, "qiven-runtime", {
+    runtime_files: dict[str, str] = {
         "CMakeLists.txt": (
             "cmake_minimum_required(VERSION 3.20)\n"
             f"{pin_block}"
             'set(QIVEN_DRAFT_PINNED_SHA "' + "e" * 40 + '")\n'
         ),
-    })
+    }
+    if devkit_pin:
+        runtime_files[".qiven/operator.json"] = json.dumps({
+            "schema_version": 1, "repository_name": "qiven-runtime",
+            "devkit_pin": devkit_pin,
+        }, indent=2) + "\n"
+    elif managed_snapshots:
+        runtime_files[".qiven/operator.json"] = json.dumps({
+            "schema_version": 1, "repository_name": "qiven-runtime",
+        }, indent=2) + "\n"
+    if create_runtime:
+        _make_repo(root, "qiven-runtime", runtime_files)
     runtime_entry = _record("qiven-runtime", [{"contract": "qiven-runtime-api-v1"}], [
         {"id": "qiven-foundation", "kind": "first-party-source", "contract": FOUNDATION_V1},
     ])
-    if context_devkit_pin:
-        _make_repo(root, "qiven-context", {
-            ".qiven/operator.json": json.dumps({
-                "schema_version": 1, "repository_name": "qiven-context",
-                "devkit_pin": context_devkit_pin,
-            }, indent=2) + "\n",
-        })
-    elif managed_snapshots:
-        _make_repo(root, "qiven-context", {
-            ".qiven/operator.json": json.dumps({
-                "schema_version": 1, "repository_name": "qiven-context",
-            }, indent=2) + "\n",
-        })
-        _make_repo(root, "qiven-math", {
-            ".qiven/operator.json": json.dumps({
-                "schema_version": 1, "repository_name": "qiven-math",
-            }, indent=2) + "\n",
-        })
 
     declarations = {"schema": "qiven-wr0-census-declarations-v1", "nodes": {
         "qiven-devkit": _record("qiven-devkit", [{"contract": DEVKIT_CONTRACT}], []),
@@ -153,7 +153,7 @@ def main() -> int:
         root2 = root / "sh1"
         root2.mkdir()
         control = _fixture(root2, runtime_foundation_pin="LOCKED",
-                           context_devkit_pin=None, managed_snapshots=False)
+                           devkit_pin=None, managed_snapshots=False)
         report = sh.build_report(control, root2)
         foundation = _class(report, "qiven-foundation")
         assert foundation["verdict"] == "equality" and foundation["cutover_eligible"] is True, (
@@ -166,7 +166,7 @@ def main() -> int:
         root3 = root / "sh2"
         root3.mkdir()
         control3 = _fixture(root3, runtime_foundation_pin="9" * 40,
-                            context_devkit_pin=None, managed_snapshots=False)
+                            devkit_pin=None, managed_snapshots=False)
         report3 = sh.build_report(control3, root3)
         conflict = _class(report3, "qiven-foundation")
         assert conflict["verdict"] == "shadow-conflict" and conflict["cutover_eligible"] is False, (
@@ -179,7 +179,7 @@ def main() -> int:
         root4.mkdir()
         lock4_commit = None
         control4 = _fixture(root4, runtime_foundation_pin=None,
-                            context_devkit_pin="7" * 40, managed_snapshots=False)
+                            devkit_pin="7" * 40, managed_snapshots=False)
         report4 = sh.build_report(control4, root4)
         devkit = _class(report4, "qiven-devkit")
         assert devkit["verdict"] == "shadow-conflict" and "WR-6" in devkit["disposition"], (
@@ -190,7 +190,7 @@ def main() -> int:
         root5 = root / "sh4"
         root5.mkdir()
         control5 = _fixture(root5, runtime_foundation_pin=None,
-                            context_devkit_pin=None, managed_snapshots=True)
+                            devkit_pin=None, managed_snapshots=True)
         report5 = sh.build_report(control5, root5)
         devkit5 = _class(report5, "qiven-devkit")
         assert devkit5["verdict"] == "shadow-discrepancy" and devkit5["cutover_eligible"] is False, (
@@ -201,7 +201,7 @@ def main() -> int:
         root6 = root / "sh5"
         root6.mkdir()
         control6 = _fixture(root6, runtime_foundation_pin=None,
-                            context_devkit_pin=None, managed_snapshots=False)
+                            devkit_pin=None, managed_snapshots=False)
         runtime_cmake = root6 / "qiven-runtime" / "CMakeLists.txt"
         runtime_cmake.write_text(
             runtime_cmake.read_text(encoding="utf-8")
@@ -232,7 +232,22 @@ def main() -> int:
         rc_fail = sh.main(["--control", str(control6), "--workspace-root", str(root6), "--json"])
         assert rc_fail == 1, "SH7: typed extraction failure must fail"
 
-    print("[ OK ] workspace-shadow self-test (SH1-SH7)")
+        # SH8: a census-declared consumer checkout missing from the
+        # workspace root is a typed MissingConsumer failure — its pins are
+        # cutover evidence and must not be silently skipped.
+        root7 = root / "sh8"
+        root7.mkdir()
+        control7 = _fixture(root7, runtime_foundation_pin=None,
+                            devkit_pin=None, managed_snapshots=False,
+                            create_runtime=False)
+        try:
+            sh.build_report(control7, root7)
+        except sh.ShadowError as error:
+            assert error.kind == "MissingConsumer", f"SH8: {error.kind}"
+        else:
+            raise AssertionError("SH8: missing consumer skipped silently")
+
+    print("[ OK ] workspace-shadow self-test (SH1-SH8)")
     return 0
 
 

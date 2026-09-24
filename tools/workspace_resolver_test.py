@@ -293,6 +293,64 @@ def main() -> int:
         error_nf = _resolve_typed(root / "fixture-provider")
         assert error_nf.kind == "WorkspaceNotFound", f"R11: {error_nf.kind}"
 
+        # R12: syntactically broken control JSON (one quote removed from the
+        # lock) is a typed SchemaViolation, never a bare traceback.
+        malformed_root = root / "r12"
+        malformed_root.mkdir()
+        control_mal, _ = _fixture_workspace(malformed_root)
+        (control_mal / "workspace.lock.json").write_text(
+            (control_mal / "workspace.lock.json").read_text(encoding="utf-8").replace(
+                '"workspace_id": "fixture-ws",', '"workspace_id: "fixture-ws",'),
+            encoding="utf-8", newline="\n")
+        _git(["add", "-A"], control_mal)
+        _git(["commit", "-q", "-m", "malformed lock"], control_mal)
+        error_mal = _resolve_typed(control_mal)
+        assert error_mal.kind == "SchemaViolation", f"R12: {error_mal.kind}"
+        assert "malformed JSON in workspace.lock.json" in error_mal.message, (
+            f"R12: file not named: {error_mal.message}"
+        )
+
+        # R13 (F6): candidate package requirements are checked — a dep whose
+        # package is not provided by the provider is a DependencyConflict
+        # failure in the candidate receipt.
+        package_candidate = root / "candidate-package.json"
+        package_candidate.write_text(json.dumps(_record("fixture-candidate", [
+            {"contract": "qiven-candidate-api-v1"},
+        ], [
+            _dep("fixture-provider", "first-party-source", PROVIDER_V1,
+                 packages=["fixture-missing-package"]),
+        ])), encoding="utf-8", newline="\n")
+        candidate_pkg = wr.validate_candidate(control, package_candidate)
+        assert candidate_pkg["candidate_validated"] is False, "R13: package gap accepted"
+        package_failures = [f for f in candidate_pkg["failures"]
+                            if f["type"] == "DependencyConflict"]
+        assert package_failures and (
+            package_failures[0]["message"] ==
+            "edge fixture-candidate->fixture-provider: package "
+            "fixture-missing-package not provided by fixture-provider"
+        ), f"R13: {candidate_pkg['failures']}"
+
+        # R14 (F5): the reference canonicalizer owns its UTF-16 key ordering
+        # (inline key function, not shared with the primary). For a BMP key
+        # vs an astral key, UTF-16 unit order is NOT code-point order (the
+        # surrogate pair 0xD83D.. sorts before 0xFF01); both implementations
+        # must still agree byte-for-byte on the UTF-16 order.
+        tricky = {"\uff01": 1, "\U0001F600": 2}
+        expected_tricky = '{"\U0001F600":2,"\uff01":1}'.encode("utf-8")
+        assert wr.canonical_bytes(tricky) == expected_tricky, "R14: primary key order"
+        assert wr.canonical_bytes_reference(tricky) == expected_tricky, (
+            "R14: reference key order"
+        )
+
+        # R15 (F8): an object key containing a lone surrogate is a typed
+        # CanonicalEncoding failure in the key branch (not a bare traceback).
+        try:
+            wr.canonical_bytes({"\ud800": 1, "a": 2})
+        except wr.ResolutionError as error:
+            assert error.kind == "CanonicalEncoding", f"R15: {error.kind}"
+        else:
+            raise AssertionError("R15: surrogate key accepted")
+
         # R10: preflight end-to-end through the LOCKED devkit resolver binary.
         fixture_devkit = root / "qiven-devkit"
         (fixture_devkit / "tools").mkdir(exist_ok=True)
@@ -334,7 +392,7 @@ def main() -> int:
         assert preflight_receipt["workspace_generation"] == lock_r10["generation"], "R10: generation"
         assert preflight_receipt["released"] is True and preflight_receipt["shadow_only"] is True, "R10: release flags"
 
-    print("[ OK ] workspace-resolver self-test (R1-R11)")
+    print("[ OK ] workspace-resolver self-test (R1-R15)")
     return 0
 
 
