@@ -89,6 +89,12 @@
         "{python}",
         "tools/workspace_shadow_test.py"
       ]
+    },
+    "workspace-profile-b-tests": {
+      "argv": [
+        "{python}",
+        "tools/workspace_profile_b_test.py"
+      ]
     }
   },
   "gates": {
@@ -102,6 +108,7 @@
       "workspace-resolver-tests",
       "workspace-bootstrap-tests",
       "workspace-shadow-tests",
+      "workspace-profile-b-tests",
       "commit-subjects",
       "devkit-regression",
       "diff-check",

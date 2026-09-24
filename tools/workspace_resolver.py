@@ -511,6 +511,83 @@ def preflight(control: Path, devkit: Path, mode: str, trust_policy: Path | None,
 
 
 # ---------------------------------------------------------------------------
+# Candidate declaration validation (sealed Profile B fixture outcome 5 /
+# Profile K counterexample; the minimal WR-2 form of the architecture
+# section 5.1 overlay: a candidate's OWN declaration is validated against
+# the base lock; full per-node revision overlays arrive with WR-3)
+# ---------------------------------------------------------------------------
+
+CANDIDATE_SCHEMA = "qiven-workspace-candidate-receipt-v1"
+
+
+def validate_candidate(control: Path, manifest_path: Path) -> dict:
+    """Validate a candidate dependency declaration against the base lock.
+
+    The base graph must itself validate (its receipt is included); the
+    candidate never reuses the base proof — every incoming edge of the
+    candidate is checked against the lock's nodes and provisions, and a
+    failure produces a candidate-specific typed receipt while the base
+    receipt stays valid.
+    """
+    base = resolve(control, {}, None, "shadow", None)
+    lock = schemas.load_strict(control / "workspace.lock.json")
+
+    try:
+        candidate = schemas.load_strict(manifest_path)
+    except FileNotFoundError as error:
+        raise ResolutionError(
+            "WorkspaceNotFound", f"candidate manifest not found: {error}"
+        ) from error
+    errors = schemas.validate(candidate, schemas.load_schema("qiven-dependencies-v1.schema.json"))
+    if errors:
+        first = errors[0]
+        raise ResolutionError(
+            "SchemaViolation",
+            f"candidate manifest: {first.error_type} at {first.path}: {first.message}",
+        ) from first
+    if candidate["repository"] in lock["nodes"]:
+        raise ResolutionError(
+            "CandidateRejected",
+            f"candidate {candidate['repository']} is already a base lock node; "
+            "an overlay for an existing node is WR-3 scope, not candidate admission",
+        )
+
+    records: dict[str, dict] = {}
+    for node_id, node in lock["nodes"].items():
+        record, _census = _load_declaration(node_id, node, control, None)
+        records[node_id] = record
+    provisions = {
+        node_id: {p["contract"] for p in record.get("provides", [])}
+        for node_id, record in records.items()
+    }
+
+    failures: list[dict] = []
+    for dep in candidate.get("dependencies", []):
+        edge = f"{candidate['repository']}->{dep['id']}"
+        if dep["id"] not in lock["nodes"]:
+            failures.append({
+                "type": "UnknownNode", "consumer_edge": edge, "node": dep["id"],
+                "message": f"edge {edge}: candidate requires a provider absent from the base lock",
+            })
+            continue
+        contract = dep.get("contract")
+        if contract is not None and contract not in provisions[dep["id"]]:
+            failures.append({
+                "type": "DependencyConflict", "consumer_edge": edge, "node": dep["id"],
+                "message": f"edge {edge}: candidate requires {contract}; "
+                           f"provider provides {sorted(provisions[dep['id']]) or ['<nothing>']}",
+            })
+    return {
+        "schema": CANDIDATE_SCHEMA,
+        "candidate_repository": candidate["repository"],
+        "base_generation": base["workspace_generation"],
+        "base_graph_valid": True,
+        "candidate_validated": not failures,
+        "failures": failures,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Golden vectors
 # ---------------------------------------------------------------------------
 
@@ -581,6 +658,11 @@ def main(argv: list[str] | None = None) -> int:
     add_common(preflight_cmd)
     preflight_cmd.add_argument("--devkit", required=True, help="locked Devkit checkout")
 
+    candidate_cmd = sub.add_parser("candidate")
+    candidate_cmd.add_argument("--control", required=True, help="workspace control checkout")
+    candidate_cmd.add_argument("--manifest", required=True, help="candidate dependencies-v1 file")
+    candidate_cmd.add_argument("--json", action="store_true", help="machine output")
+
     sub.add_parser("golden-vectors")
 
     args = parser.parse_args(argv)
@@ -604,6 +686,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "validate":
             receipt = resolve(control, checkouts, workspace_root, args.mode, trust_policy)
+        elif args.command == "candidate":
+            receipt = validate_candidate(control, Path(args.manifest).resolve())
+            print(json.dumps(receipt, sort_keys=True) if args.json else json.dumps(receipt, indent=2, sort_keys=True))
+            return 0 if receipt["candidate_validated"] else 1
         else:
             devkit = Path(args.devkit).resolve()
             receipt = preflight(control, devkit, args.mode, trust_policy, checkouts)

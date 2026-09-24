@@ -1,14 +1,19 @@
 # Workspace Resolution — Devkit Design Landing
 
 Status: accepted program (ADR-0052, qiven-context 2026-09-24); WR-0
-DELIVERED and **owner-accepted 2026-09-25 with WR-1 authorized** (see
-[`workspace-resolution/wr0-report.md`](workspace-resolution/wr0-report.md)).
-WR-1 is landing: schema family + strict validator (PR #35), resolver
-with golden vectors (this batch), bootstrap contract test, and the
-qiven-workspace control repository in shadow mode. Authoritative use
-stays gated on the owner-accepted control-repository trust policy
-(doc 02 §2 WR-1 / §7.7). The normative program documents are the
-single source of truth:
+DELIVERED and owner-accepted 2026-09-25; WR-1 DELIVERED (schemas +
+resolver + bootstrap + the published qiven-workspace control
+repository, shadow mode) and its trust policy ACCEPTED by owner H1
+(admitted control revision `1743d921…`; authoritative bootstrap
+additionally requires a compatible selection — the typed
+BaselineConflict on the context devkit pin stands until WR-6);
+**WR-2 DELIVERED** (shadow preflight + legacy-pin comparator with
+per-class verdicts; Profile B permanent regression; live report at
+[`workspace-resolution/wr2-report.md`](workspace-resolution/wr2-report.md)
+— Foundation/Draft/ThirdParty classes at equality, Devkit class an
+explicit WR-6 discrepancy). Next owner gate: the WR-3 Foundation
+cutover decision (Profile J pilot). The normative program documents
+are the single source of truth:
 
 - qiven-docs `accepted/2026-09-24/00-qiven-workspace-dependency-resolution-program.md`
   (governance laws WG-1..WG-10)
