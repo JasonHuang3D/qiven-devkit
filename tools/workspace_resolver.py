@@ -209,6 +209,10 @@ def _load_validated(control: Path) -> tuple[dict, dict]:
     try:
         manifest = schemas.load_strict(control / "workspace.json")
         lock = schemas.load_strict(control / "workspace.lock.json")
+    except FileNotFoundError as error:
+        raise ResolutionError(
+            "WorkspaceNotFound", f"no workspace control data at {control}: {error}"
+        ) from error
     except schemas.SchemaError as error:
         raise ResolutionError(error.error_type, error.message) from error
     for instance, schema_name in (
