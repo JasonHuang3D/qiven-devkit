@@ -12,6 +12,9 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*$"
     },
+    "note": {
+      "type": "string"
+    },
     "supported_platforms": {
       "type": "array",
       "items": {
@@ -82,6 +85,9 @@
               "pattern": "^[a-z0-9][a-z0-9-]*$"
             },
             "uniqueItems": true
+          },
+          "note": {
+            "type": "string"
           },
           "legacy_consumer_pin": {
             "type": "object",
