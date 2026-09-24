@@ -7,6 +7,18 @@ singleton (`qiven-third-party-win`, engineering standard
 contrast — what is deliberately NOT allowed. Established 2026-09-23
 (v19 review) to make every external-target reference uniform.
 
+> **Status under ADR-0052 (2026-09-24): this pattern is the MIGRATION
+> STAGE, not the endpoint.** The accepted endpoint is the Workspace
+> Resolution program: CMake consumes a generated, validated resolution
+> (`qiven_workspace_require`) and performs no repository discovery or
+> revision selection (WG-1/WG-4). Until a dependency class passes its
+> own WR cutover, everything below remains the valid, in-force
+> mechanism. After the WR-0 census begins, no NEW consumer-local
+> resolver or pin may be added except as a recorded emergency
+> compatibility exception with a removal trigger. Landing doc:
+> `../design/workspace-resolution.md`; program documents: qiven-docs
+> `accepted/2026-09-24/`.
+
 ## 1. The one consumption pattern
 
 External code enters a consumer build in exactly ONE way:
