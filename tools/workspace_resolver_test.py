@@ -531,6 +531,30 @@ def main() -> int:
         else:
             raise AssertionError("R20: mismatched repository manifest accepted")
 
+        # R21: identity-preserving no-op overlay — a checkout ALREADY at a
+        # node's locked commit (zero delta: same commit/tree) keeps the
+        # locked node unchanged: already-locked overlay kind, effective
+        # generation == base generation, and the node keeps its census-bound
+        # declaration instead of a repository-manifest rebuild (the fixture
+        # provider carries no .qiven/dependencies.json at its locked commit,
+        # so a rebuild path cannot silently pass).
+        r21_root = root / "r21"
+        r21_root.mkdir()
+        control_21, _ = _fixture_workspace(r21_root)
+        provider_repo_21 = r21_root / "fixture-provider"  # built at the exact locked commit
+        receipt_21 = wr.resolve_overlay(control_21, {"fixture-provider": provider_repo_21},
+                                        "shadow", None, {}, None)
+        assert receipt_21["overlays"]["fixture-provider"]["overlay_kind"] == "already-locked", (
+            "R21: zero-delta overlay not classified already-locked"
+        )
+        assert receipt_21["effective_generation"] == receipt_21["base_generation"], (
+            "R21: no-op overlay must derive the base generation"
+        )
+        node_21 = [n for n in receipt_21["nodes"] if n["id"] == "fixture-provider"][0]
+        assert node_21["declaration_origin"] == "census-wr0", (
+            "R21: locked node rebuilt instead of preserved"
+        )
+
 
         # R10: preflight end-to-end through the LOCKED devkit resolver binary.
         fixture_devkit = root / "qiven-devkit"
@@ -573,7 +597,7 @@ def main() -> int:
         assert preflight_receipt["workspace_generation"] == lock_r10["generation"], "R10: generation"
         assert preflight_receipt["released"] is True and preflight_receipt["shadow_only"] is True, "R10: release flags"
 
-    print("[ OK ] workspace-resolver self-test (R1-R20)")
+    print("[ OK ] workspace-resolver self-test (R1-R21)")
     return 0
 
 

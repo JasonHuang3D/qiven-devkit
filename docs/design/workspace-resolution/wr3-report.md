@@ -4,7 +4,8 @@ Status: delivered under the owner's WR-3 start instruction (v28,
 2026-09-25, long-running mode, delegated per-batch H2). Batch budget
 (declared at start, this file): ≤3 devkit PRs / ≤2 commits per C++
 repository / 1 control lock transaction (+batch-consistency advances)
-/ 1 session. Delivered: 1 devkit PR series (branch, 5 commits),
+/ 1 session. Delivered: 1 devkit PR series (branch, 6 commits
+(5 code + report)),
 1 commit per C++ repository (+1 runtime companion draft re-pin), 1
 lock transaction + 5 batch-consistency control commits. Within budget.
 
@@ -16,7 +17,7 @@ lock transaction + 5 batch-consistency control commits. Within budget.
 | qiven-workspace `bootstrap/qiven-bootstrap.py` | `gate-configure`: identity-check locked Devkit → resolver adapter → `cmake --preset` with QIVEN_RESOLUTION_FILE (architecture §4: CMake receives resolved roots; preflight CLI form unchanged, B1-B6 contract intact) |
 | qiven-foundation | `.qiven/dependencies.json` (provides `qiven-foundation-v1` → `qiven::foundation`) |
 | qiven-runtime / qiven-context-draft / qiven-math | repository-owned manifests; CMake Foundation blocks (sibling discovery + consumer-local SHA pin + `if(NOT TARGET)` suppression guard) REPLACED by adapter include + `qiven_workspace_materialize`; gate configure tasks rerouted through the bootstrap |
-| qiven-workspace control | lock transaction: the four nodes move to repository-manifest declarations (cache under `declarations/`); qiven-devkit node advances (census declaration, WR-1 precedent); generation `sha256:3edee552…` |
+| qiven-workspace control | lock transaction: the four nodes move to repository-manifest declarations (cache under `declarations/`); qiven-devkit node advances (census declaration, WR-1 precedent); generation `sha256:9d7cc02d…` at control HEAD `fcfede8` (transaction `f68ffcb` wrote `b5b22c5c…`; devkit-node batch advances followed) |
 
 ## Gate receipts (all PASS at exact branch heads)
 
