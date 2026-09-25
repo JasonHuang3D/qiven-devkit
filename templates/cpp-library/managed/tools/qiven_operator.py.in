@@ -1503,6 +1503,10 @@ def _ci_watch_match_run(runs: list[dict[str, Any]], head: str) -> dict[str, Any]
     # as queued/in_progress from creation, so the canonical start->watch
     # flow never locks onto a stale terminal run); terminal matches need the
     # stabilization counter in _ci_watch before they may be accepted.
+    # Known trade-off (deliberate): if an OLD run is stuck non-terminal and
+    # a NEWER same-head run already completed, the newest non-terminal still
+    # wins - the F1 listing-lag window is common, stuck runs are rare, and
+    # preferring the newer terminal here would reintroduce F1.
     terminal: dict[str, Any] | None = None
     for run in runs:
         if run.get("headSha") != head:
@@ -1554,6 +1558,7 @@ def _ci_watch(config: dict[str, Any], profile: str, console: Console,
     console.emit("run", f"ci:watch:{profile}: resolving run for {head} on {branch} (workflow {workflow})")
     run: dict[str, Any] | None = None
     stable_polls = 0
+    stable_run_id: Any = None
     gh_failures = 0
     while run is None:
         if time.monotonic() >= deadline:
@@ -1572,6 +1577,7 @@ def _ci_watch(config: dict[str, Any], profile: str, console: Console,
             console.emit("fail", f"ci:watch:{profile}: gh run list failed ({gh_failures}/{CI_WATCH_GH_STRIKES}): {detail}")
             if gh_failures >= CI_WATCH_GH_STRIKES:
                 raise OperatorError(f"ci:watch:{profile}: gh run list failed {CI_WATCH_GH_STRIKES} times")
+            stable_polls = 0
             time.sleep(CI_WATCH_POLL_SECONDS)
             continue
         gh_failures = 0
@@ -1586,8 +1592,12 @@ def _ci_watch(config: dict[str, Any], profile: str, console: Console,
             continue
         if candidate.get("status") == "completed":
             # Only-terminal evidence: the just-dispatched run may not be
-            # listed yet. Accept only after the newest terminal match stays
-            # stable across consecutive polls (finding F1).
+            # listed yet. Accept only after the SAME terminal run stays the
+            # newest match across consecutive polls (identity-checked; a
+            # failed poll breaks the streak - finding F1).
+            if candidate.get("databaseId") != stable_run_id:
+                stable_run_id = candidate.get("databaseId")
+                stable_polls = 0
             stable_polls += 1
             if stable_polls < CI_WATCH_STABLE_POLLS:
                 time.sleep(CI_WATCH_POLL_SECONDS)

@@ -900,6 +900,34 @@ def main() -> int:
         else:
             raise AssertionError("ci watch did not abort after three gh failures")
 
+        # Observation-phase (run view) three-strike abort after lock-on.
+        locked_list = json.dumps([{"databaseId": 12, "headSha": local_head, "status": "in_progress",
+                                   "conclusion": None, "url": "https://example/runs/12"}])
+
+        def view_failing_capture(argv: list[str]) -> subprocess.CompletedProcess[str]:
+            watch_calls.append(list(argv))
+            if "run list" in " ".join(argv):
+                return subprocess.CompletedProcess(argv, 0, locked_list)
+            return subprocess.CompletedProcess(argv, 1, "", "gh unavailable")
+
+        operator._gh_capture = view_failing_capture
+        try:
+            operator._ci_watch(ci_config, "full", watch_console, 5.0, False)
+        except operator.OperatorError as exc:
+            check("run view failed 3 times" in str(exc), "G4.watch-view-three-strikes-typed")
+        else:
+            raise AssertionError("ci watch did not abort after three run-view failures")
+
+        # main() plumbing: the CLI surface rejects a non-terminating budget
+        # with exit 2 (argparse wiring + OperatorError mapping exercised
+        # end to end through the generated entrypoint).
+        plumbing = run(
+            [sys.executable, "tools/qiven.py", "ci", "watch", "full", "--timeout", "nan"],
+            cwd=repo,
+            expect=2,
+        )
+        check("positive finite" in plumbing.stdout, "G4.watch-main-plumbing-budget-error")
+
         # Poll-phase timeout: run stays pending past the deadline -> verdict
         # timeout with exit 1 (never an infinite wait).
         clock = {"now": 0.0}
