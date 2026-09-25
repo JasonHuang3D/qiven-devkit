@@ -58,12 +58,25 @@ CASES: list[tuple[str, str]] = [
     ("call tools\\qiven.cmd gate", "gate-class"),
     ("tools/qiven.cmd run test-debug", "gate-class"),
     ("qiven ci start full", "gate-class"),
+    # ci watch (OBL-F1A2B3 observation runner) is the same class: raw
+    # foreground calls are denied with the background re-call + guard
+    # teaching; the watch is inherently terminating so backgrounding it
+    # is the designed shape (the MSBuild guard env prefix is required by
+    # the class matcher and harmless - watch never builds).
+    ("qiven ci watch full", "gate-class"),
+    ("python tools/qiven.py ci watch --repo JasonHuang3D/qiven-runtime --workflow ci.yml --branch main --head 7b3ce51 --timeout 45 --receipt", "gate-class"),
+    ("MSBUILDDISABLENODEREUSE=1 python tools/qiven.py ci watch full --receipt", "gate-class"),
     # env-prefixed invocations classify the same (v4.1: the taught guard
     # re-call form must not escape classification, and neither may an
     # arbitrary FOO=1 prefix bypass the gate class raw):
     ("MSBUILDDISABLENODEREUSE=1 tools/qiven.cmd gate", "gate-class"),
     ("FOO=1 qiven gate", "gate-class"),
     ("FOO=1 tools\\qiven.cmd run test-debug", "gate-class"),
+    # v4.2: env BEFORE the python launcher is the TAUGHT guard re-call
+    # form for python-launcher invocations - it must classify (and thus
+    # carry the mechanically enforced guard), not escape raw:
+    ("FOO=1 python tools/qiven.py gate", "gate-class"),
+    ("MSBUILDDISABLENODEREUSE=1 python tools/qiven.py run test-debug", "gate-class"),
     # gate INSIDE exec is allowed (exec at command position; the gate
     # regex finds no command position for gate):
     ("tools/qiven.cmd exec start --timeout 900 -- cmd /c call tools/qiven.cmd gate", "allow"),
@@ -271,6 +284,23 @@ def background_cases() -> list[tuple[str, bool, bool]]:
         return None
 
     check("env-prefixed operator exec stays raw (v4.1)", env_prefixed_operator_exec_stays_raw)
+
+    def ci_watch_v31_usage_shape():
+        # The exact OBL-F1A2B3 observation shape: cd + env guard +
+        # explicit-identity watch, backgrounded. Raw (foreground) must
+        # deny with the background+guard teaching; the guarded background
+        # re-call must pass.
+        raw = 'cd "D:\\JasonWork\\qiven-devkit" && python tools/qiven.py ci watch --repo JasonHuang3D/qiven-runtime --workflow ci.yml --branch main --head 7b3ce51 --timeout 45 --receipt'
+        code, message = router.verdict(raw)
+        if code != 2 or "run_in_background: true" not in message or "MSBUILDDISABLENODEREUSE" not in message:
+            return "raw ci watch must deny with the background+guard teaching"
+        guarded = 'cd "D:\\JasonWork\\qiven-devkit" && MSBUILDDISABLENODEREUSE=1 python tools/qiven.py ci watch --repo JasonHuang3D/qiven-runtime --workflow ci.yml --branch main --head 7b3ce51 --timeout 45 --receipt'
+        code, _ = router.verdict(guarded, background=True)
+        if code != 0:
+            return "guarded backgrounded ci watch must pass"
+        return None
+
+    check("ci watch raw denies / guarded background passes (F1A2B3)", ci_watch_v31_usage_shape)
 
     def raw_network():
         code, message = router.verdict("pip install pyyaml")

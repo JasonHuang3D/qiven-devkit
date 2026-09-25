@@ -149,15 +149,18 @@ _HEREDOC = re.compile(
 )
 
 # Segment-level patterns (each applied to ONE command segment, anchored
-# at its start; see classify() for the splitting law). Leading NAME=value
-# assignments are tolerated (v4.1, 2026-09-24): the TAUGHT guard re-call
-# form is `MSBUILDDISABLENODEREUSE=1 <same command>` - without this, any
-# env-prefixed gate/run/ci call escaped classification entirely, and the
-# guard requirement with it (found live in v25: a guarded call passed
-# via non-match, so an unguarded `FOO=1 qiven gate` also passed raw).
+# at its start; see classify() for the splitting law). The launcher/env
+# prefix tolerates BOTH orders - `python FOO=1 qiven ...` and
+# `FOO=1 python qiven ...` (v4.2, 2026-09-26: the TAUGHT guard re-call
+# form is `MSBUILDDISABLENODEREUSE=1 <same command>`, and when the same
+# command uses the python launcher the env assignment lands BEFORE
+# `python` - that form escaped classification entirely, so the guard
+# check never fired for it; found by the ci-watch router test).
 _SEGMENT_PREFIX = (
-    r"^(?:cmd\s+/c\s+call\s+|cmd\s+/c\s+|call\s+|python\s+)?"
+    r"^(?:cmd\s+/c\s+call\s+|cmd\s+/c\s+|call\s+)?"
+    r"(?:python\s+)?"
     r"(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|[^\s\"']+)\s+)*"
+    r"(?:python\s+)?"
 )
 _GATE_CLASS = re.compile(
     _SEGMENT_PREFIX + r"(?:tools[/\\])?qiven(?:\.cmd|\.py|\.sh)?\s+(?:gate|run|ci)\b",

@@ -72,6 +72,18 @@ Exit codes: 0 run concluded success; 1 failure/cancelled/poll-timeout;
 the budget). `--receipt` prints one JSON receipt line (run id, url,
 conclusion, head, durations); `--json` mode prints only the receipt.
 
+Routing (no special case needed): `qiven ci ...` — including `watch` —
+is gate-class at the hook router: raw foreground calls are denied with
+the standard background re-call + `MSBUILDDISABLENODEREUSE` guard
+teaching (the guard is class-mandated but inert for watch, which never
+builds), and the guarded background re-call passes. Backgrounding IS
+the designed shape: the watch polls internally, produces no output
+until terminal, and is inherently terminating by its own budget. It
+does NOT route through `qiven exec` — exec is for local custody classes
+(ADR-0051); a watch observes a REMOTE run, and losing a watcher at
+session end is harmless (the run lives on GitHub; re-watch or `gh run
+view` recovers).
+
 ## exec — supervised detached execution under bounded custody (the custody path)
 
 ADR-0051 (2026-09-24) scopes exec to CUSTODY classes: filesystem tree
