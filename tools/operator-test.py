@@ -778,6 +778,230 @@ def main() -> int:
         check(ci_payload["remote_head"] == local_head, "G1.ci-remote-head")
         check(ci_payload["branch"] == "fixture-branch", "G1.ci-branch")
 
+        # ---------------- G4: ci watch (observation-only runner) ----------
+        # Pure helpers first.
+        runs = [
+            {"databaseId": 11, "headSha": "c" * 40, "status": "completed", "conclusion": "success"},
+            {"databaseId": 10, "headSha": local_head, "status": "in_progress", "conclusion": None},
+            {"databaseId": 9, "headSha": local_head, "status": "completed", "conclusion": "failure"},
+        ]
+        check(operator._ci_watch_match_run(runs, local_head)["databaseId"] == 10,
+              "G4.match-live-run-beats-older-terminal")
+        check(operator._ci_watch_match_run(runs, "d" * 40) is None, "G4.match-miss-is-none")
+        terminal_only = [
+            {"databaseId": 11, "headSha": "c" * 40, "status": "completed", "conclusion": "success"},
+            {"databaseId": 9, "headSha": local_head, "status": "completed", "conclusion": "failure"},
+        ]
+        check(operator._ci_watch_match_run(terminal_only, local_head)["databaseId"] == 9,
+              "G4.match-terminal-fallback-newest")
+        check(operator._ci_watch_verdict("in_progress", None) == "pending", "G4.verdict-pending")
+        check(operator._ci_watch_verdict("completed", "success") == "success", "G4.verdict-success")
+        check(operator._ci_watch_verdict("completed", "failure") == "failure", "G4.verdict-failure")
+        check(operator._ci_watch_verdict("completed", "cancelled") == "cancelled", "G4.verdict-cancelled")
+        check(operator._ci_watch_verdict("completed", "startup_failure") == "failure",
+              "G4.verdict-unknown-conclusion-fails-closed")
+        check(operator._ci_watch_verdict("queued", None) == "pending", "G4.verdict-queued-pending")
+
+        # Timeout budget validation: NaN/inf/non-positive must be rejected so
+        # the inherently-terminating guarantee cannot be defeated by flags.
+        for bad_timeout in (float("nan"), float("inf"), 0.0, -5.0):
+            try:
+                operator._ci_watch(ci_config, "full", ci_console, bad_timeout, False)
+            except operator.OperatorError:
+                check(True, "G4.timeout-validated-rejected")
+            else:
+                raise AssertionError(f"ci watch accepted non-terminating --timeout {bad_timeout!r}")
+
+        # Watch loop against scripted gh replies (dispatch never invoked).
+        real_sleep = operator.time.sleep
+        watch_calls: list[list[str]] = []
+        script = {
+            "list": [
+                json.dumps([{"databaseId": 10, "headSha": "c" * 40, "status": "completed", "conclusion": "success"}]),
+                json.dumps([{"databaseId": 12, "headSha": local_head, "status": "in_progress",
+                             "conclusion": None, "url": "https://example/runs/12"}]),
+            ],
+            "view": [
+                json.dumps({"status": "in_progress", "conclusion": None, "url": "https://example/runs/12"}),
+                json.dumps({"status": "completed", "conclusion": "success", "url": "https://example/runs/12"}),
+            ],
+        }
+        receipts: list[str] = []
+        operator._print_json = lambda payload: receipts.append(json.dumps(payload))
+        fast_sleeps: list[float] = []
+
+        def watch_capture(argv: list[str]) -> subprocess.CompletedProcess[str]:
+            watch_calls.append(list(argv))
+            joined = " ".join(argv)
+            if "run list" in joined:
+                return subprocess.CompletedProcess(argv, 0, script["list"].pop(0))
+            if "run view" in joined:
+                return subprocess.CompletedProcess(argv, 0, script["view"].pop(0))
+            raise AssertionError(f"unexpected gh call: {argv}")
+
+        operator._gh_capture = watch_capture
+        operator.time.sleep = fast_sleeps.append
+        watch_console = operator.Console(json_mode=True, no_color=True)
+        payload = operator._ci_watch(ci_config, "full", watch_console, 60.0, True)
+        check(payload["_exit"] == 0, "G4.watch-success-exit0")
+        check(payload["run_id"] == 12, "G4.watch-identity-bound-run")
+        check(payload["conclusion"] == "success", "G4.watch-success-conclusion")
+        check(payload["url"] == "https://example/runs/12", "G4.watch-url")
+        check(receipts and json.loads(receipts[-1])["conclusion"] == "success", "G4.watch-receipt-json")
+        check("_exit" not in json.loads(receipts[-1]), "G4.watch-receipt-clean")
+        check(all("workflow run" not in " ".join(c) for c in watch_calls), "G4.watch-never-dispatches")
+        check(any("run list" in " ".join(c) for c in watch_calls), "G4.watch-discovery-used-list")
+        check(len(fast_sleeps) >= 3, "G4.watch-poll-interval-sleeps")
+
+        # Failure conclusion maps to exit 1.
+        script["view"] = [json.dumps({"status": "completed", "conclusion": "failure",
+                                      "url": "https://example/runs/12"})]
+        script["list"] = [json.dumps([{"databaseId": 12, "headSha": local_head, "status": "in_progress",
+                                       "conclusion": None, "url": "https://example/runs/12"}])]
+        payload = operator._ci_watch(ci_config, "full", watch_console, 60.0, False)
+        check(payload["_exit"] == 1, "G4.watch-failure-exit1")
+
+        # Stale same-head terminal decoy: two terminal-only polls, then the
+        # live queued run appears - the decoy's verdict must never surface.
+        script["list"] = [
+            json.dumps([{"databaseId": 9, "headSha": local_head, "status": "completed", "conclusion": "failure"}]),
+            json.dumps([{"databaseId": 9, "headSha": local_head, "status": "completed", "conclusion": "failure"}]),
+            json.dumps([
+                {"databaseId": 9, "headSha": local_head, "status": "completed", "conclusion": "failure"},
+                {"databaseId": 12, "headSha": local_head, "status": "queued", "conclusion": None,
+                 "url": "https://example/runs/12"},
+            ]),
+        ]
+        script["view"] = [json.dumps({"status": "completed", "conclusion": "success",
+                                      "url": "https://example/runs/12"})]
+        payload = operator._ci_watch(ci_config, "full", watch_console, 60.0, False)
+        check(payload["run_id"] == 12, "G4.watch-stale-terminal-decoy-ignored")
+        check(payload["_exit"] == 0, "G4.watch-decoy-run-verdict-not-reported")
+
+        # Terminal-only evidence is accepted after the stabilization window.
+        stale_terminal = json.dumps([{"databaseId": 9, "headSha": local_head, "status": "completed",
+                                      "conclusion": "failure", "url": "https://example/runs/9"}])
+        script["list"] = [stale_terminal] * 4
+        payload = operator._ci_watch(ci_config, "full", watch_console, 60.0, False)
+        check(payload["run_id"] == 9, "G4.watch-terminal-stabilized-accept")
+        check(payload["_exit"] == 1, "G4.watch-terminal-stabilized-verdict")
+
+        # Three consecutive gh failures abort with a typed error.
+        def failing_capture(argv: list[str]) -> subprocess.CompletedProcess[str]:
+            watch_calls.append(list(argv))
+            return subprocess.CompletedProcess(argv, 1, "", "gh unavailable")
+
+        operator._gh_capture = failing_capture
+        operator.time.sleep = lambda seconds: None
+        try:
+            operator._ci_watch(ci_config, "full", watch_console, 5.0, False)
+        except operator.OperatorError as exc:
+            check("3 times" in str(exc), "G4.watch-gh-three-strikes-typed")
+        else:
+            raise AssertionError("ci watch did not abort after three gh failures")
+
+        # Observation-phase (run view) three-strike abort after lock-on.
+        locked_list = json.dumps([{"databaseId": 12, "headSha": local_head, "status": "in_progress",
+                                   "conclusion": None, "url": "https://example/runs/12"}])
+
+        def view_failing_capture(argv: list[str]) -> subprocess.CompletedProcess[str]:
+            watch_calls.append(list(argv))
+            if "run list" in " ".join(argv):
+                return subprocess.CompletedProcess(argv, 0, locked_list)
+            return subprocess.CompletedProcess(argv, 1, "", "gh unavailable")
+
+        operator._gh_capture = view_failing_capture
+        try:
+            operator._ci_watch(ci_config, "full", watch_console, 5.0, False)
+        except operator.OperatorError as exc:
+            check("run view failed 3 times" in str(exc), "G4.watch-view-three-strikes-typed")
+        else:
+            raise AssertionError("ci watch did not abort after three run-view failures")
+
+        # main() plumbing: the CLI surface rejects a non-terminating budget
+        # with exit 2 (argparse wiring + OperatorError mapping exercised
+        # end to end through the generated entrypoint).
+        plumbing = run(
+            [sys.executable, "tools/qiven.py", "ci", "watch", "full", "--timeout", "nan"],
+            cwd=repo,
+            expect=2,
+        )
+        check("positive finite" in plumbing.stdout, "G4.watch-main-plumbing-budget-error")
+
+        # Explicit identity mode: no profile, no local git context; the
+        # caller-held dispatch identity drives discovery (cross-repo use).
+        explicit_calls: list[list[str]] = []
+        explicit_head = "e" * 40
+
+        def explicit_capture(argv: list[str]) -> subprocess.CompletedProcess[str]:
+            explicit_calls.append(list(argv))
+            joined = " ".join(argv)
+            listing = json.dumps([
+                {"databaseId": 21, "headSha": "f" * 40, "status": "completed", "conclusion": "success"},
+                {"databaseId": 22, "headSha": explicit_head, "status": "queued", "conclusion": None,
+                 "url": "https://example/runs/22"},
+            ])
+            if "run list" in joined:
+                return subprocess.CompletedProcess(argv, 0, listing)
+            return subprocess.CompletedProcess(
+                argv, 0, json.dumps({"status": "completed", "conclusion": "success",
+                                     "url": "https://example/runs/22"})
+            )
+
+        operator._gh_capture = explicit_capture
+        operator.time.sleep = lambda seconds: None
+        identity = {"repo": "example/other", "workflow": "ci.yml",
+                    "branch": "release-branch", "head": explicit_head}
+        payload = operator._ci_watch(ci_config, None, watch_console, 5.0, False, identity)
+        check(payload["run_id"] == 22, "G4.watch-explicit-identity-run")
+        check(payload["repository"] == "example/other", "G4.watch-explicit-identity-repo")
+        check(payload["head"] == explicit_head, "G4.watch-explicit-identity-head")
+        check(any("example/other" in " ".join(c) for c in explicit_calls), "G4.watch-explicit-targets-remote-repo")
+        check(payload["_exit"] == 0, "G4.watch-explicit-identity-exit0")
+
+        # Poll-phase timeout: run stays pending past the deadline -> verdict
+        # timeout with exit 1 (never an infinite wait).
+        clock = {"now": 0.0}
+        real_monotonic = operator.time.monotonic
+        pending_list = json.dumps([{"databaseId": 12, "headSha": local_head, "status": "in_progress",
+                                    "conclusion": None, "url": "https://example/runs/12"}])
+        pending_view = json.dumps({"status": "in_progress", "conclusion": None,
+                                   "url": "https://example/runs/12"})
+
+        def pending_capture(argv: list[str]) -> subprocess.CompletedProcess[str]:
+            watch_calls.append(list(argv))
+            if "run list" in " ".join(argv):
+                return subprocess.CompletedProcess(argv, 0, pending_list)
+            return subprocess.CompletedProcess(argv, 0, pending_view)
+
+        def advancing_sleep(seconds: float) -> None:
+            clock["now"] += 60.0
+            fast_sleeps.append(seconds)
+
+        operator._gh_capture = pending_capture
+        operator.time.monotonic = lambda: clock["now"]
+        operator.time.sleep = advancing_sleep
+        payload = operator._ci_watch(ci_config, "full", watch_console, 1.0, False)
+        check(payload["conclusion"] == "timeout", "G4.watch-poll-timeout-verdict")
+        check(payload["_exit"] == 1, "G4.watch-poll-timeout-exit1")
+
+        # Discovery timeout is inherently terminating: no run ever appears.
+        empty_list = json.dumps([])
+        operator._gh_capture = lambda argv: (
+            watch_calls.append(list(argv)) or subprocess.CompletedProcess(argv, 0, empty_list)
+        )
+        try:
+            operator._ci_watch(ci_config, "full", watch_console, 1.0, False)
+        except operator.OperatorError as exc:
+            check("no run found" in str(exc), "G4.watch-discovery-timeout-typed")
+        else:
+            raise AssertionError("ci watch discovery loop did not terminate on timeout")
+
+        # Restore process-global patches: the fixture module shares the real
+        # time module, so later additions to this suite must not inherit fakes.
+        operator.time.monotonic = real_monotonic
+        operator.time.sleep = real_sleep
+
     print(f"[ OK ] Qiven Operator tests passed ({checks} named checks)")
     return 0
 

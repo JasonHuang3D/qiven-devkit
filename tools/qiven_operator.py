@@ -5,6 +5,7 @@ import concurrent.futures
 import ctypes
 from dataclasses import dataclass, asdict
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -1445,23 +1446,10 @@ def _ci_start(config: dict[str, Any], profile: str, console: Console) -> dict[st
     spec = ci.get(profile) if isinstance(ci, dict) else None
     if not isinstance(spec, dict):
         raise OperatorError(f"unknown CI profile: {profile}")
-    workflow = spec.get("workflow")
     inputs = spec.get("inputs", {})
-    if not isinstance(workflow, str) or not workflow:
-        raise OperatorError("CI profile requires workflow")
     if not isinstance(inputs, dict):
         raise OperatorError("CI profile inputs must be an object")
-    if shutil.which("gh") is None:
-        raise OperatorError("GitHub CLI 'gh' was not found on PATH")
-    branch = _current_branch()
-    head = _head()
-    repo = _remote_repo()
-    console.emit("run", f"ci:{profile}: verify origin/{branch} exact HEAD")
-    remote_head = _remote_branch_head(branch)
-    if remote_head != head:
-        raise OperatorError(
-            f"CI dispatch requires origin/{branch} to match local HEAD: local={head} remote={remote_head}"
-        )
+    workflow, branch, head, repo = _ci_resolve_guard(config, profile, "ci:" + profile)
     console.emit("ok", f"ci:{profile}: origin/{branch} matches {head}")
     argv = ["gh", "workflow", "run", workflow, "--repo", repo, "--ref", branch]
     for key, value in inputs.items():
@@ -1478,9 +1466,205 @@ def _ci_start(config: dict[str, Any], profile: str, console: Console) -> dict[st
         "repository": repo,
         "branch": branch,
         "head": head,
-        "remote_head": remote_head,
+        "remote_head": head,
         "status": "dispatched",
     }
+
+
+def _ci_resolve_guard(config: dict[str, Any], profile: str, action: str) -> tuple[str, str, str, str]:
+    # Shared dispatch/watch precondition: profile resolution plus the
+    # local-HEAD == origin/<branch> guard (the invariant that must not
+    # drift between `ci start` and `ci watch` - review finding F5).
+    ci = config.get("ci", {})
+    spec = ci.get(profile) if isinstance(ci, dict) else None
+    if not isinstance(spec, dict):
+        raise OperatorError(f"unknown CI profile: {profile}")
+    workflow = spec.get("workflow")
+    if not isinstance(workflow, str) or not workflow:
+        raise OperatorError("CI profile requires workflow")
+    if shutil.which("gh") is None:
+        raise OperatorError("GitHub CLI 'gh' was not found on PATH")
+    branch = _current_branch()
+    head = _head()
+    repo = _remote_repo()
+    remote_head = _remote_branch_head(branch)
+    if remote_head != head:
+        raise OperatorError(
+            f"{action} requires origin/{branch} to match local HEAD: local={head} remote={remote_head}"
+        )
+    return workflow, branch, head, repo
+
+
+def _ci_watch_match_run(runs: list[dict[str, Any]], head: str) -> dict[str, Any] | None:
+    # gh run list is newest-first; the watch target is identity-bound to the
+    # exact head SHA (never "latest" - the operating contract's racy-latest
+    # prohibition). Preference order among same-head matches (review finding
+    # F1): a NON-TERMINAL run wins immediately (a just-dispatched run exists
+    # as queued/in_progress from creation, so the canonical start->watch
+    # flow never locks onto a stale terminal run); terminal matches need the
+    # stabilization counter in _ci_watch before they may be accepted.
+    # Known trade-off (deliberate): if an OLD run is stuck non-terminal and
+    # a NEWER same-head run already completed, the newest non-terminal still
+    # wins - the F1 listing-lag window is common, stuck runs are rare, and
+    # preferring the newer terminal here would reintroduce F1.
+    terminal: dict[str, Any] | None = None
+    for run in runs:
+        if run.get("headSha") != head:
+            continue
+        if run.get("status") != "completed":
+            return run
+        if terminal is None:
+            terminal = run
+    return terminal
+
+
+def _ci_watch_verdict(status: str | None, conclusion: str | None) -> str:
+    # pending while not completed; terminal mapping otherwise. Unknown
+    # conclusions are failures, never successes (fail closed).
+    if status != "completed":
+        return "pending"
+    if conclusion == "success":
+        return "success"
+    if conclusion == "cancelled":
+        return "cancelled"
+    return "failure"
+
+
+CI_WATCH_STABLE_POLLS = 3
+CI_WATCH_POLL_SECONDS = 10.0
+CI_WATCH_GH_STRIKES = 3
+
+
+def _gh_capture(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    # gh JSON must be parsed from stdout ONLY: merging stderr (the
+    # _run_capture default) lets any benign gh notice corrupt the parse
+    # across a 60-minute poll cadence (review finding F4).
+    return subprocess.run(argv, cwd=ROOT, text=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, check=False)
+
+
+def _ci_watch(config: dict[str, Any], profile: str | None, console: Console,
+              timeout_minutes: float, json_receipt: bool,
+              identity: dict[str, str] | None = None) -> dict[str, Any]:
+    # OBSERVATION ONLY (OBL-F1A2B3 owner design 2026-09-25): watches a
+    # DISPATCHED run to its terminal state. Never dispatches anything;
+    # the dispatch-only trigger law (MEM-20260921T095600Z-C5E1A8) stands.
+    # Designed to run under the harness's run_in_background: inherently
+    # terminating (internal timeout), clean output (markers + errors
+    # only, no per-poll chatter), one JSON receipt line at the end.
+    # Two identity modes: PROFILE (config + local git: HEAD must equal
+    # origin/<branch>) or EXPLICIT (--repo/--workflow/--branch/--head,
+    # checkout-independent - the caller holds the dispatch identity, so
+    # the watch does not depend on live git state for cross-repo use).
+    if not (math.isfinite(timeout_minutes) and timeout_minutes > 0):
+        raise OperatorError(f"ci:watch --timeout must be a positive finite number of minutes, got {timeout_minutes!r}")
+    if identity is not None:
+        repo = identity["repo"]
+        workflow = identity["workflow"]
+        branch = identity["branch"]
+        head = identity["head"]
+        profile = profile or "explicit"
+    else:
+        if not profile:
+            raise OperatorError("ci watch requires PROFILE, or the explicit --repo/--workflow/--branch/--head identity")
+        workflow, branch, head, repo = _ci_resolve_guard(config, profile, "ci:watch")
+    deadline = time.monotonic() + timeout_minutes * 60.0
+    console.emit("run", f"ci:watch:{profile}: resolving run for {head} on {branch} (workflow {workflow})")
+    run: dict[str, Any] | None = None
+    stable_polls = 0
+    stable_run_id: Any = None
+    gh_failures = 0
+    while run is None:
+        if time.monotonic() >= deadline:
+            raise OperatorError(
+                f"ci:watch:{profile}: no run found for {head} on {branch} within the timeout "
+                "(dispatch happens separately via `qiven ci start`)"
+            )
+        completed = _gh_capture([
+            "gh", "run", "list", "--repo", repo, "--workflow", workflow,
+            "--branch", branch, "--limit", "20",
+            "--json", "databaseId,headSha,status,conclusion,url",
+        ])
+        if completed.returncode:
+            gh_failures += 1
+            detail = (completed.stderr or completed.stdout or "").strip()[:200]
+            console.emit("fail", f"ci:watch:{profile}: gh run list failed ({gh_failures}/{CI_WATCH_GH_STRIKES}): {detail}")
+            if gh_failures >= CI_WATCH_GH_STRIKES:
+                raise OperatorError(f"ci:watch:{profile}: gh run list failed {CI_WATCH_GH_STRIKES} times")
+            stable_polls = 0
+            time.sleep(CI_WATCH_POLL_SECONDS)
+            continue
+        gh_failures = 0
+        try:
+            runs = json.loads(completed.stdout or "[]")
+        except json.JSONDecodeError as exc:
+            raise OperatorError(f"ci:watch:{profile}: unparseable gh run list output: {exc}") from exc
+        candidate = _ci_watch_match_run(runs, head)
+        if candidate is None:
+            stable_polls = 0
+            time.sleep(CI_WATCH_POLL_SECONDS)
+            continue
+        if candidate.get("status") == "completed":
+            # Only-terminal evidence: the just-dispatched run may not be
+            # listed yet. Accept only after the SAME terminal run stays the
+            # newest match across consecutive polls (identity-checked; a
+            # failed poll breaks the streak - finding F1).
+            if candidate.get("databaseId") != stable_run_id:
+                stable_run_id = candidate.get("databaseId")
+                stable_polls = 0
+            stable_polls += 1
+            if stable_polls < CI_WATCH_STABLE_POLLS:
+                time.sleep(CI_WATCH_POLL_SECONDS)
+                continue
+        run = candidate
+    run_id = run.get("databaseId")
+    url = run.get("url") or ""
+    console.emit("wait", f"ci:watch:{profile}: observing run {run_id} (errors only until terminal)")
+    verdict = _ci_watch_verdict(run.get("status"), run.get("conclusion"))
+    started = time.monotonic()
+    while verdict == "pending":
+        if time.monotonic() >= deadline:
+            verdict = "timeout"
+            break
+        time_left = deadline - time.monotonic()
+        time.sleep(min(CI_WATCH_POLL_SECONDS, max(0.0, time_left)))
+        completed = _gh_capture([
+            "gh", "run", "view", str(run_id), "--repo", repo,
+            "--json", "status,conclusion,url",
+        ])
+        if completed.returncode:
+            gh_failures += 1
+            detail = (completed.stderr or completed.stdout or "").strip()[:200]
+            console.emit("fail", f"ci:watch:{profile}: gh run view failed ({gh_failures}/{CI_WATCH_GH_STRIKES}): {detail}")
+            if gh_failures >= CI_WATCH_GH_STRIKES:
+                raise OperatorError(f"ci:watch:{profile}: gh run view failed {CI_WATCH_GH_STRIKES} times")
+            continue
+        gh_failures = 0
+        try:
+            state = json.loads(completed.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise OperatorError(f"ci:watch:{profile}: unparseable gh run view output: {exc}") from exc
+        url = state.get("url") or url
+        verdict = _ci_watch_verdict(state.get("status"), state.get("conclusion"))
+    payload = {
+        "profile": profile,
+        "workflow": workflow,
+        "repository": repo,
+        "branch": branch,
+        "head": head,
+        "run_id": run_id,
+        "url": url,
+        "conclusion": verdict,
+        "duration_seconds": round(time.monotonic() - started, 1),
+    }
+    exit_code = 0 if verdict == "success" else 1
+    if json_receipt:
+        _print_json(payload)
+    else:
+        console.emit("ok" if verdict == "success" else "fail",
+                     f"ci:watch:{profile}: run {run_id} conclusion={verdict} {url}")
+    payload["_exit"] = exit_code
+    return payload
 
 
 def _common_flags() -> argparse.ArgumentParser:
@@ -1551,6 +1735,21 @@ def _parser() -> argparse.ArgumentParser:
     ci_sub = ci.add_subparsers(dest="ci_command", required=True)
     ci_start = ci_sub.add_parser("start", help="dispatch CI and return immediately", parents=[_common_flags()])
     ci_start.add_argument("profile", help="declared CI profile")
+    ci_watch = ci_sub.add_parser(
+        "watch", help="observe an already-dispatched CI run to terminal state (observation only; run under run_in_background)",
+        parents=[_common_flags()],
+    )
+    ci_watch.add_argument("profile", nargs="?", default=None,
+                          help="declared CI profile (in-repo mode); omitted when the explicit identity flags are used")
+    ci_watch.add_argument("--timeout", type=float, default=60.0,
+                          help="overall watch budget in minutes (inherently terminating; default 60)")
+    ci_watch.add_argument("--receipt", action="store_true",
+                          help="print one JSON receipt line at the end (always printed in --json mode)")
+    ci_watch.add_argument("--repo", default=None,
+                          help="explicit identity mode: OWNER/NAME of the target repository (requires --workflow/--branch/--head)")
+    ci_watch.add_argument("--workflow", default=None, help="explicit identity mode: workflow name")
+    ci_watch.add_argument("--branch", default=None, help="explicit identity mode: branch name")
+    ci_watch.add_argument("--head", default=None, help="explicit identity mode: exact head SHA the run must match")
     exec_parser = sub.add_parser(
         "exec", help="supervised detached command execution under bounded process custody", parents=[_common_flags()]
     )
@@ -1668,6 +1867,22 @@ def main(argv: list[str] | None = None) -> int:
                     f"      workflow:    {payload['workflow']}"
                 )
             return 0
+
+        if args.command == "ci" and args.ci_command == "watch":
+            identity = None
+            if args.repo is not None:
+                missing = [flag for flag, value in (
+                    ("--workflow", args.workflow), ("--branch", args.branch), ("--head", args.head),
+                ) if not value]
+                if missing:
+                    raise OperatorError(f"ci:watch explicit identity requires {'+'.join(missing)} alongside --repo")
+                if args.profile:
+                    raise OperatorError("ci:watch explicit identity does not take a PROFILE argument")
+                identity = {"repo": args.repo, "workflow": args.workflow,
+                            "branch": args.branch, "head": args.head}
+            payload = _ci_watch(config, args.profile, console, args.timeout,
+                                args.receipt or console.json_mode, identity)
+            return payload.pop("_exit")
 
         if args.command == "exec":
             if args.exec_command == "start":
