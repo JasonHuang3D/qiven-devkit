@@ -778,6 +778,94 @@ def main() -> int:
         check(ci_payload["remote_head"] == local_head, "G1.ci-remote-head")
         check(ci_payload["branch"] == "fixture-branch", "G1.ci-branch")
 
+        # ---------------- G4: ci watch (observation-only runner) ----------
+        # Pure helpers first.
+        runs = [
+            {"databaseId": 11, "headSha": "c" * 40, "status": "completed", "conclusion": "success"},
+            {"databaseId": 10, "headSha": local_head, "status": "in_progress", "conclusion": None},
+            {"databaseId": 9, "headSha": local_head, "status": "completed", "conclusion": "failure"},
+        ]
+        check(operator._ci_watch_match_run(runs, local_head)["databaseId"] == 10,
+              "G4.match-newest-first-not-latest")
+        check(operator._ci_watch_match_run(runs, "d" * 40) is None, "G4.match-miss-is-none")
+        check(operator._ci_watch_verdict("in_progress", None) == "pending", "G4.verdict-pending")
+        check(operator._ci_watch_verdict("completed", "success") == "success", "G4.verdict-success")
+        check(operator._ci_watch_verdict("completed", "failure") == "failure", "G4.verdict-failure")
+        check(operator._ci_watch_verdict("completed", "cancelled") == "cancelled", "G4.verdict-cancelled")
+        check(operator._ci_watch_verdict("completed", "startup_failure") == "failure",
+              "G4.verdict-unknown-conclusion-fails-closed")
+        check(operator._ci_watch_verdict("queued", None) == "pending", "G4.verdict-queued-pending")
+
+        # Watch loop against scripted gh replies (dispatch never invoked).
+        watch_calls: list[list[str]] = []
+        script = {
+            "list": [
+                json.dumps([{"databaseId": 10, "headSha": "c" * 40, "status": "completed", "conclusion": "success"}]),
+                json.dumps([{"databaseId": 12, "headSha": local_head, "status": "in_progress",
+                             "conclusion": None, "url": "https://example/runs/12"}]),
+            ],
+            "view": [
+                json.dumps({"status": "in_progress", "conclusion": None, "url": "https://example/runs/12"}),
+                json.dumps({"status": "completed", "conclusion": "success", "url": "https://example/runs/12"}),
+            ],
+        }
+        receipts: list[str] = []
+        operator._print_json = lambda payload: receipts.append(json.dumps(payload))
+        fast_sleeps: list[float] = []
+
+        def watch_capture(argv: list[str], *, cwd: Path = operator.ROOT) -> subprocess.CompletedProcess[str]:
+            watch_calls.append(list(argv))
+            joined = " ".join(argv)
+            if "run list" in joined:
+                return subprocess.CompletedProcess(argv, 0, script["list"].pop(0))
+            if "run view" in joined:
+                return subprocess.CompletedProcess(argv, 0, script["view"].pop(0))
+            raise AssertionError(f"unexpected gh call: {argv}")
+
+        operator._run_capture = watch_capture
+        operator.time.sleep = fast_sleeps.append
+        watch_console = operator.Console(json_mode=True, no_color=True)
+        payload = operator._ci_watch(ci_config, "full", watch_console, 60.0, True)
+        check(payload["_exit"] == 0, "G4.watch-success-exit0")
+        check(payload["run_id"] == 12, "G4.watch-identity-bound-run")
+        check(payload["conclusion"] == "success", "G4.watch-success-conclusion")
+        check(payload["url"] == "https://example/runs/12", "G4.watch-url")
+        check(receipts and json.loads(receipts[-1])["conclusion"] == "success", "G4.watch-receipt-json")
+        check("_exit" not in json.loads(receipts[-1]), "G4.watch-receipt-clean")
+        check(all("workflow run" not in " ".join(c) for c in watch_calls), "G4.watch-never-dispatches")
+        check(any("run list" in " ".join(c) for c in watch_calls), "G4.watch-discovery-used-list")
+        check(len(fast_sleeps) >= 3, "G4.watch-poll-interval-sleeps")
+
+        # Failure conclusion maps to exit 1.
+        script["view"] = [json.dumps({"status": "completed", "conclusion": "failure",
+                                      "url": "https://example/runs/12"})]
+        script["list"] = [json.dumps([{"databaseId": 12, "headSha": local_head, "status": "in_progress",
+                                       "conclusion": None, "url": "https://example/runs/12"}])]
+        payload = operator._ci_watch(ci_config, "full", watch_console, 60.0, False)
+        check(payload["_exit"] == 1, "G4.watch-failure-exit1")
+
+        # Timeout is inherently terminating: no run ever appears, deadline passes.
+        clock = {"now": 0.0}
+        real_monotonic = operator.time.monotonic
+
+        def advancing_sleep(seconds: float) -> None:
+            clock["now"] += max(seconds, 60.0)
+            fast_sleeps.append(seconds)
+
+        empty_list = json.dumps([])
+        operator._run_capture = lambda argv, *, cwd=operator.ROOT: (
+            watch_calls.append(list(argv)) or subprocess.CompletedProcess(argv, 0, empty_list)
+        )
+        operator.time.monotonic = lambda: clock["now"]
+        operator.time.sleep = advancing_sleep
+        try:
+            operator._ci_watch(ci_config, "full", watch_console, 1.0, False)
+        except operator.OperatorError as exc:
+            check("no run found" in str(exc), "G4.watch-discovery-timeout-typed")
+        else:
+            raise AssertionError("ci watch discovery loop did not terminate on timeout")
+        operator.time.monotonic = real_monotonic
+
     print(f"[ OK ] Qiven Operator tests passed ({checks} named checks)")
     return 0
 

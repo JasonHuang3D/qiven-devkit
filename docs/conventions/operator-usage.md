@@ -44,12 +44,27 @@ pit P-53).
 `qiven run TASK...` (`--parallel` to run them concurrently). Unknown names
 return the available alternatives.
 
-## ci — explicit CI dispatch only
+## ci — explicit dispatch + observation-only watch
 
 `qiven ci start PROFILE` verifies the remote branch matches local HEAD,
 dispatches the declared workflow via `gh`, and returns immediately. Qiven
 workflows are `workflow_dispatch`-only — a push never triggers CI
 (`collaboration/session-ci-handoff-contract.md`).
+
+`qiven ci watch PROFILE [--timeout MINUTES] [--receipt]` (2026-09-26,
+OBL-F1A2B3 owner design) observes an ALREADY-DISPATCHED run to its
+terminal state. It never dispatches anything. The watched run is
+identity-bound: it must match local HEAD == origin/branch (same guard as
+start), resolved through `gh run list` by exact head SHA — never "latest".
+Designed to run under the harness's `run_in_background` re-call: the
+process polls gh internally every 10 s (zero token cost while running;
+the harness notifies once on completion), output stays clean (markers +
+errors only, no per-poll chatter), and it is inherently terminating
+(internal timeout, default 60 min; discovery window shares the budget).
+Exit codes: 0 run concluded success; 1 failure/cancelled/timeout; 2
+environment/usage error. `--receipt` prints one JSON receipt line
+(run id, url, conclusion, head, durations); `--json` mode prints only the
+receipt.
 
 ## exec — supervised detached execution under bounded custody (the custody path)
 
