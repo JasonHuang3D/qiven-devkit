@@ -5,6 +5,7 @@ import concurrent.futures
 import ctypes
 from dataclasses import dataclass, asdict
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -1445,23 +1446,10 @@ def _ci_start(config: dict[str, Any], profile: str, console: Console) -> dict[st
     spec = ci.get(profile) if isinstance(ci, dict) else None
     if not isinstance(spec, dict):
         raise OperatorError(f"unknown CI profile: {profile}")
-    workflow = spec.get("workflow")
     inputs = spec.get("inputs", {})
-    if not isinstance(workflow, str) or not workflow:
-        raise OperatorError("CI profile requires workflow")
     if not isinstance(inputs, dict):
         raise OperatorError("CI profile inputs must be an object")
-    if shutil.which("gh") is None:
-        raise OperatorError("GitHub CLI 'gh' was not found on PATH")
-    branch = _current_branch()
-    head = _head()
-    repo = _remote_repo()
-    console.emit("run", f"ci:{profile}: verify origin/{branch} exact HEAD")
-    remote_head = _remote_branch_head(branch)
-    if remote_head != head:
-        raise OperatorError(
-            f"CI dispatch requires origin/{branch} to match local HEAD: local={head} remote={remote_head}"
-        )
+    workflow, branch, head, repo = _ci_resolve_guard(config, profile, "ci:" + profile)
     console.emit("ok", f"ci:{profile}: origin/{branch} matches {head}")
     argv = ["gh", "workflow", "run", workflow, "--repo", repo, "--ref", branch]
     for key, value in inputs.items():
@@ -1478,41 +1466,15 @@ def _ci_start(config: dict[str, Any], profile: str, console: Console) -> dict[st
         "repository": repo,
         "branch": branch,
         "head": head,
-        "remote_head": remote_head,
+        "remote_head": head,
         "status": "dispatched",
     }
 
 
-def _ci_watch_match_run(runs: list[dict[str, Any]], head: str) -> dict[str, Any] | None:
-    # gh run list is newest-first; the watch target is identity-bound to the
-    # exact head SHA (never "latest" - the operating contract's racy-latest
-    # prohibition). First exact match wins.
-    for run in runs:
-        if run.get("headSha") == head:
-            return run
-    return None
-
-
-def _ci_watch_verdict(status: str | None, conclusion: str | None) -> str:
-    # pending while not completed; terminal mapping otherwise. Unknown
-    # conclusions are failures, never successes (fail closed).
-    if status != "completed":
-        return "pending"
-    if conclusion == "success":
-        return "success"
-    if conclusion == "cancelled":
-        return "cancelled"
-    return "failure"
-
-
-def _ci_watch(config: dict[str, Any], profile: str, console: Console,
-              timeout_minutes: float, json_receipt: bool) -> dict[str, Any]:
-    # OBSERVATION ONLY (OBL-F1A2B3 owner design 2026-09-25): watches a
-    # DISPATCHED run to its terminal state. Never dispatches anything;
-    # the dispatch-only trigger law (MEM-20260921T095600Z-C5E1A8) stands.
-    # Designed to run under the harness's run_in_background: inherently
-    # terminating (internal timeout), clean output (markers + errors
-    # only, no per-poll chatter), one JSON receipt line at the end.
+def _ci_resolve_guard(config: dict[str, Any], profile: str, action: str) -> tuple[str, str, str, str]:
+    # Shared dispatch/watch precondition: profile resolution plus the
+    # local-HEAD == origin/<branch> guard (the invariant that must not
+    # drift between `ci start` and `ci watch` - review finding F5).
     ci = config.get("ci", {})
     spec = ci.get(profile) if isinstance(ci, dict) else None
     if not isinstance(spec, dict):
@@ -1528,11 +1490,70 @@ def _ci_watch(config: dict[str, Any], profile: str, console: Console,
     remote_head = _remote_branch_head(branch)
     if remote_head != head:
         raise OperatorError(
-            f"ci:watch requires origin/{branch} to match local HEAD: local={head} remote={remote_head}"
+            f"{action} requires origin/{branch} to match local HEAD: local={head} remote={remote_head}"
         )
+    return workflow, branch, head, repo
+
+
+def _ci_watch_match_run(runs: list[dict[str, Any]], head: str) -> dict[str, Any] | None:
+    # gh run list is newest-first; the watch target is identity-bound to the
+    # exact head SHA (never "latest" - the operating contract's racy-latest
+    # prohibition). Preference order among same-head matches (review finding
+    # F1): a NON-TERMINAL run wins immediately (a just-dispatched run exists
+    # as queued/in_progress from creation, so the canonical start->watch
+    # flow never locks onto a stale terminal run); terminal matches need the
+    # stabilization counter in _ci_watch before they may be accepted.
+    terminal: dict[str, Any] | None = None
+    for run in runs:
+        if run.get("headSha") != head:
+            continue
+        if run.get("status") != "completed":
+            return run
+        if terminal is None:
+            terminal = run
+    return terminal
+
+
+def _ci_watch_verdict(status: str | None, conclusion: str | None) -> str:
+    # pending while not completed; terminal mapping otherwise. Unknown
+    # conclusions are failures, never successes (fail closed).
+    if status != "completed":
+        return "pending"
+    if conclusion == "success":
+        return "success"
+    if conclusion == "cancelled":
+        return "cancelled"
+    return "failure"
+
+
+CI_WATCH_STABLE_POLLS = 3
+CI_WATCH_POLL_SECONDS = 10.0
+CI_WATCH_GH_STRIKES = 3
+
+
+def _gh_capture(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    # gh JSON must be parsed from stdout ONLY: merging stderr (the
+    # _run_capture default) lets any benign gh notice corrupt the parse
+    # across a 60-minute poll cadence (review finding F4).
+    return subprocess.run(argv, cwd=ROOT, text=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, check=False)
+
+
+def _ci_watch(config: dict[str, Any], profile: str, console: Console,
+              timeout_minutes: float, json_receipt: bool) -> dict[str, Any]:
+    # OBSERVATION ONLY (OBL-F1A2B3 owner design 2026-09-25): watches a
+    # DISPATCHED run to its terminal state. Never dispatches anything;
+    # the dispatch-only trigger law (MEM-20260921T095600Z-C5E1A8) stands.
+    # Designed to run under the harness's run_in_background: inherently
+    # terminating (internal timeout), clean output (markers + errors
+    # only, no per-poll chatter), one JSON receipt line at the end.
+    if not (math.isfinite(timeout_minutes) and timeout_minutes > 0):
+        raise OperatorError(f"ci:watch --timeout must be a positive finite number of minutes, got {timeout_minutes!r}")
+    workflow, branch, head, repo = _ci_resolve_guard(config, profile, "ci:watch")
     deadline = time.monotonic() + timeout_minutes * 60.0
     console.emit("run", f"ci:watch:{profile}: resolving run for {head} on {branch} (workflow {workflow})")
     run: dict[str, Any] | None = None
+    stable_polls = 0
     gh_failures = 0
     while run is None:
         if time.monotonic() >= deadline:
@@ -1540,26 +1561,38 @@ def _ci_watch(config: dict[str, Any], profile: str, console: Console,
                 f"ci:watch:{profile}: no run found for {head} on {branch} within the timeout "
                 "(dispatch happens separately via `qiven ci start`)"
             )
-        completed = _run_capture([
+        completed = _gh_capture([
             "gh", "run", "list", "--repo", repo, "--workflow", workflow,
             "--branch", branch, "--limit", "20",
             "--json", "databaseId,headSha,status,conclusion,url",
         ])
         if completed.returncode:
             gh_failures += 1
-            console.emit("fail", f"ci:watch:{profile}: gh run list failed ({gh_failures}/3): {completed.stdout.strip()[:200]}")
-            if gh_failures >= 3:
-                raise OperatorError(f"ci:watch:{profile}: gh run list failed 3 times")
-            time.sleep(10.0)
+            detail = (completed.stderr or completed.stdout or "").strip()[:200]
+            console.emit("fail", f"ci:watch:{profile}: gh run list failed ({gh_failures}/{CI_WATCH_GH_STRIKES}): {detail}")
+            if gh_failures >= CI_WATCH_GH_STRIKES:
+                raise OperatorError(f"ci:watch:{profile}: gh run list failed {CI_WATCH_GH_STRIKES} times")
+            time.sleep(CI_WATCH_POLL_SECONDS)
             continue
         gh_failures = 0
         try:
             runs = json.loads(completed.stdout or "[]")
         except json.JSONDecodeError as exc:
             raise OperatorError(f"ci:watch:{profile}: unparseable gh run list output: {exc}") from exc
-        run = _ci_watch_match_run(runs, head)
-        if run is None:
-            time.sleep(10.0)
+        candidate = _ci_watch_match_run(runs, head)
+        if candidate is None:
+            stable_polls = 0
+            time.sleep(CI_WATCH_POLL_SECONDS)
+            continue
+        if candidate.get("status") == "completed":
+            # Only-terminal evidence: the just-dispatched run may not be
+            # listed yet. Accept only after the newest terminal match stays
+            # stable across consecutive polls (finding F1).
+            stable_polls += 1
+            if stable_polls < CI_WATCH_STABLE_POLLS:
+                time.sleep(CI_WATCH_POLL_SECONDS)
+                continue
+        run = candidate
     run_id = run.get("databaseId")
     url = run.get("url") or ""
     console.emit("wait", f"ci:watch:{profile}: observing run {run_id} (errors only until terminal)")
@@ -1570,16 +1603,17 @@ def _ci_watch(config: dict[str, Any], profile: str, console: Console,
             verdict = "timeout"
             break
         time_left = deadline - time.monotonic()
-        time.sleep(min(10.0, max(0.0, time_left)))
-        completed = _run_capture([
+        time.sleep(min(CI_WATCH_POLL_SECONDS, max(0.0, time_left)))
+        completed = _gh_capture([
             "gh", "run", "view", str(run_id), "--repo", repo,
             "--json", "status,conclusion,url",
         ])
         if completed.returncode:
             gh_failures += 1
-            console.emit("fail", f"ci:watch:{profile}: gh run view failed ({gh_failures}/3): {completed.stdout.strip()[:200]}")
-            if gh_failures >= 3:
-                raise OperatorError(f"ci:watch:{profile}: gh run view failed 3 times")
+            detail = (completed.stderr or completed.stdout or "").strip()[:200]
+            console.emit("fail", f"ci:watch:{profile}: gh run view failed ({gh_failures}/{CI_WATCH_GH_STRIKES}): {detail}")
+            if gh_failures >= CI_WATCH_GH_STRIKES:
+                raise OperatorError(f"ci:watch:{profile}: gh run view failed {CI_WATCH_GH_STRIKES} times")
             continue
         gh_failures = 0
         try:

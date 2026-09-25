@@ -55,16 +55,22 @@ workflows are `workflow_dispatch`-only — a push never triggers CI
 OBL-F1A2B3 owner design) observes an ALREADY-DISPATCHED run to its
 terminal state. It never dispatches anything. The watched run is
 identity-bound: it must match local HEAD == origin/branch (same guard as
-start), resolved through `gh run list` by exact head SHA — never "latest".
-Designed to run under the harness's `run_in_background` re-call: the
-process polls gh internally every 10 s (zero token cost while running;
-the harness notifies once on completion), output stays clean (markers +
-errors only, no per-poll chatter), and it is inherently terminating
-(internal timeout, default 60 min; discovery window shares the budget).
-Exit codes: 0 run concluded success; 1 failure/cancelled/timeout; 2
-environment/usage error. `--receipt` prints one JSON receipt line
-(run id, url, conclusion, head, durations); `--json` mode prints only the
-receipt.
+start), resolved through `gh run list` by exact head SHA — never
+"latest". Same-head re-dispatch: a live (non-terminal) run is preferred
+immediately; a terminal run is accepted only after it stays the newest
+match across three consecutive polls (~30 s stabilization), so a stale
+run's verdict is never reported in the canonical start→watch flow. gh
+JSON is parsed from stdout only; three consecutive gh failures abort
+with a typed error. Designed to run under the harness's
+`run_in_background` re-call: the process polls gh internally every 10 s
+(zero token cost while running; the harness notifies once on
+completion), output stays clean (markers + errors only, no per-poll
+chatter), and it is inherently terminating (internal timeout, default
+60 min, validated finite/positive; discovery window shares the budget).
+Exit codes: 0 run concluded success; 1 failure/cancelled/poll-timeout;
+2 environment/usage error (including no run found for the head within
+the budget). `--receipt` prints one JSON receipt line (run id, url,
+conclusion, head, durations); `--json` mode prints only the receipt.
 
 ## exec — supervised detached execution under bounded custody (the custody path)
 
