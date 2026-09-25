@@ -1543,17 +1543,31 @@ def _gh_capture(argv: list[str]) -> subprocess.CompletedProcess[str]:
                           stderr=subprocess.PIPE, check=False)
 
 
-def _ci_watch(config: dict[str, Any], profile: str, console: Console,
-              timeout_minutes: float, json_receipt: bool) -> dict[str, Any]:
+def _ci_watch(config: dict[str, Any], profile: str | None, console: Console,
+              timeout_minutes: float, json_receipt: bool,
+              identity: dict[str, str] | None = None) -> dict[str, Any]:
     # OBSERVATION ONLY (OBL-F1A2B3 owner design 2026-09-25): watches a
     # DISPATCHED run to its terminal state. Never dispatches anything;
     # the dispatch-only trigger law (MEM-20260921T095600Z-C5E1A8) stands.
     # Designed to run under the harness's run_in_background: inherently
     # terminating (internal timeout), clean output (markers + errors
     # only, no per-poll chatter), one JSON receipt line at the end.
+    # Two identity modes: PROFILE (config + local git: HEAD must equal
+    # origin/<branch>) or EXPLICIT (--repo/--workflow/--branch/--head,
+    # checkout-independent - the caller holds the dispatch identity, so
+    # the watch does not depend on live git state for cross-repo use).
     if not (math.isfinite(timeout_minutes) and timeout_minutes > 0):
         raise OperatorError(f"ci:watch --timeout must be a positive finite number of minutes, got {timeout_minutes!r}")
-    workflow, branch, head, repo = _ci_resolve_guard(config, profile, "ci:watch")
+    if identity is not None:
+        repo = identity["repo"]
+        workflow = identity["workflow"]
+        branch = identity["branch"]
+        head = identity["head"]
+        profile = profile or "explicit"
+    else:
+        if not profile:
+            raise OperatorError("ci watch requires PROFILE, or the explicit --repo/--workflow/--branch/--head identity")
+        workflow, branch, head, repo = _ci_resolve_guard(config, profile, "ci:watch")
     deadline = time.monotonic() + timeout_minutes * 60.0
     console.emit("run", f"ci:watch:{profile}: resolving run for {head} on {branch} (workflow {workflow})")
     run: dict[str, Any] | None = None
@@ -1725,11 +1739,17 @@ def _parser() -> argparse.ArgumentParser:
         "watch", help="observe an already-dispatched CI run to terminal state (observation only; run under run_in_background)",
         parents=[_common_flags()],
     )
-    ci_watch.add_argument("profile", help="declared CI profile")
+    ci_watch.add_argument("profile", nargs="?", default=None,
+                          help="declared CI profile (in-repo mode); omitted when the explicit identity flags are used")
     ci_watch.add_argument("--timeout", type=float, default=60.0,
                           help="overall watch budget in minutes (inherently terminating; default 60)")
     ci_watch.add_argument("--receipt", action="store_true",
                           help="print one JSON receipt line at the end (always printed in --json mode)")
+    ci_watch.add_argument("--repo", default=None,
+                          help="explicit identity mode: OWNER/NAME of the target repository (requires --workflow/--branch/--head)")
+    ci_watch.add_argument("--workflow", default=None, help="explicit identity mode: workflow name")
+    ci_watch.add_argument("--branch", default=None, help="explicit identity mode: branch name")
+    ci_watch.add_argument("--head", default=None, help="explicit identity mode: exact head SHA the run must match")
     exec_parser = sub.add_parser(
         "exec", help="supervised detached command execution under bounded process custody", parents=[_common_flags()]
     )
@@ -1849,8 +1869,19 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "ci" and args.ci_command == "watch":
+            identity = None
+            if args.repo is not None:
+                missing = [flag for flag, value in (
+                    ("--workflow", args.workflow), ("--branch", args.branch), ("--head", args.head),
+                ) if not value]
+                if missing:
+                    raise OperatorError(f"ci:watch explicit identity requires {'+'.join(missing)} alongside --repo")
+                if args.profile:
+                    raise OperatorError("ci:watch explicit identity does not take a PROFILE argument")
+                identity = {"repo": args.repo, "workflow": args.workflow,
+                            "branch": args.branch, "head": args.head}
             payload = _ci_watch(config, args.profile, console, args.timeout,
-                                args.receipt or console.json_mode)
+                                args.receipt or console.json_mode, identity)
             return payload.pop("_exit")
 
         if args.command == "exec":

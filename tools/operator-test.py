@@ -928,6 +928,37 @@ def main() -> int:
         )
         check("positive finite" in plumbing.stdout, "G4.watch-main-plumbing-budget-error")
 
+        # Explicit identity mode: no profile, no local git context; the
+        # caller-held dispatch identity drives discovery (cross-repo use).
+        explicit_calls: list[list[str]] = []
+        explicit_head = "e" * 40
+
+        def explicit_capture(argv: list[str]) -> subprocess.CompletedProcess[str]:
+            explicit_calls.append(list(argv))
+            joined = " ".join(argv)
+            listing = json.dumps([
+                {"databaseId": 21, "headSha": "f" * 40, "status": "completed", "conclusion": "success"},
+                {"databaseId": 22, "headSha": explicit_head, "status": "queued", "conclusion": None,
+                 "url": "https://example/runs/22"},
+            ])
+            if "run list" in joined:
+                return subprocess.CompletedProcess(argv, 0, listing)
+            return subprocess.CompletedProcess(
+                argv, 0, json.dumps({"status": "completed", "conclusion": "success",
+                                     "url": "https://example/runs/22"})
+            )
+
+        operator._gh_capture = explicit_capture
+        operator.time.sleep = lambda seconds: None
+        identity = {"repo": "example/other", "workflow": "ci.yml",
+                    "branch": "release-branch", "head": explicit_head}
+        payload = operator._ci_watch(ci_config, None, watch_console, 5.0, False, identity)
+        check(payload["run_id"] == 22, "G4.watch-explicit-identity-run")
+        check(payload["repository"] == "example/other", "G4.watch-explicit-identity-repo")
+        check(payload["head"] == explicit_head, "G4.watch-explicit-identity-head")
+        check(any("example/other" in " ".join(c) for c in explicit_calls), "G4.watch-explicit-targets-remote-repo")
+        check(payload["_exit"] == 0, "G4.watch-explicit-identity-exit0")
+
         # Poll-phase timeout: run stays pending past the deadline -> verdict
         # timeout with exit 1 (never an infinite wait).
         clock = {"now": 0.0}
