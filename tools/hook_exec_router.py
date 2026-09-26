@@ -10,9 +10,25 @@ is the HARNESS's run_in_background - one re-call, one completion
 notification, zero polling. exec-detour + status-poll loops and
 foreground sleep+tail loops are the anti-pattern being retired. The
 Qiven Operator exec remains the sanctioned path ONLY for custody
-classes: tree sweeps (lease-bounded ghost-process class), runs that
-must survive the session, owner kits, and work past the 10-min Bash
-timeout ceiling.
+classes: unbounded tree sweeps (lease-bounded ghost-process class),
+runs that must survive the session, owner kits, and work past the
+10-min Bash timeout ceiling.
+
+v4.3 (owner direction 2026-09-26, token economy): sweeps split by
+INHERENT BOUNDEDNESS. `git grep` / `git ls-files` walk tracked files
+only (they structurally cannot enter .venv/node_modules/third-party
+checkouts) and pass RAW - zero round-trips, zero context cost; a
+sweep-class denial that pushes the model into whole-file Reads
+pollutes the live context and compounds the compaction problem.
+Recursive grep/find/dir sweeps whose explicit path arguments stay
+strictly inside the workspace root (and name no heavy directory) are
+seconds-class: deny -> run_in_background re-call, with the
+--exclude-dir bounding carried in the command because the Bash timeout
+parameter does not bind background tasks (P3). Sweeps without an
+explicit in-scope path, escaping the root, or naming a heavy tree stay
+exec-lease custody (the 2026-09-23 ghost-process class; OBL-D5E6F7
+reframing: operational session end kills nothing, so an unbounded
+background sweep can outlive the session).
 
 Every denial is prefixed "[qiven-hook]" and, where a probe ran, states
 the MEASUREMENT ("measured: 137 commits ahead") so the receiving agent
@@ -32,9 +48,14 @@ Verdicts:
   build         builds/toolchains - background re-call AND the MSBuild
                 node-reuse guard (ADR-0048 s3 defense in depth extended
                 to the background path by ADR-0051)
-  sweep         filesystem tree sweeps - exec lease custody ONLY (the
-                ghost-process class; background session-end lifetime is
-                uncharacterized, ADR-0051 clause 5)
+  sweep-scoped filesystem tree sweep with explicit path arguments that
+                stay strictly inside the workspace root and name no
+                heavy directory - seconds-class: background re-call
+                (v4.3); the bounding rides the command (P3)
+  sweep-        unbounded filesystem tree sweep (no explicit in-scope
+  unbounded     path, escapes the root, or names a heavy tree) - exec
+                lease custody ONLY (the ghost-process class; OBL-D5E6F7
+                reframing: session end kills nothing)
   repo-tool     repository gate/tool entrypoints - background re-call
   network       network acquisition - background re-call
   interactive   suspends the shell awaiting a human
@@ -51,9 +72,12 @@ discipline.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 PROBE_BUDGET_S = 5.0
 PUSH_COMMIT_THRESHOLD = 25
@@ -89,16 +113,28 @@ _BUILD_CLASS = re.compile(
 )
 
 # Filesystem tree sweeps (2026-09-23 incident: a raw Git-Bash `find` over
-# the workspace survived the session at 20%+ CPU; sweeps are minutes-class
-# and belong under exec custody's lease). Path-argument forms (`find
-# /d/...`, `find D:\...`, flags then path) sweep; the Windows text-FILTER
-# form (`find /i "text" file` - slash-flag then quoted needle) does not.
-# grep -r/--recursive and `dir /s` same class.
+# the workspace survived the session at 20%+ CPU; unbounded sweeps are
+# minutes-class and belong under exec custody's lease). Path-argument forms
+# (`find /d/...`, `find D:\...`, flags then path) sweep; the Windows
+# text-FILTER form (`find /i "text" file` - slash-flag then quoted needle)
+# does not. grep -r/--recursive and `dir /s` same class. v4.3: a match is
+# then sub-classified by _sweep_scope (scoped -> background; unbounded ->
+# exec lease); `git grep`/`git ls-files` never reach this class at all.
 _SWEEP_CLASS = re.compile(
-    r"\bg?find\s+(?:-[A-Za-z][A-Za-z0-9-]*\s+)*(?:[A-Za-z]:[\\/]|/[A-Za-z0-9_.-]+[\\/])"
+    r"\bg?find\s+(?:-[A-Za-z][A-Za-z0-9-]*\s+)*"
+    r"(?:[A-Za-z]:[\\/]|/[A-Za-z0-9_.-]+[\\/]"
+    r"|[A-Za-z0-9_.\-][A-Za-z0-9_.\-\\/]*(?:\s|$))"
     r"|\bgrep\s+(?:[^&|;]*\s)?(?:-r[A-Za-z]*\b|--recursive\b)"
     r"|\bdir\s+(?:[^&|;]*\s)?/[sb]\b",
     re.IGNORECASE,
+)
+
+# Heavy directory components: a sweep whose target names one of these is
+# minutes-class regardless of scope (vendored trees, dependency forests,
+# git object stores). Membership is owned by the canonical registry
+# (qiven-context collaboration/long-command-registry.md).
+_HEAVY_DIR_COMPONENTS = frozenset(
+    {".venv", "node_modules", ".git", "third-party-win", "qiven-third-party-win"}
 )
 
 # Repository gate/tool entrypoints that sweep or build big trees.
@@ -170,6 +206,16 @@ _OPERATOR_EXEC = re.compile(
     _SEGMENT_PREFIX + r"(?:tools[/\\])?qiven(?:\.cmd|\.py|\.sh)?\s+(?:exec|info|status)\b",
     re.IGNORECASE,
 )
+# v4.3 (owner direction 2026-09-26): git's own tree walks are INHERENTLY
+# BOUNDED - tracked files only, structurally unable to enter .venv/
+# node_modules/third-party checkouts - so they pass raw: zero round-trips,
+# zero context cost. Without this exemption `git grep -rn x` matched the
+# sweep class through its -r flag and pushed the model toward whole-file
+# Reads (the exact context-pollution compounding the owner flagged).
+_GIT_BOUNDED_SEARCH = re.compile(
+    _SEGMENT_PREFIX + r"git\s+(?:grep|ls-files)\b",
+    re.IGNORECASE,
+)
 _GIT_NETWORK = re.compile(r"git\s+(push|fetch|pull)\b", re.IGNORECASE)
 
 _HOOK_TAG = "[qiven-hook]"
@@ -195,15 +241,31 @@ _DENY_BG_GUARD_TEMPLATE = (
     "  MSBUILDDISABLENODEREUSE=1 <same command>    (with run_in_background: true)\n"
     "(/nr:false or /nodeReuse:false also satisfies the guard for direct msbuild calls)."
 )
-# Sweeps stay under exec lease custody (ADR-0051 clause 5): the ghost-
-# process class survived a session through an uncustodied path, and a
-# background task's session-end lifetime is not yet characterized.
+# v4.3 scoped sweep: seconds-class by construction (explicit in-scope
+# path arguments), so the harness background path carries it; the
+# bounding rides the command because the Bash timeout parameter does
+# NOT bind background tasks (P3).
+_DENY_SWEEP_SCOPED_TEMPLATE = (
+    "{tag} repo-scoped filesystem sweep invoked raw: re-issue THIS EXACT command with\n"
+    "run_in_background: true (Bash tool parameter) - the output auto-persists with a short\n"
+    "preview, so the scan never floods your context. Background is NOT timeout-bounded (P3):\n"
+    "bound the walk in the command, e.g. --exclude-dir=.venv --exclude-dir=node_modules\n"
+    "--exclude-dir=build --exclude-dir=.git (grep), or prefer `git grep <pattern>` / `git\n"
+    "ls-files` (tracked files only), which pass this hook raw (v4.3)."
+)
+# Unbounded sweeps stay under exec lease custody (ADR-0051 clause 5 as
+# reframed by OBL-D5E6F7: operational session end kills nothing, so an
+# unbounded background sweep can outlive the session - the ghost class).
 _DENY_SWEEP_TEMPLATE = (
-    "{tag} filesystem tree sweep: sweeps run under the Qiven Operator lease - custody must not\n"
-    "depend on this session's lifetime (ghost-process class, ADR-0051 s5); run_in_background is\n"
-    "NOT sufficient here. Route it:\n"
+    "{tag} unbounded filesystem tree sweep (no explicit in-repo path, escapes the workspace\n"
+    "root, or names a heavy tree like .venv/node_modules/third-party): this class runs under\n"
+    "the Qiven Operator lease - custody must not depend on this session's lifetime (ghost-\n"
+    "process class, ADR-0051 s5); run_in_background is NOT sufficient here. Route it:\n"
     "  tools\\qiven.cmd exec start --timeout 600 -- <your command>\n"
-    "exit 124 = still running; re-attach then (and only then): tools\\qiven.cmd exec status <run-id>"
+    "exit 124 = still running; re-attach then (and only then): tools\\qiven.cmd exec status <run-id>\n"
+    "Better for your context budget: scope the sweep to an explicit in-repo subpath (then the\n"
+    "run_in_background re-call passes), or use `git grep <pattern>` / `git ls-files` (tracked\n"
+    "files only), which pass this hook raw (v4.3)."
 )
 _DENY_INTERACTIVE = (
     f"{_HOOK_TAG} interactive command invoked raw: it suspends the shell awaiting a human\n"
@@ -284,11 +346,85 @@ _VERDICT_PRIORITY = (
     "gate-class",
     "git-network",
     "build",
-    "sweep",
+    "sweep-unbounded",
+    "sweep-scoped",
     "repo-tool",
     "network",
     "interactive",
 )
+
+
+def _argv(raw: str) -> list[str]:
+    """Quote-aware tokenization that KEEPS backslashes (posix=False - the
+    backslash-eating scar class, MEM-20260925T174500Z-E5F6A7) and strips
+    one layer of matching surrounding quotes per token. Empty on
+    unparseable input (caller treats that as unbounded)."""
+    try:
+        tokens = shlex.split(raw, posix=False)
+    except ValueError:
+        return []
+    out: list[str] = []
+    for token in tokens:
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in ("'", '"'):
+            token = token[1:-1]
+        out.append(token)
+    return out
+
+
+def _path_is_scoped(token: str, root_normalized: str) -> bool:
+    """One path candidate is in-scope iff it is relative without any '..'
+    or heavy component, or absolute, strictly inside the scope root, with
+    no heavy component below it. '.' (the root wholesale) is NOT scoped.
+    The bound is on the ENTRY POINT, not the subtree contents - the
+    background teaching carries --exclude-dir (registry residual)."""
+    match = re.match(r"^/([a-zA-Z])/(.+)$", token)
+    if match:  # Git-Bash drive form /d/... -> D:\...
+        token = f"{match.group(1).upper()}:\\{match.group(2)}"
+    if re.match(r"^[a-zA-Z]:", token):
+        normalized = os.path.normcase(os.path.normpath(token))
+        if normalized == root_normalized:
+            return False  # the workspace root wholesale = unbounded
+        if not normalized.startswith(root_normalized + os.sep):
+            return False  # escapes the scope root entirely
+        below = [c for c in normalized[len(root_normalized):].split(os.sep) if c]
+        return not any(c.lower() in _HEAVY_DIR_COMPONENTS for c in below)
+    parts = [c for c in re.split(r"[\\/]+", token) if c not in ("", ".")]
+    if not parts or any(c == ".." for c in parts):
+        return False  # no real target ('.'/empty = root wholesale) or escape
+    return not any(c.lower() in _HEAVY_DIR_COMPONENTS for c in parts)
+
+
+def _sweep_scope(segment: str, scope_root: Path) -> str:
+    """Sub-classify a segment that already matched _SWEEP_CLASS:
+    'sweep-scoped' iff EVERY explicit path candidate is in-scope and at
+    least one exists; else 'sweep-unbounded'. Path candidates are
+    approximated from argv: leading env assignments and cd/cmd/call
+    wrappers are skipped; '-' flags (and short '/x' dir-flags) are
+    skipped; for grep the first non-flag token is the PATTERN and is
+    dropped. The approximation fails toward 'unbounded' (friction, not
+    danger)."""
+    tokens = _argv(segment.strip())
+    index = 0
+    while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[index]):
+        index += 1
+    while index < len(tokens) and tokens[index].lower() in ("cmd", "/c", "call", "python"):
+        index += 1
+    tool = tokens[index].lower() if index < len(tokens) else ""
+    candidates: list[str] = []
+    dropped_pattern = False
+    for token in tokens[index + 1:]:
+        if token.startswith("-"):
+            continue
+        if token.startswith("/") and len(token) <= 3:
+            continue  # dir-style flag (/s /b /x)
+        if tool.endswith("grep") and not dropped_pattern:
+            dropped_pattern = True  # grep's PATTERN positional
+            continue
+        candidates.append(token)
+    root_normalized = os.path.normcase(str(scope_root.resolve()))
+    if candidates and all(_path_is_scoped(c, root_normalized) for c in candidates):
+        return "sweep-scoped"
+    return "sweep-unbounded"
 
 
 def _strip_quoted(text: str) -> str:
@@ -310,14 +446,15 @@ def _strip_quoted(text: str) -> str:
     return "".join(out)
 
 
-def _classify_segment(segment: str) -> str:
+def _classify_segment(segment: str, scope_root: Path) -> str:
     """One command segment (no separators). exec/info segments (the
     sanctioned operator wrappers) are exempt from ROUTING classes — but
     not from heredoc: an absolute authoring prohibition cannot be
-    laundered by wrapping it in `qiven exec`. Everything else by class,
-    matched against the quote-stripped command surface. Segments are
-    lstripped before matching: a segment following `&&`/`;`/`|` arrives
-    with a leading space and the anchors are `^`-anchored
+    laundered by wrapping it in `qiven exec`. git grep/ls-files segments
+    are inherently bounded and pass raw (v4.3). Everything else by
+    class, matched against the quote-stripped command surface. Segments
+    are lstripped before matching: a segment following `&&`/`;`/`|`
+    arrives with a leading space and the anchors are `^`-anchored
     (OBL-20260923T224500Z-A7B8C9: chained exec invocations denied)."""
     if not segment.strip():
         return "allow"
@@ -326,6 +463,8 @@ def _classify_segment(segment: str) -> str:
         return "heredoc"
     if _OPERATOR_EXEC.match(surface):
         return "allow"
+    if _GIT_BOUNDED_SEARCH.match(surface):
+        return "allow"
     if _GATE_CLASS.match(surface):
         return "gate-class"
     if _GIT_NETWORK.search(surface):
@@ -333,7 +472,7 @@ def _classify_segment(segment: str) -> str:
     if _BUILD_CLASS.search(surface):
         return "build"
     if _SWEEP_CLASS.search(surface):
-        return "sweep"
+        return _sweep_scope(segment, scope_root)
     if _REPO_TOOL_CLASS.search(surface):
         return "repo-tool"
     if _NETWORK_CLASS.search(surface):
@@ -343,14 +482,17 @@ def _classify_segment(segment: str) -> str:
     return "allow"
 
 
-def classify(command: str) -> str:
+def classify(command: str, scope_root: Path | None = None) -> str:
     """Whole-command classification: split on command separators (quote-
     aware), judge each segment independently, and return the
     highest-priority denial (an exec wrapper in one segment never
-    launders a raw long command in another)."""
+    launders a raw long command in another). scope_root defaults to the
+    hook process cwd (the workspace root in practice) and bounds the
+    sweep-scoped subclass."""
     if not command:
         return "allow"
-    verdicts = [_classify_segment(segment) for segment in _split_segments(command)]
+    root = scope_root if scope_root is not None else Path.cwd()
+    verdicts = [_classify_segment(segment, root) for segment in _split_segments(command)]
     for candidate in _VERDICT_PRIORITY:
         if candidate in verdicts:
             return candidate
@@ -451,21 +593,28 @@ _DENY_GIT_NETWORK_TEMPLATE = (
 )
 
 
-def verdict(command: str, probe_runner=_run_git, background: bool = False) -> tuple[int, str]:
+def verdict(command: str, probe_runner=_run_git, background: bool = False,
+            scope_root: Path | None = None) -> tuple[int, str]:
     """Full decision: (exit_code, stderr_message). 0 = allow.
 
     `background` mirrors the Bash tool call's run_in_background flag
     (ADR-0051): the long/gate/network classes are satisfied by a
     backgrounded re-call; build/gate additionally require the MSBuild
-    node-reuse guard; sweeps always require exec lease custody."""
-    kind = classify(command)
+    node-reuse guard; scoped sweeps are satisfied by a backgrounded
+    re-call (v4.3) while unbounded sweeps always require exec lease
+    custody."""
+    kind = classify(command, scope_root)
     if kind == "allow":
         return 0, ""
     if kind == "heredoc":
         return 2, _DENY_HEREDOC
     if kind == "interactive":
         return 2, _DENY_INTERACTIVE
-    if kind == "sweep":
+    if kind == "sweep-scoped":
+        if not background:
+            return 2, _DENY_SWEEP_SCOPED_TEMPLATE.format(tag=_HOOK_TAG)
+        return 0, ""
+    if kind == "sweep-unbounded":
         return 2, _DENY_SWEEP_TEMPLATE.format(tag=_HOOK_TAG)
     if kind in ("build", "gate-class"):
         if not background:
