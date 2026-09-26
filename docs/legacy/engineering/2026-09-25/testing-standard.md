@@ -1,10 +1,9 @@
-# Testing Standard
+# Testing Standard (pre-correction snapshot, museum)
 
-> v2 (2026-09-26, PR4 Devkit repair, owner adjudication approved):
-> incorporates PR-3 (discriminating proof) from the accepted Devkit
-> audit and corrects stale tool commands. The pre-correction snapshot
-> is preserved at
-> `docs/legacy/engineering/2026-09-25/testing-standard.md`.
+> Museum (2026-09-26 PR4 Devkit repair, owner adjudication approved):
+> preserved verbatim from `docs/engineering/testing-standard.md` before
+> its v2 rewrite (PR-3 discriminating proof + real tool commands).
+> Historical quotations only.
 
 Tests exist to validate semantics and protect architectural contracts. The goal is not maximum test count; it is strong coverage of plausible ways a feature could be subtly wrong.
 
@@ -59,13 +58,13 @@ Two local validation profiles exist.
 
 `FULL` is the default. It includes repository-required Debug and Release build/test coverage plus formatting, diff inspection, and `git diff --check`.
 
-For the standard generated C++ library workflow, configure/generate via the repository's CMake presets (or the workspace bootstrap + `tools\qiven.cmd gate` where the repository is workspace-resolved):
+For the standard generated C++ library workflow, configure/generate as needed with:
 
 ```cmd
-cmake --preset vs2022-x64
+tools\gen-vs2022-x64.cmd
 ```
 
-(The earlier `tools\gen-vs2022-x64.cmd` spelling never existed in the managed tool tree and is retired.) Then run the repository's Debug and Release build/test presets.
+Then run the repository's Debug and Release build/test presets.
 
 ### FOCUSED
 
@@ -86,11 +85,9 @@ Cross-platform CI remains an independent later gate.
 Formatting scripts enumerate tracked AND new (untracked, unignored) C/C++ files themselves; no index preparation is needed:
 
 ```cmd
-python tools\format_sources.py --fix
-python tools\format_sources.py --check
+tools\format.cmd
+tools\format-check.cmd
 ```
-
-(The earlier `tools\format.cmd` / `tools\format-check.cmd` spellings never existed in the managed tool tree and are retired.)
 
 `git add -N` is PROHIBITED for formatter exposure (2026-09-21 scar): an intent-to-add entry holds an EMPTY blob, and any later `git checkout -- .` restores that empty blob over the real file content - silent data loss. The formatter's enumeration is a pure read; keep it that way. Inspect the diff afterward because a formatter can legitimately change more text than expected.
 
@@ -117,22 +114,9 @@ Do not obtain a pass by disabling/commenting tests, reducing assertions, suppres
 
 If a detector is actually wrong, report evidence and fix the detector under explicit scope.
 
-## 12. Regression fixes (PR-3: discriminating proof)
+## 12. Regression fixes
 
-For a defect correction, name a regression that fails on the **pre-fix**
-behavior and passes on the candidate, plus a negative or near-miss case
-that exposes an attractive incorrect fix — not merely a test copied from
-the implementation. "100 green tests" authored under the same assumption
-as the defect does not meet this rule. When reproducing the old code is
-infeasible, record a concrete alternative falsification method (a
-controlled fault injection, a pinned historical revision) and its limits.
-Examples of the bar: for a two-frame hello+event deadline, a one-frame
-echo is insufficient; for a path identity rule, string lexical agreement
-is insufficient for a filesystem authorization claim; for a borrowed
-span, happy-path parsing without lifetime stress is insufficient. Record
-the exact candidate, platform, harness and configuration that ran. For
-ordinary low-risk fixes a simple failing-old/passing-new regression
-remains sufficient — proportionality by risk class.
+A bug fix should normally add a regression test that would fail for the defective behavior and pass for the correction. If a deterministic regression is impractical, record why.
 
 ## 13. Cross-platform limits
 

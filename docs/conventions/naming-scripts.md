@@ -18,7 +18,7 @@ Applies to tool scripts in every `qiven-*` repository (`tools/`, `scripts/`).
 ## Batch (`.cmd` / `.bat`)
 
 - Files: lowercase, short verb phrases (`bootstrap.cmd`, `test.cmd`,
-  `gen-vs2022-x64.cmd`).
+  `qiven.cmd`).
 - Every batch script: `setlocal`, explicit `exit /b %errorlevel%` semantics,
   and it MUST return a non-zero code on failure — a batch script that prints
   a failure but exits 0 is a defect.

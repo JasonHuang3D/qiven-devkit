@@ -25,8 +25,12 @@ Every managed repository carries exactly one root `AGENTS.md`, and it is a
 1. One identity line: what this repository is (or a pointer to its README).
 2. Pointer to the Devkit conventions index (`docs/conventions/README.md`)
    — to be read before creating files, folders, branches or targets.
-3. Pointer to the repository's own `docs/engineering/` index and, where
-  present, `docs/architecture/`.
+3. Pointer to the Devkit-canonical engineering index
+   (`docs/engineering/README.md` in the Devkit — repositories carry no
+   local copies, ADR-0046; the managed `AGENTS.md.in` is the reference
+   shape) and, where present, the repository's `docs/architecture/`
+   with its active/history status stated by that directory's own index
+   — never a generic whole-directory sweep.
 4. One authority line: canonical roles/handoffs/authority live in
    qiven-context collaboration contracts; this file grants none.
 

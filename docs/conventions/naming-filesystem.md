@@ -31,7 +31,7 @@ otherwise. Deviation requires an architecture document in the deviating repo.
 | C/C++ headers | `snake_case.hpp` | `byte_cursor.hpp`, `hashing.hpp` |
 | C/C++ sources | `snake_case.cpp` mirroring the header | `byte_cursor.cpp` |
 | Python | `snake_case.py` | `check_toolchain.py`, `format_sources.py` |
-| Batch | lowercase, hyphens allowed, no spaces | `bootstrap.cmd`, `gen-vs2022-x64.cmd` |
+| Batch | lowercase, hyphens allowed, no spaces | `bootstrap.cmd`, `sync-repo.cmd` |
 | Shell | lowercase, `.sh`, hyphens allowed | `bootstrap.sh` |
 | CMake modules | `snake_case.cmake` or `CMakeLists.txt` | `managed-files.cmake` |
 | Markdown docs | `snake_case.md` or the established `PascalCase` for top-level specs | `foundation.md`, `pit-regression-map.md` |
