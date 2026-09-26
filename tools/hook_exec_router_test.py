@@ -17,6 +17,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import hook_exec_router as router  # noqa: E402
 
+# Deterministic scope root for sweep sub-classification (v4.3): the
+# workspace-root shape this hook runs under in practice.
+TEST_SCOPE_ROOT = Path("D:\\JasonWork")
+
 
 CASES: list[tuple[str, str]] = [
     # --- allow: short, read-only, everyday session work -----------------
@@ -27,6 +31,15 @@ CASES: list[tuple[str, str]] = [
     ("ls -la build/", "allow"),
     ("python tools/third_party_verify.py", "allow"),
     ("echo hello", "allow"),
+    # --- allow: git's own tree walks are inherently bounded (v4.3) ------
+    # tracked files only - structurally cannot enter .venv/node_modules/
+    # third-party checkouts; previously `git grep -rn` matched the sweep
+    # class through its -r flag and pushed the model toward whole-file
+    # Reads (owner direction 2026-09-26: token economy).
+    ("git grep -rn pattern", "allow"),
+    ("git grep -n TODO src/", "allow"),
+    ("git ls-files", "allow"),
+    ("git ls-files tools | grep router", "allow"),
     # --- deny: heredoc authoring (absolute prohibition, 2026-09-23) -----
     ("cat << EOF", "heredoc"),
     ("cat <<EOF", "heredoc"),
@@ -117,15 +130,30 @@ CASES: list[tuple[str, str]] = [
     ("tools/qiven.cmd info && tools/qiven.cmd exec status abc", "allow"),
     ("git status && tools\\qiven.cmd gate", "gate-class"),
     ("git status &&    qiven run test-debug", "gate-class"),
-    # --- tree sweeps are sweep-class: exec lease custody, NOT background --
-    ("find /d/JasonWork -name '*.vcxproj'", "sweep"),
-    ("find /d/JasonWork/qiven-runtime -type f -name '*.cpp'", "sweep"),
-    ("find -L /d/JasonWork -name build", "sweep"),
-    ("find D:\\JasonWork -name build", "sweep"),
-    ("grep -r pattern .", "sweep"),
-    ("grep --recursive foo src/", "sweep"),
-    ("cmd /c dir /s /b", "sweep"),
-    ("dir build /s", "sweep"),
+    # --- tree sweeps split by inherent boundedness (v4.3) ----------------
+    # scope root for these cases: TEST_SCOPE_ROOT (D:\JasonWork). Explicit
+    # in-root subpath -> scoped (deny -> background); root wholesale, no
+    # explicit path, escape, or heavy tree -> unbounded (exec lease).
+    ("find /d/JasonWork -name '*.vcxproj'", "sweep-unbounded"),
+    ("find /d/JasonWork/qiven-runtime -type f -name '*.cpp'", "sweep-scoped"),
+    ("find -L /d/JasonWork -name build", "sweep-unbounded"),
+    ("find D:\\JasonWork -name build", "sweep-unbounded"),
+    ("find tools -name '*.py'", "sweep-scoped"),
+    ("find qiven-devkit/tools -name 'hook*'", "sweep-scoped"),
+    ("grep -r pattern .", "sweep-unbounded"),
+    ("grep -rn pattern", "sweep-unbounded"),
+    ("grep --recursive foo src/", "sweep-scoped"),
+    ("grep -rn pattern tools/", "sweep-scoped"),
+    ("grep -rn pattern D:\\JasonWork\\qiven-devkit\\tools", "sweep-scoped"),
+    ("grep -rn pattern /d/JasonWork/qiven-context", "sweep-scoped"),
+    ("grep -rn pattern ../outside", "sweep-unbounded"),
+    ("grep -rn pattern D:\\Other", "sweep-unbounded"),
+    ("grep -rn pattern qiven-context/.venv", "sweep-unbounded"),
+    ("grep -rn pattern qiven-third-party-win", "sweep-unbounded"),
+    ("cmd /c dir /s /b", "sweep-unbounded"),
+    ("dir build /s", "sweep-scoped"),
+    # a scoped sweep in one segment does not launder an unbounded one:
+    ("grep -rn pattern tools/ && find /d/JasonWork -name x", "sweep-unbounded"),
     # the Windows text-FILTER find (slash-flag + quoted needle) stays raw:
     ("find /i \"marker\" out.log", "allow"),
     ("find \"needle\" file.txt", "allow"),
@@ -329,14 +357,54 @@ def background_cases() -> list[tuple[str, bool, bool]]:
     check("background repo-tool passes", bg_repo_tool)
 
     def sweep_stays_exec_even_background():
-        code, message = router.verdict("grep -r pattern .", background=True)
+        code, message = router.verdict("grep -r pattern .", background=True,
+                                       scope_root=TEST_SCOPE_ROOT)
         if code != 2:
-            return "sweep must deny even when backgrounded (exec lease custody)"
+            return "unbounded sweep must deny even when backgrounded (exec lease custody)"
         if "qiven.cmd exec start" not in message or "re-issue THIS EXACT command" in message:
-            return "sweep denial must route to exec lease, not a background re-call"
+            return "unbounded sweep denial must route to exec lease, not a background re-call"
         return None
 
-    check("sweep denies even backgrounded (exec lease)", sweep_stays_exec_even_background)
+    check("unbounded sweep denies even backgrounded (exec lease)", sweep_stays_exec_even_background)
+
+    def scoped_sweep_raw_teaches_background():
+        code, message = router.verdict("grep -rn pattern tools/", scope_root=TEST_SCOPE_ROOT)
+        if code != 2 or "run_in_background: true" not in message:
+            return "scoped sweep raw must deny with the background re-call teaching"
+        if "--exclude-dir=" not in message or "git grep" not in message:
+            return "scoped sweep denial must carry the bounding and git-grep alternatives"
+        if "qiven.cmd exec start" in message:
+            return "scoped sweep denial must NOT route to exec (v4.3)"
+        return None
+
+    check("scoped sweep raw denies with background + bounding teaching",
+          scoped_sweep_raw_teaches_background)
+
+    def scoped_sweep_background_passes():
+        code, _ = router.verdict("grep -rn pattern tools/", background=True,
+                                 scope_root=TEST_SCOPE_ROOT)
+        if code != 0:
+            return "backgrounded scoped sweep must pass (v4.3)"
+        return None
+
+    check("backgrounded scoped sweep passes (v4.3)", scoped_sweep_background_passes)
+
+    def git_grep_raw_passes():
+        code, _ = router.verdict("git grep -rn hook_exec_router tools/", scope_root=TEST_SCOPE_ROOT)
+        if code != 0:
+            return "git grep must pass raw (tracked files only, inherently bounded)"
+        return None
+
+    check("git grep passes raw (v4.3 token economy)", git_grep_raw_passes)
+
+    def heavy_target_is_unbounded_even_with_path():
+        code, _ = router.verdict("grep -rn pattern qiven-context/.venv", background=True,
+                                 scope_root=TEST_SCOPE_ROOT)
+        if code != 2:
+            return "a heavy-tree target must stay exec custody even backgrounded"
+        return None
+
+    check("heavy-tree target stays exec custody", heavy_target_is_unbounded_even_with_path)
 
     def heredoc_denies_even_background():
         code, _ = router.verdict("cat << EOF", background=True)
@@ -365,7 +433,7 @@ def background_cases() -> list[tuple[str, bool, bool]]:
 def main() -> int:
     failures = 0
     for command, expected in CASES:
-        actual = router.classify(command)
+        actual = router.classify(command, scope_root=TEST_SCOPE_ROOT)
         if actual != expected:
             failures += 1
             print(f"[FAIL] {command!r}: expected {expected}, got {actual}")
