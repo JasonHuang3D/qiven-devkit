@@ -6,11 +6,22 @@ Qiven Devkit defines how a Qiven repository is created, safely adopted, and kept
 
 - **qiven-toolchain-win** owns pinned executable build tools such as CMake and clang-format.
 - **qiven-devkit** owns repository templates, shared engineering conventions, explicit bootstrap/synchronization tooling, and the shared Qiven Operator runtime.
-- **qiven-workspace** may later own ecosystem version composition and multi-repository orchestration; it does not exist yet.
+- **qiven-workspace** owns ecosystem version composition: the control repository (`JasonHuang3D/qiven-workspace`) is live, its generation-bound lock selects revisions, and the workspace resolver is the accepted dependency endpoint (ADR-0052; WR-1..WR-3 delivered; foundation/math/draft/runtime resolve through it — state only the tested rollout, not a universal transition).
 - Runtime repositories such as **qiven-foundation** own their APIs, implementation, tests, domain architecture, and repository-specific Operator policy.
 
 Devkit materializes an ordinary snapshot into each generated repository. Generated repositories contain their own scripts,
 engineering protocol, and Operator runtime and never call back into a Devkit checkout. They remain independently usable after generation.
+
+## Authority resolution
+
+When instructions conflict, resolve by source class, not by file order:
+
+1. **Canonical project cognition** (`JasonHuang3D/qiven-context`): collaboration contracts, ADRs, governance, typed handoffs — loaded at cold boot; nothing here overrides them.
+2. **Devkit engineering law** (this repository: `docs/conventions/` + `docs/engineering/`) — the single canonical engineering protocol (ADR-0046).
+3. **Repository architecture** (each repository's `docs/architecture/`) — domain contracts; may specialize, never contradict 1-2.
+4. **Task specification** — may specialize ordinary implementation details for one feature; never silently override repository-wide architecture or safety rules.
+
+(The root `AGENTS.md` is a self-hosting pointer and defines no precedence itself; this section is the operative resolution procedure.)
 
 ## Qiven Operator
 
@@ -48,7 +59,7 @@ tools\qiven.cmd ci start full
 
 The command validates the local Git context, requires the named `origin` branch to point at the exact local HEAD, dispatches the configured workflow through `gh`, reports the branch and exact HEAD it submitted, and returns immediately. It does not use hard-coded sleeps, discover a "latest" run, or poll merely to make a remote asynchronous job look synchronous.
 
-Each Operator task runs in a separate child process rooted at the repository, so task-local environment or working-directory changes do not leak into sibling tasks or the interactive CMD prompt. Shared mechanism is managed by Devkit; repository policy lives in `.qiven/operator.json`. See `docs/operator-design.md`.
+Each Operator task runs in a separate child process rooted at the repository, so task-local environment or working-directory changes do not leak into sibling tasks or the interactive CMD prompt. Shared mechanism is managed by Devkit; repository policy lives in `.qiven/operator.json`. The current operator contract (including `ci watch` observation and `exec` bounded custody) is [`docs/operator-contract.md`](docs/operator-contract.md); the Phase-1 design history is preserved at `docs/legacy/design/operator-phase1.md`.
 
 ## Managed and bootstrap-only files
 

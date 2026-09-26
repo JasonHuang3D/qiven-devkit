@@ -48,7 +48,7 @@ never by role-to-role handoffs.
 
 ## Instruction precedence
 
-Use the precedence defined by the root `AGENTS.md`. A feature specification may specialize ordinary implementation details for one feature, but it may not silently override repository-wide architecture or safety rules. Deliberate exceptions must be explicit.
+Resolve conflicts by source class — canonical qiven-context cognition first, then this Devkit engineering law, then repository architecture, then the task specification (the operative procedure is the Devkit README's "Authority resolution" section; the root `AGENTS.md` is a self-hosting pointer and defines no precedence itself). A feature specification may specialize ordinary implementation details for one feature, but it may not silently override repository-wide architecture or safety rules. Deliberate exceptions must be explicit.
 
 ## Protocol evolution
 

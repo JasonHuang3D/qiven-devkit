@@ -1,10 +1,9 @@
-# Implementation Standard
+# Implementation Standard (pre-correction snapshot, museum)
 
-> v2 (2026-09-26, PR4 Devkit repair, owner adjudication approved):
-> incorporates PR-1/PR-2 (borrowed premises; stop-patch-to-green) from
-> the accepted Devkit audit and corrects stale tool commands. The
-> pre-correction snapshot is preserved at
-> `docs/legacy/engineering/2026-09-25/implementation-standard.md`.
+> Museum (2026-09-26 PR4 Devkit repair, owner adjudication approved):
+> preserved verbatim from `docs/engineering/implementation-standard.md`
+> before its v2 rewrite (PR-1..PR-4 operational criteria + real tool
+> commands). Historical quotations only.
 
 This document defines the implementation quality expected from implementation work in this repository, regardless of who performs it (single-session unified engineering, ADR-0044). Read it with the root `AGENTS.md`, the current task/feature specification, and applicable repository architecture.
 
@@ -78,7 +77,7 @@ Follow established naming unless the task specification deliberately changes it.
 
 Comments are for non-obvious intent, invariants, platform quirks, ownership/lifetime constraints, or important trade-offs. Do not narrate syntax or write tutorial essays in source files.
 
-Repository `.clang-format` is authoritative. Use the repository's real formatting tooling — the format task (`python tools\format_sources.py --fix` / `--check`; the earlier `tools\format.cmd` / `tools\format-check.cmd` spellings never existed in the managed tool tree and are retired) — then inspect the actual diff. Never modify formatting policy as a side effect of an unrelated feature.
+Repository `.clang-format` is authoritative. Use `tools\format.cmd` and `tools\format-check.cmd`, then inspect the actual diff. Never modify formatting policy as a side effect of an unrelated feature.
 
 ## 12. Build configuration
 
@@ -103,38 +102,3 @@ A feature diff should tell one coherent story.
 Do not consider a feature complete merely because it compiles. Before requesting review or publication, be able to explain the invariant, ownership/lifetime behavior, failure behavior, meaningful edge cases, what was tested, what local validation could not prove, and why the implementation stays inside architecture and scope.
 
 Exact-delta self-review is the authoring session's own duty: read the complete diff against the specification before presenting it for acceptance. A passing gate is evidence about the validated properties, not semantic acceptance.
-
-## 16. Borrowed premises (PR-1: old code is a hypothesis, never its own oracle)
-
-Apply at every task boundary for R2/R3 work, at any repeated scar, and
-when a fix crosses an external, ownership, authority, filesystem or
-protocol boundary. Ordinary R1 under a stable accepted contract keeps
-its existing proportional scope.
-
-- An accepted ADR supplies binding authority within its current scope;
-  a prior implementation, a passing gate, a stable-looking API, or a
-  downloaded library supplies a **candidate and provenance, never its
-  own correctness proof**. A prior owner acceptance supplies authority
-  for a decision at its time, not timeless empirical verification.
-- Before copying or building on existing semantics, identify: (a) the
-  present governing source and its supersession status; (b) the real
-  consumer and its exact current version; (c) assumptions borrowed from
-  the previous code; (d) an observable counterexample that would
-  falsify each material assumption; and (e) the **independent oracle** —
-  an accepted contract with directly applicable preconditions, vendor
-  or harness behavior, a platform API contract, an actual boundary
-  trace, or a qualified independent test. A result derived from the
-  same code under review is not an independent oracle.
-
-## 17. Stop patch-to-green when the mechanism is not understood (PR-2)
-
-For a regression or an owner-live failure, reconstruct the end-to-end
-causal sequence from the external input to the observable result and
-name which boundary invariant failed. A subsequent fix to the same
-hazard class may not proceed as a local literal change if the earlier
-repair did not explain or test the violated contract. If a test, CI
-run or live trial contradicts an author assumption, change the task's
-risk and design state before another semantics-bearing patch — do not
-silently re-run until green. Where the real contract is unknown, create
-a bounded disposable probe with an explicit falsifier and capture its
-result before fixing production behavior.

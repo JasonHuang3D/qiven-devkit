@@ -1,10 +1,10 @@
-# Design-First Workflow Standard
+# Design-First Workflow Standard (pre-correction snapshot, museum)
 
-> v2 (2026-09-26, PR4 Devkit repair, owner adjudication approved):
-> tightens design-before-code to commit ordering for R2/R3, revises E4
-> so boundary-semantics tooling follows R2/R3, and mounts the PR-6
-> continuity trigger. The pre-correction snapshot is preserved at
-> `docs/legacy/engineering/2026-09-25/design-first-workflow.md`.
+> Museum (2026-09-26 PR4 Devkit repair, owner adjudication approved):
+> preserved verbatim from `docs/engineering/design-first-workflow.md`
+> before its v2 rewrite (commit-ordering tightening + E4 boundary-
+> semantics revision + the PR-6 continuity trigger). Historical
+> quotations only.
 
 Single canonical gate rule (ADR-0046: Devkit-canonical): **production
 code is written only after a merged detailed design document** (owner
@@ -26,15 +26,6 @@ ALONE, before any implementation code exists in the branch. Writing
 the design after the code and backdating is a process violation worse
 than having no design — it forfeits the document's entire purpose
 (finding design defects while they are still cheap).
-
-**Commit-ordering requirement for R2/R3 (v2, adjudicated 2026-09-26):**
-for contract-bearing (R2) and trust-boundary (R3) batches, the design
-artifact is source-controlled with its digest, and its commit PRECEDES
-the first semantics-changing source commit (or the design lands as a
-separately accepted PR). Commit order is a necessary trace — not proof
-the design was intellectually independent or correct; review tests the
-design's assumptions against external truth. Existing pre-v2 work is
-not retroactively called invalid.
 
 ## 2. Relationship to feature-spec
 
@@ -106,11 +97,7 @@ A batch may skip a standalone design document ONLY when it is entirely:
 - **E3 mechanical** (renames, formatting, includes, dead-code removal
   with no semantic change);
 - **E4 gate/tooling repair** (operator/CMake/CI mechanics with no
-  product-code semantics) — **v2 (adjudicated 2026-09-26): an
-  Operator/hook/gate change with BOUNDARY semantics (what it admits,
-  denies, proves or lets bypass) follows R2/R3 regardless of "no
-  product source changed"; only pure mechanics with no boundary-semantics
-  change qualify for E4**;
+  product-code semantics);
 - **E5 trivial fix** (typo-level, single-file, no contract change).
 
 The PR body must state the exception class in one line ("design-first:
@@ -139,18 +126,3 @@ review and treated as a process violation. (3) No automated detector
 yet (e.g. a gate check that changed src/ files have a named design in
 the PR body) — recorded as the first candidate when the rule's manual
 phase shows drift (engineering README "protocol evolution" question 5).
-
-## Continuity trigger (PR-6, v2 adjudicated 2026-09-26)
-
-A long prompt, an archived lesson, or an untriggered test cannot
-enforce this standard across a context compact. Each material R2/R3
-obligation binds to: a current source revision, an applicability
-selector, an independent detector, and an actual task/publication
-trigger. A concise activation receipt is required before the relevant
-design decision, and a fresh non-skipped test receipt before candidate
-acceptance; a changed source graph or a compact boundary invalidates
-any claim that old model-visible prose is still sufficient. Until a
-trusted model-request boundary exists (the CA-2 path), the interim
-publication check is reported as partial — it can block an unproven
-candidate; it cannot certify that every intermediate model decision
-used all intended context.
