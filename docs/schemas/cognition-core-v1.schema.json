@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "qiven-cognition-core-v1",
+  "title": "qiven-cognition-core-v1",
+  "description": "CA-1 activation corpus/capabilities/budgets/registry instance. The runtime loader accepts a STRICT BLOCK-STYLE subset (exact keys, fixed nesting, no flow syntax, line-typed fail-closed errors); this schema documents the shape that subset admits. Vocabulary growth is a schema_version bump.",
+  "type": "object",
+  "required": ["schema_version", "corpus", "capabilities", "budgets", "registry", "consumer_profiles", "latency_objectives"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "corpus": {
+      "type": "object",
+      "required": ["repositories"],
+      "properties": {
+        "repositories": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["repository", "path_filters"],
+            "properties": {
+              "repository": { "type": "string", "pattern": "^qiven-[a-z-]+$" },
+              "path_filters": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["repository", "path"],
+        "properties": {
+          "repository": { "type": "string" },
+          "path": { "type": "string" }
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "required": ["compact_core_max_bytes", "task_payload_max_bytes", "inlined_body_max_bytes", "supporting_share_max_percent"],
+      "properties": {
+        "compact_core_max_bytes": { "type": "integer", "minimum": 1 },
+        "task_payload_max_bytes": { "type": "integer", "minimum": 1 },
+        "inlined_body_max_bytes": { "type": "integer", "minimum": 1 },
+        "supporting_share_max_percent": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "required": ["selector_schema_version", "activation_policy_path", "task_schema_repository", "task_schema_path", "fixtures_repository", "fixtures_path"],
+      "properties": {
+        "selector_schema_version": { "const": 1 },
+        "activation_policy_path": { "type": "string" },
+        "task_schema_repository": { "type": "string" },
+        "task_schema_path": { "type": "string" },
+        "fixtures_repository": { "type": "string" },
+        "fixtures_path": { "type": "string" }
+      }
+    },
+    "consumer_profiles": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "latency_objectives": {
+      "type": "object",
+      "required": ["cold_rebuild_max_ms", "warm_activation_p95_max_ms"],
+      "properties": {
+        "cold_rebuild_max_ms": { "type": "integer", "minimum": 1 },
+        "warm_activation_p95_max_ms": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}
