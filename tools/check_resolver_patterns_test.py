@@ -92,7 +92,38 @@ def main() -> int:
         code, out = run_gate(repo)
         assert code == 0, f"P6: {code} {out}"
 
-    print("[ OK ] resolver-patterns self-test (P1-P6)")
+        # P7: a batch launcher carrying the retired env-var/sibling
+        # fallback fails typed (the 2026-09-28 v44 finding class);
+        # rem/:: comment law text does NOT trip it
+        repo = build_fixture(tmp, "r7", {
+            "tools/deploy.cmd": "@echo off\n"
+                                "rem resolves via QIVEN_DEVKIT_ROOT (law text only)\n"
+                                ":: ../qiven-devkit sibling fallback (comment)\n"
+                                "if \"%QIVEN_DEVKIT_ROOT%\"==\"\" (\n"
+                                "  set \"QIVEN_DEVKIT_ROOT=%~dp0..\\..\\qiven-devkit\"\n"
+                                ")\n"
+                                "python \"%QIVEN_DEVKIT_ROOT%\\tools\\deploy_bundle.py\"\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 1 and out.count("R1") >= 2, f"P7: {code} {out}"
+
+        # P8: a WR-6-shaped launcher passes - the bootstrap identity-check
+        # wrapper named like the documented thin launcher, a comment-only
+        # mention, and the python guard form with the identity marker
+        repo = build_fixture(tmp, "r8", {
+            "qiven.cmd": "@echo off\n"
+                         "python \"%~dp0tools\\launch.py\" %*\n",
+            "tools/deploy.cmd": "@echo off\n"
+                                "rem WR-6: no env var, no sibling fallback -\n"
+                                "rem the lock's qiven-devkit node is the only source\n"
+                                "python \"%~dp0deploy.py\" %*\n",
+            "tools/deploy.py": "CHECKOUT = ROOT.parent / 'qiven-devkit'\n"
+                               "_bootstrap_identity()  # WR-6 guard\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 0, f"P8: {code} {out}"
+
+    print("[ OK ] resolver-patterns self-test (P1-P8)")
     return 0
 
 
