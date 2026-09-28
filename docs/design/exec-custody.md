@@ -206,12 +206,17 @@ Named regression classes (each maps to a numbered case group in
 ## 6. Dependencies and rollout
 
 Standard library only (ctypes on Windows). The operator runtime stays a
-single-file managed snapshot; `templates/.../qiven_operator.py.in` stays
-byte-identical to `tools/qiven_operator.py`; the template version bumps
-so consumer repositories re-sync deliberately. Devkit + qiven-context
-roll in this batch (context is the heaviest exec consumer); the
-remaining sibling repositories roll on their next touching batch
-(recorded obligation with explicit trigger — visible, not silent).
+single-file managed snapshot; ~~`templates/.../qiven_operator.py.in` stays
+byte-identical to `tools/qiven_operator.py`~~ [template clause superseded
+2026-09-28, WR-6/v44: the operator template is RETIRED from the managed
+set (template 0.1.10) — generated repositories import the LOCKED devkit
+operator through the workspace bootstrap launcher; the byte-identity rule
+now scopes only to the grandfathered repository-owned instances
+(foundation, runtime), a recorded wr6-report consolidation residual]; the
+template version bumps so consumer repositories re-sync deliberately.
+Devkit + qiven-context rolled in that batch (context is the heaviest exec
+consumer); the remaining sibling repositories rolled on their next
+touching batch (recorded obligation — executed through WR-6).
 
 ## 7. Deferrals
 

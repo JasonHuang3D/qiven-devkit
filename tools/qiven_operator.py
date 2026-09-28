@@ -17,9 +17,12 @@ import time
 from typing import Any
 
 
-# ADR-0046 shim mode: an external repo may delegate to this operator by
-# setting QIVEN_TARGET_ROOT to its own repository root (workspace shim +
-# pin consumption); unset means this checkout is the target itself.
+# WR-6 consumption model (2026-09-28; supersedes the ADR-0046 Decision-3
+# shim+pin wording, which is historical record): consumer repositories
+# launch through the workspace bootstrap identity-check, set
+# QIVEN_TARGET_ROOT to their own repository root, and import THIS
+# operator from the locked devkit node; unset means this checkout is the
+# target itself. No consumer-local devkit pin exists.
 ROOT = Path(os.environ.get("QIVEN_TARGET_ROOT", Path(__file__).resolve().parents[1])).resolve()
 CONFIG_PATH = ROOT / ".qiven" / "operator.json"
 HEARTBEAT_SECONDS = 5.0
