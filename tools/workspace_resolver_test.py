@@ -679,6 +679,24 @@ def main() -> int:
         error_23d = _resolve_typed(control_23d, mode="authoritative", trust_policy=policy_23d)
         assert error_23d.kind == "UntrustedControlRevision", f"R23: {error_23d.kind}"
 
+        # case 5: valid-JSON NON-OBJECT lock history at the head rejects
+        # (never a typed crash, never auto-admitted)
+        r23e_root = root / "r23e"
+        r23e_root.mkdir()
+        control_23e, _ = _fixture_workspace(r23e_root)
+        head_23e = _git(["rev-parse", "HEAD"], control_23e)
+        (control_23e / "workspace.lock.json").write_text("[]\n", encoding="utf-8", newline="\n")
+        _git(["add", "-A"], control_23e)
+        _git(["commit", "-q", "-m", "non-object lock"], control_23e)
+        policy_23e = root / "trust-r23e.json"
+        policy_23e.write_text(json.dumps({
+            "schema": "qiven-workspace-control-trust-v1",
+            "admitted_control_revisions": [head_23e],
+        }), encoding="utf-8", newline="\n")
+        error_23e = _resolve_typed(control_23e, mode="authoritative", trust_policy=policy_23e)
+        assert error_23e is not None and error_23e.kind in (
+            "UntrustedControlRevision", "SchemaViolation", "UnknownError"), f"R23: {error_23e}"
+
 
         # R10: preflight end-to-end through the LOCKED devkit resolver binary.
         fixture_devkit = root / "qiven-devkit"

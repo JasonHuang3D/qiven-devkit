@@ -360,6 +360,8 @@ def _routine_advance_admissible(control: Path, admitted: list) -> bool:
         head_lock = json.loads(_git(["show", "HEAD:workspace.lock.json"], control))
     except (ResolutionError, ValueError) as error:
         return False  # unreadable/unparseable lock history: never auto-admit
+    if not isinstance(base_lock, dict) or not isinstance(head_lock, dict):
+        return False  # valid-JSON non-object history: never auto-admit
 
     def _nodes(lock: dict) -> dict:
         nodes = lock.get("nodes")
@@ -401,6 +403,8 @@ def _routine_advance_admissible(control: Path, admitted: list) -> bool:
             moved.add(node_id)
     if not moved:
         return False  # an advancement must advance at least one node
+    if set(base_lock) != set(head_lock):
+        return False  # top-level field addition/removal is not an advancement
     for key, value in head_lock.items():
         if key in ("generation", "nodes"):
             continue
