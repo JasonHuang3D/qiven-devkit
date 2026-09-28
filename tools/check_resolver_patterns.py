@@ -112,11 +112,6 @@ def iter_files(repo: Path):
         # runtime-state subdir and generated cache are excluded
         if parts[:2] == (".qiven", "runtime"):
             continue
-        # the control repository's census/ is the SEALED WR-0 record:
-        # its legacy_consumer_pin entries are recorded evidence of the
-        # retired mechanism, not live configuration
-        if parts[0] == "census":
-            continue
         yield path
 
 
