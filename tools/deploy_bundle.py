@@ -74,16 +74,42 @@ def load_policy(repo: pathlib.Path) -> dict:
     return policy
 
 
+def _locked_singleton_commit() -> str:
+    """WR-5: the locked qiven-third-party-win node commit (typed fail)."""
+    control = pathlib.Path(os.environ.get(
+        "QIVEN_WORKSPACE_CONTROL",
+        str(pathlib.Path(__file__).resolve().parent.parent.parent / "qiven-workspace"),
+    )).resolve()
+    lock_path = control / "workspace.lock.json"
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"[FAIL] workspace lock unreadable at {lock_path}: {exc}")
+    node = lock.get("nodes", {}).get("qiven-third-party-win")
+    commit = node.get("commit") if isinstance(node, dict) else None
+    if not isinstance(commit, str) or len(commit) != 40:
+        raise SystemExit("[FAIL] workspace lock has no qiven-third-party-win node commit")
+    return commit
+
+
 def resolve_singleton(repo: pathlib.Path) -> pathlib.Path | None:
     """Third-party singleton root (Devkit standard v2): env override ->
-    sibling default -> None (no licenses to collect)."""
+    sibling default -> None (no licenses to collect). The selected
+    revision is identity-checked against the locked node (WR-5 shape,
+    mirroring the runtime verify task)."""
     override = os.environ.get("QIVEN_THIRD_PARTY_ROOT")
     if override and (pathlib.Path(override) / "packages").is_dir():
-        return pathlib.Path(override)
-    sibling = repo.parent / "qiven-third-party-win"
-    if (sibling / "packages").is_dir():
-        return sibling
-    return None
+        root = pathlib.Path(override)
+    else:
+        root = repo.parent / "qiven-third-party-win"
+        if not (root / "packages").is_dir():
+            return None
+    locked = _locked_singleton_commit()
+    head = git(root, "rev-parse", "HEAD").stdout.strip()
+    if head != locked:
+        raise SystemExit(f"[FAIL] third-party singleton at {head[:12] or '<unreadable>'} != "
+                         f"locked node {locked[:12]}; advance the workspace lock deliberately")
+    return root
 
 
 def collect_provenance(repo: pathlib.Path) -> list[dict]:
