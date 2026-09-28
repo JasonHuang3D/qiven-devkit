@@ -11,8 +11,10 @@ propagation-measurement duty.
   (`.qiven/dependencies.json` at docs main `4b6f22f`) ends the LAST
   census-wr0 shadow binding — the lock graph carries ZERO shadow-only
   declarations (verified by node scan at control `c4dc4a9`). The
-  `census/wr0-declarations.json` file remains as sealed WR-0 history
-  (museum class; the pattern gate excludes it as recorded evidence).
+  `census/wr0-declarations.json` file was subsequently REMOVED at owner
+  direction (2026-09-28, control `cfcd793`) once no tool read it and no
+  lock declaration referenced it — git history retains the sealed WR-0
+  record.
 - **The forbidden resolver-pattern gate** (devkit
   `tools/check_resolver_patterns.py`, wired into gate:local as
   `resolver-patterns` + `resolver-patterns-tests`, gate PASS at each
