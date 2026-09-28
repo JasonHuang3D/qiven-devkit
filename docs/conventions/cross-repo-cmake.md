@@ -102,6 +102,6 @@ a consumer-local SHA pin (retired at WR-3/WR-4/WR-5).
 | `qiven-context-draft` | frozen semantic library (source) | `QIVEN_RESOLUTION_FILE` (workspace adapter, WR-4) | workspace lock node | runtime |
 | `qiven-toolchain-win` | pinned executables (env layer) | locator only (`QIVEN_TOOLCHAIN_ROOT`/sibling); revision from WorkspaceGeneration (WR-5) | workspace lock node, identity-checked at consumption | all builds via check-toolchain |
 | `qiven-third-party-win` | third-party singleton | `QIVEN_RESOLUTION_FILE` (workspace adapter, WR-5) | workspace lock node, selected once | runtime (sqlite3) |
-| `qiven-devkit` | tool/standards package | bootstrap launcher (WR-6: identity-check before any Devkit import) | workspace lock node | context, math, draft (operator via the locked Devkit after bootstrap preflight), runtime (deploy shim) |
+| `qiven-devkit` | tool/standards package | bootstrap launcher (WR-6: identity-check before any Devkit import) | workspace lock node | context, math, draft (operator via the locked Devkit after bootstrap preflight), runtime (deploy thin launcher, WR-6) |
 
 New externals append here in the same batch that adds them.

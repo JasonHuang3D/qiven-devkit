@@ -221,11 +221,15 @@ digest" — investigate, re-vendor deliberately, or restore.
 "If our own foundation were a third-party library cloned from GitHub —
 would the current CMake consumption be right?" Answered honestly:
 
-- Foundation/draft consumption = sibling source checkout +
-  in-consumer `add_subdirectory` build + an exact-SHA pin validated at
-  configure. For CO-DEVELOPED first-party layers this is a valid mode
-  ("layer model", ADR-0039/0046): you want the local source, and the
-  layer evolves with its consumers.
+- Foundation/draft consumption historically used sibling source
+  checkout + in-consumer `add_subdirectory` build + an exact-SHA pin
+  validated at configure; since WR-3/WR-4 the delivered shape is the
+  workspace adapter (`QIVEN_RESOLUTION_FILE`) materializing the
+  lock-selected revision, with the lock node identity-checked at
+  configure (consumer-local pins are retired). For CO-DEVELOPED
+  first-party layers local-source co-evolution remains the intent of
+  the model ("layer model", ADR-0039/0046) — the lock, not a
+  consumer pin, is what selects the revision.
 - It is NOT the right model for third-party code: no per-repo
   vendoring (that is what v2 removes), no network at configure, no
   per-repo flag adaptation, and binary reuse questions do not arise
