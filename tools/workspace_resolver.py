@@ -1251,7 +1251,7 @@ def _parse_node_map(pairs: list[str], label: str) -> dict[str, Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="qiven workspace resolver (ADR-0052; graph validation, overlay/adapter emission, explicit lock-update; authoritative by default with the accepted trust policy)")
+    parser = argparse.ArgumentParser(description="qiven workspace resolver (ADR-0052; graph validation, overlay/adapter emission, explicit lock-update; shadow is the fail-safe default - authoritative mode is selected explicitly via --mode authoritative --trust-policy)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_common(target):
