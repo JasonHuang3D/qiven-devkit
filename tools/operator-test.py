@@ -43,6 +43,14 @@ if not CMAKE:
     from toolchain import resolve
     CMAKE = resolve()["cmake"]
 
+# WR-6 (2026-09-28, template 0.1.10): generated repositories carry the
+# bootstrap LAUNCHER (tools/qiven.py), which requires a live workspace
+# control checkout; the operator MECHANICS are exercised here through the
+# canonical devkit operator under the WR-6 consumption env
+# (QIVEN_TARGET_ROOT identifying the fixture repository). The launcher
+# path itself is covered by workspace_bootstrap_test.py.
+OPERATOR = str(ROOT / "tools" / "qiven_operator.py")
+
 IS_WINDOWS = os.name == "nt"
 checks = 0
 
@@ -101,10 +109,10 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def load_operator(repo: Path):
-    module_path = repo / "tools" / "qiven_operator.py"
+    module_path = ROOT / "tools" / "qiven_operator.py"
     spec = importlib.util.spec_from_file_location("qiven_operator_fixture", module_path)
     if spec is None or spec.loader is None:
-        raise AssertionError("could not load generated qiven_operator.py")
+        raise AssertionError("could not load the canonical devkit qiven_operator.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -153,10 +161,10 @@ def main() -> int:
             ".qiven/operator.json",
             "tools/qiven.cmd",
             "tools/qiven.py",
-            "tools/qiven_operator.py",
         ):
             if not (repo / relative).is_file():
                 raise AssertionError(f"missing generated Operator file: {relative}")
+        os.environ["QIVEN_TARGET_ROOT"] = str(repo)
 
         git(repo, "init", "-b", "main")
         git(repo, "add", "--all")
@@ -177,7 +185,7 @@ def main() -> int:
         head = git(repo, "rev-parse", "HEAD").stdout.strip()
 
         # ---------------- G1: generation, identity, gates -----------------
-        info = run([sys.executable, "tools/qiven.py", "--json", "info"], cwd=repo)
+        info = run([sys.executable, OPERATOR, "--json", "info"], cwd=repo)
         payload = json.loads(info.stdout)
         check(payload["status"] == "ok", "G1.info-status")
         check(payload["repository"] == "operator-fixture", "G1.info-repo")
@@ -254,7 +262,7 @@ def main() -> int:
         config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
         failed = run(
-            [sys.executable, "tools/qiven.py", "--json", "gate", "--name", "fixture-fail-fast"],
+            [sys.executable, OPERATOR, "--json", "gate", "--name", "fixture-fail-fast"],
             cwd=repo,
             expect=1,
         )
@@ -265,7 +273,7 @@ def main() -> int:
         check("[ RUN]" not in failed.stdout and "[FAIL]" not in failed.stdout, "G1.failfast-json-purity")
 
         isolation = run(
-            [sys.executable, "tools/qiven.py", "--json", "gate", "--name", "fixture-isolation"],
+            [sys.executable, OPERATOR, "--json", "gate", "--name", "fixture-isolation"],
             cwd=repo,
         )
         isolation_payload = json.loads(isolation.stdout)
@@ -275,7 +283,7 @@ def main() -> int:
         parallel = run(
             [
                 sys.executable,
-                "tools/qiven.py",
+                OPERATOR,
                 "--json",
                 "run",
                 "--parallel",
@@ -312,11 +320,11 @@ def main() -> int:
         scratch.mkdir(parents=True, exist_ok=True)
 
         def qiven_cli(*args: str, expect: int = 0) -> subprocess.CompletedProcess[str]:
-            return run([sys.executable, "tools/qiven.py", "--json", *args], cwd=repo, expect=expect)
+            return run([sys.executable, OPERATOR, "--json", *args], cwd=repo, expect=expect)
 
         def exec_start(*target: str, timeout: str, lifetime: str | None = None,
                        expect: int = 0) -> dict:
-            args = [sys.executable, "tools/qiven.py", "--json", "exec", "start",
+            args = [sys.executable, OPERATOR, "--json", "exec", "start",
                     "--timeout", timeout]
             if lifetime is not None:
                 args += ["--max-lifetime", lifetime]
@@ -646,7 +654,7 @@ def main() -> int:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         config["tasks"]["fixture-tree-leak"] = {"argv": [sys.executable, str(spawn_and_exit)]}
         config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-        task_run = run([sys.executable, "tools/qiven.py", "--json", "run", "fixture-tree-leak"], cwd=repo)
+        task_run = run([sys.executable, OPERATOR, "--json", "run", "fixture-tree-leak"], cwd=repo)
         task_payload = json.loads(task_run.stdout)
         check(task_payload["status"] == "pass", "C6.task-pass", task_run.stdout)
         got_pid = wait_until(lambda: linger_pid() is not None, timeout=10)
@@ -671,7 +679,7 @@ def main() -> int:
             encoding="utf-8",
         )
         # the piggyback sweep rides any invocation (info is cheapest)
-        run([sys.executable, "tools/qiven.py", "--json", "info"], cwd=repo)
+        run([sys.executable, OPERATOR, "--json", "info"], cwd=repo)
         stale_after = json.loads(
             (exec_dir / f"{stale_id}.json").read_text(encoding="utf-8")
         )
@@ -693,7 +701,7 @@ def main() -> int:
         wrong_head = run(
             [
                 sys.executable,
-                "tools/qiven.py",
+                OPERATOR,
                 "--json",
                 "gate",
                 "--name",
@@ -712,7 +720,7 @@ def main() -> int:
         exact_fail = run(
             [
                 sys.executable,
-                "tools/qiven.py",
+                OPERATOR,
                 "--json",
                 "gate",
                 "--name",
@@ -729,7 +737,7 @@ def main() -> int:
         config["gates"]["fixture-clean"] = ["clean-tree"]
         config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
         dirty = run(
-            [sys.executable, "tools/qiven.py", "--json", "gate", "--name", "fixture-clean"],
+            [sys.executable, OPERATOR, "--json", "gate", "--name", "fixture-clean"],
             cwd=repo,
             expect=1,
         )
@@ -922,7 +930,7 @@ def main() -> int:
         # with exit 2 (argparse wiring + OperatorError mapping exercised
         # end to end through the generated entrypoint).
         plumbing = run(
-            [sys.executable, "tools/qiven.py", "ci", "watch", "full", "--timeout", "nan"],
+            [sys.executable, OPERATOR, "ci", "watch", "full", "--timeout", "nan"],
             cwd=repo,
             expect=2,
         )
