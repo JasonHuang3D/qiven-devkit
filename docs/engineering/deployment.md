@@ -68,8 +68,11 @@ installer.
 
 Implemented by the Devkit-owned `tools/deploy_bundle.py`; repositories
 declare task metadata (what to bundle) in `.qiven/operator.json` and a
-thin transport shim may resolve the Devkit checkout (ADR-0046 hook
-pattern: `QIVEN_DEVKIT_ROOT` → sibling layout → explicit failure).
+thin transport launcher resolves the Devkit checkout through the
+workspace (WR-6 shape: the launcher runs the bootstrap identity-check
+against the workspace lock BEFORE any Devkit import — no
+`QIVEN_DEVKIT_ROOT` variable and no consumer-local pin; the locked
+devkit node is the only admitted source).
 
 Steps (the script enforces the order and fails closed at each):
 

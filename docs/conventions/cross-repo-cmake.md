@@ -7,17 +7,18 @@ singleton (`qiven-third-party-win`, engineering standard
 contrast — what is deliberately NOT allowed. Established 2026-09-23
 (v19 review) to make every external-target reference uniform.
 
-> **Status under ADR-0052 (2026-09-24): this pattern is the MIGRATION
-> STAGE, not the endpoint.** The accepted endpoint is the Workspace
-> Resolution program: CMake consumes a generated, validated resolution
-> (`qiven_workspace_require`) and performs no repository discovery or
-> revision selection (WG-1/WG-4). Until a dependency class passes its
-> own WR cutover, everything below remains the valid, in-force
-> mechanism. After the WR-0 census begins, no NEW consumer-local
-> resolver or pin may be added except as a recorded emergency
-> compatibility exception with a removal trigger. Landing doc:
-> `../design/workspace-resolution.md`; program documents: qiven-docs
-> `accepted/2026-09-24/`.
+> **Status under ADR-0052 (2026-09-28): the Workspace Resolution
+> program is DELIVERED end to end (WR-0..WR-8) and this migration-stage
+> pattern is SUPERSEDED.** The delivered endpoint is in force: CMake
+> consumes the generated, validated resolution
+> (`qiven_workspace_require` from the workspace adapter) and performs
+> no repository discovery or revision selection (WG-1/WG-4); every
+> dependency edge is a repository-manifest declaration in the workspace
+> lock. The stage-by-stage text below is retained as the record of how
+> the migration was executed; where a row below predates its class
+> cutover, the registry in section 4 states the delivered shape.
+> Landing doc: `../design/workspace-resolution.md`; program documents:
+> qiven-docs `accepted/2026-09-24/`.
 
 ## 1. The one consumption pattern
 
@@ -101,6 +102,6 @@ a consumer-local SHA pin (retired at WR-3/WR-4/WR-5).
 | `qiven-context-draft` | frozen semantic library (source) | `QIVEN_RESOLUTION_FILE` (workspace adapter, WR-4) | workspace lock node | runtime |
 | `qiven-toolchain-win` | pinned executables (env layer) | locator only (`QIVEN_TOOLCHAIN_ROOT`/sibling); revision from WorkspaceGeneration (WR-5) | workspace lock node, identity-checked at consumption | all builds via check-toolchain |
 | `qiven-third-party-win` | third-party singleton | `QIVEN_RESOLUTION_FILE` (workspace adapter, WR-5) | workspace lock node, selected once | runtime (sqlite3) |
-| `qiven-devkit` | tool/standards package | `QIVEN_DEVKIT_ROOT` | shim+pin where consumed (ADR-0046 D2; WR-6 target) | context (operator shim), runtime (deploy shim) |
+| `qiven-devkit` | tool/standards package | bootstrap launcher (WR-6: identity-check before any Devkit import) | workspace lock node | context, math, draft (operator via the locked Devkit after bootstrap preflight), runtime (deploy shim) |
 
 New externals append here in the same batch that adds them.
