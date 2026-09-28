@@ -1,5 +1,15 @@
 """Shadow resolution preflight and legacy-pin comparator (WR-2, ADR-0052).
 
+HISTORICAL INSTRUMENT (annotated 2026-09-28, v44 maintenance): this is
+the WR-2 migration-stage comparator. Its LIVE workspace path derives the
+consumer set from the control census (`census/wr0-declarations.json`),
+which was RETIRED at WR-8 (removed from the control repository) — against
+the delivered workspace it fails typed CensusUnreadable by design. Its
+permanent value is the fixture regression suite (the tests resurrect the
+census in fixtures); cutover-grade comparison is owned by the WR-7
+comparator. Do not extend this tool's live path; a live comparison
+need derives consumers from the lock's repository-manifest declarations.
+
 Runs Workspace Resolution in shadow mode against the control lock, then
 extracts every LEGACY revision selection the consumer repositories
 actually enforce today and compares them with the lock node selections,
