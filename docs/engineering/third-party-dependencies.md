@@ -204,8 +204,9 @@ target_include_directories(qiven::tp::<name> INTERFACE "${CMAKE_CURRENT_SOURCE_D
    CMakeLists per class; register the consumer's design slot.
 5. Run the singleton gate (provenance verify + configure smoke of every
    package CMakeLists).
-6. Consumers re-pin to the new singleton SHA in the same batch when a
-   new package or version lands for them.
+6. Consumers advance the workspace lock node in the same batch when a
+   new package or version lands for them (no consumer-local re-pin
+   exists since WR-5).
 
 ## 7. Verification — the singleton gate
 
@@ -229,15 +230,15 @@ would the current CMake consumption be right?" Answered honestly:
   vendoring (that is what v2 removes), no network at configure, no
   per-repo flag adaptation, and binary reuse questions do not arise
   because classes S/H compile once per consumer build tree by design.
-- **Pin coverage is MANDATORY for every cross-repo source consumption
-  (owner direction 2026-09-23, closing the v2 gap the same day):**
-  foundation is SHA-pinned by all consumers (runtime, draft, math) with
-  configure-time validation, exactly like the draft and singleton pins.
-  The earlier "revisit on first drift incident" deferral is REJECTED
+- **Pin coverage is the workspace lock's job (owner direction
+  2026-09-23 closed the v2 gap; WR-3/WR-4/WR-5 moved every governed
+  external into the lock):** foundation, draft and the singleton are
+  workspace lock nodes identity-checked at configure/consumption. The
+  earlier "revisit on first drift incident" deferral was REJECTED
   practice: revisit-trigger deferrals for cheap, visible compliance
   work do not fire (owner: "看到了就做" — see
-  qiven-context MEM-20260923T183500Z-B4C5D6). Moving any pin is an
-  explicit re-pin batch with full gates.
+  qiven-context MEM-20260923T183500Z-B4C5D6). Moving any node is an
+  explicit lock transaction with full gates.
 
 ## Review record
 

@@ -65,7 +65,7 @@ Stall law on failed exit.
 | Exit criterion | Evidence |
 | --- | --- |
 | Toolchain or third-party workspace location changes require no consumer source edit | roots come from the lock/adapter (third-party) and the locked node (toolchain); locator overrides remain optional paths, never revision selectors |
-| No governed dependency resolves from PATH/system package discovery | find_package ban + adapter roots (third-party); toolchain revision identity-checked against the lock before expansion |
+| No governed dependency resolves from PATH/system package discovery | find_package ban + adapter roots (third-party); toolchain revision identity-checked against the lock before expansion; CI's windows unit checks out toolchain-win at the locked node and passes its cmake/ctest by explicit path (no runner-PATH cmake builds governed code) |
 | Configure remains offline | adapter/lock reads are local JSON + git rev-parse; no network on any new path |
 | Toolchain: remove duplicated sibling-root logic as the normal path | both copies (runtime + foundation) now take the revision from the lock |
 | Toolchain: root from WorkspaceGeneration | `_toolchain()` / `toolchain_root()` read the locked node commit |
@@ -76,20 +76,19 @@ Stall law on failed exit.
 
 ## Honest residuals
 
-- **CI toolchain**: the windows unit's bootstrap receives `--cmake cmake`
-  (the RUNNER's cmake), not the locked toolchain-win executable set —
-  a pre-existing CI-infrastructure shape, not a workspace-graph edge;
-  a future batch may checkout toolchain-win in CI and pass its cmake.
-  Recorded, not fixed here.
-- **CI snapshot**: the ci.yml pinned control/node refs ride a
-  self-consistent admitted snapshot; the WR-5 transaction makes them
-  stale by design — the windows-unit refs are bumped in the publication
-  step and the replacement proof remains an owner-dispatched run (the
-  standing WR-3-era open row).
+- **CI snapshot trail**: the ci.yml pinned control/node refs ride a
+  self-consistent snapshot that trails the ci.yml-carrying commit by
+  design; the replacement proof remains an owner-dispatched run (the
+  standing WR-3-era open row). Since the review round, CI consumes the
+  LOCKED toolchain by explicit path (the runner-PATH cmake no longer
+  builds governed code).
 - **Devkit managed-repo operator copies** (math/draft template ripples)
   consume toolchain via the devkit template's own resolution — WR-6
   (operator migration) consolidates operator discovery; not reworked
-  here.
+  here. The toolchain-root logic itself remains duplicated in three
+  near-copies (runtime toolchain.py, foundation toolchain.py, the
+  operator's `_toolchain()`) — each fails closed independently; WR-6's
+  operator consolidation is the dedup point.
 - **The standing lock-devkit-node split** (lock node `bfdb4c1` vs devkit
   main) and the context→devkit pin BaselineConflict are unchanged WR-6
   targets. The devkit lock node cannot move to the schema-registration
@@ -100,3 +99,14 @@ Stall law on failed exit.
   revisions rides session checkpoints (v28-v42). Reconciling the file
   is an owner-visible governance write, deliberately not done inside
   this engineering batch.
+- **Toolchain version-string optionality**: `toolchain.py validate()`
+  skips the version assertion for manifest entries without a `version`
+  string (pre-existing; the manifest lives inside the identity-checked
+  node, and resolve() still fails on missing paths). Recorded for the
+  next toolchain-touching batch.
+- **Toolchain graph edge**: the toolchain is consumed by direct
+  locked-node lookup without a declared dependency edge (the schema's
+  kind enumeration does not obviously admit a build-tool edge);
+  drop-node failures surface typed at check-toolchain. Whether a
+  `toolchain` edge kind belongs in qiven-dependencies-v1 is an open
+  schema question for WR-6.

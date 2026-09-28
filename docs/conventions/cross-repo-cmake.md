@@ -24,33 +24,32 @@ contrast — what is deliberately NOT allowed. Established 2026-09-23
 External code enters a consumer build in exactly ONE way:
 
 ```cmake
-# --- <name>: external root resolution (fail-closed, workspace-bounded)
-set(QIVEN_<NAME>_ROOT "" CACHE PATH "Path to the <name> checkout")
-if(NOT QIVEN_<NAME>_ROOT)
-    set(QIVEN_<NAME>_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../<name>")
-    if(EXISTS "${QIVEN_<NAME>_DEFAULT}/CMakeLists.txt")
-        set(QIVEN_<NAME>_ROOT "${QIVEN_<NAME>_DEFAULT}")
-    endif()
+# --- <name>: workspace-resolved provider root (fail-closed, ADR-0052)
+# configure runs through the workspace bootstrap (gate-configure), which
+# sets QIVEN_RESOLUTION_FILE; the adapter emits the identity-checked
+# provider roots. The consumer declares the edge in .qiven/dependencies.json
+# (kind first-party-source or third-party-singleton) and never resolves
+# siblings or pins SHAs itself.
+if(NOT DEFINED ENV{QIVEN_RESOLUTION_FILE})
+    message(FATAL_ERROR "configure through the workspace bootstrap, not a bare cmake invocation")
 endif()
-if(NOT EXISTS "${QIVEN_<NAME>_ROOT}/CMakeLists.txt")
-    message(FATAL_ERROR "<name> checkout not found; set QIVEN_<NAME>_ROOT")
-endif()
+include("$ENV{QIVEN_RESOLUTION_FILE}")
 
-# --- pin (when the external tree is version-frozen for this consumer)
-set(QIVEN_<NAME>_PINNED_SHA "<full sha>")
-execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
-    WORKING_DIRECTORY "${QIVEN_<NAME>_ROOT}" ... )
-# mismatch -> FATAL_ERROR naming both SHAs and the re-pin procedure
-
-# --- consumption: source layers build INTO the consumer's build tree
-add_subdirectory("${QIVEN_<NAME>_ROOT}" "${CMAKE_BINARY_DIR}/<name>")
+# --- first-party source providers materialize through the adapter guard
+qiven_workspace_materialize(<name>)
 target_link_libraries(<consumer-target> ... qiven::<name>)
+
+# --- consumed third-party packages: per-package add_subdirectory WITHOUT
+# directory-level EXCLUDE_FROM_ALL (the LNK1104 law; never route these
+# through the materialize() helper)
+add_subdirectory("${QIVEN_WORKSPACE_PROVIDER_ROOT_<name>}/packages/<pkg>"
+                 "${CMAKE_BINARY_DIR}/tp/<pkg>")
 ```
 
-Precedence: environment/cache override → sibling-layout default →
-explicit failure. NEVER a system path, NEVER `CMAKE_PREFIX_PATH`
-discovery for governed targets, NEVER an in-repo copy of the external
-tree.
+Precedence: the workspace lock node (selected once, advanced by a lock
+transaction). NEVER a system path, NEVER `CMAKE_PREFIX_PATH` discovery
+for governed targets, NEVER an in-repo copy of the external tree, NEVER
+a consumer-local SHA pin (retired at WR-3/WR-4/WR-5).
 
 ## 2. Rules that apply to every external target
 
@@ -71,11 +70,10 @@ tree.
    carry our full warning law; the third-party singleton carries its
    own scoped adaptation law (standard §4). The consumer's global
    flags never reach either.
-5. **Pins are exact and validated at configure.** Version-frozen
-   consumers (draft, third-party singleton) record the full SHA and
-   FAIL on mismatch; co-developed first-party layers (foundation) are
-   unpinned today — a recorded gap with a revisit trigger (standard
-   §8), not a silent one.
+5. **Pins are the workspace lock nodes (WR-3/WR-4/WR-5 shape).** Every
+   governed external is selected once in the workspace lock and
+   identity-checked at configure/consumption; consumer-local SHA pins
+   are retired. Moving a node is a lock transaction with full gates.
 6. **IMPORTED (prebuilt) externals** must be `GLOBAL` with per-config
    locations and explicit `MAP_IMPORTED_CONFIG_*` when configurations
    are a subset (standard §4.2) — a multi-config consumer linking a
