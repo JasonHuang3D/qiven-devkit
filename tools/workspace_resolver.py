@@ -7,7 +7,8 @@ Resolution and validation never mutate the workspace lock — the explicit
 lock-update --apply operation is the lock's only writer. Census-wr0
 declaration origins are shadow-only by construction: a receipt containing
 any census declaration is labeled shadow-only and cannot back an
-authoritative operation.
+authoritative operation (historical: the census was retired at WR-8; the
+delivered graph is repository-manifest-only and validates authoritative).
 
 Canonicalization is the RFC 8785 subset over the integer/string/bool/null/
 array/object vocabulary (floats are rejected by the schema layer). The
@@ -644,7 +645,6 @@ def resolve(control: Path, checkouts: dict[str, str], workspace_root: Path | Non
         "trusted": trust.get("trusted", False),
         "auto_admitted": trust.get("auto_admitted"),
         "shadow_only": any_census or mode != "authoritative",
-        "legacy_resolution_used": True,
         "nodes": node_receipts,
         "edges": edges,
         "baseline_conflicts": conflicts,
@@ -912,7 +912,6 @@ def _validate_effective(control: Path, manifest: dict, effective_lock: dict,
         "trusted": trust.get("trusted", False),
         "auto_admitted": trust.get("auto_admitted"),
         "shadow_only": any_census or mode != "authoritative",
-        "legacy_resolution_used": True,
         "nodes": node_receipts,
         "edges": edges,
         "baseline_conflicts": conflicts,
@@ -1252,7 +1251,7 @@ def _parse_node_map(pairs: list[str], label: str) -> dict[str, Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="qiven workspace resolver (WR-1, shadow read-only)")
+    parser = argparse.ArgumentParser(description="qiven workspace resolver (ADR-0052; graph validation, overlay/adapter emission, explicit lock-update; authoritative by default with the accepted trust policy)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_common(target):
