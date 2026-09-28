@@ -99,10 +99,10 @@ tree.
 
 | External | Kind | Root var | Pin | Consumers |
 | --- | --- | --- | --- | --- |
-| `qiven-foundation` | first-party layer (source) | `QIVEN_FOUNDATION_ROOT` | exact SHA, configure-validated (mandatory since 2026-09-23) | runtime, draft, math |
-| `qiven-context-draft` | frozen semantic library (source) | `QIVEN_DRAFT_ROOT` | exact SHA, configure-validated | runtime |
-| `qiven-toolchain-win` | pinned executables (env layer) | `QIVEN_TOOLCHAIN_ROOT` | toolchain.py pins | all builds via check-toolchain |
-| `qiven-third-party-win` | third-party singleton | `QIVEN_THIRD_PARTY_ROOT` | exact SHA per consumer | runtime (sqlite3) |
-| `qiven-devkit` | tool/standards package | `QIVEN_DEVKIT_ROOT` | shim+pin where consumed (ADR-0046 D2) | context (operator shim), runtime (deploy shim) |
+| `qiven-foundation` | first-party layer (source) | `QIVEN_RESOLUTION_FILE` (workspace adapter, WR-3) | workspace lock node | runtime, draft, math |
+| `qiven-context-draft` | frozen semantic library (source) | `QIVEN_RESOLUTION_FILE` (workspace adapter, WR-4) | workspace lock node | runtime |
+| `qiven-toolchain-win` | pinned executables (env layer) | locator only (`QIVEN_TOOLCHAIN_ROOT`/sibling); revision from WorkspaceGeneration (WR-5) | workspace lock node, identity-checked at consumption | all builds via check-toolchain |
+| `qiven-third-party-win` | third-party singleton | `QIVEN_RESOLUTION_FILE` (workspace adapter, WR-5) | workspace lock node, selected once | runtime (sqlite3) |
+| `qiven-devkit` | tool/standards package | `QIVEN_DEVKIT_ROOT` | shim+pin where consumed (ADR-0046 D2; WR-6 target) | context (operator shim), runtime (deploy shim) |
 
 New externals append here in the same batch that adds them.

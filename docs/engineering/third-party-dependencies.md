@@ -164,24 +164,30 @@ target_include_directories(qiven::tp::<name> INTERFACE "${CMAKE_CURRENT_SOURCE_D
 
 ## 5. Consumption law (every consuming repository)
 
-1. **Root resolution** (fail-closed, no system discovery):
-   `QIVEN_THIRD_PARTY_ROOT` env override → sibling default
-   `<repo>/../qiven-third-party-win` → explicit failure with
-   instructions. `find_package` for governed third-party code is
-   forbidden (it can silently bind system/vcpkg/PATH copies);
-   the build is hermetic to the workspace.
-2. **Pin**: the consumer records the singleton's exact SHA
-   (`QIVEN_THIRD_PARTY_PIN` in its CMakeLists, the same discipline as
-   the draft pin) and configure FAILS when the checkout is at another
-   SHA. Moving the pin is an explicit re-pin batch with full gates.
+1. **Root resolution** (fail-closed, no system discovery; WR-5 shape):
+   the singleton is SELECTED ONCE in the workspace lock — the consumer
+   declares the `third-party-singleton` edge in `.qiven/dependencies.json`
+   and reads the identity-checked root from the workspace adapter
+   (`QIVEN_RESOLUTION_FILE`; runtime: the adapter-emitted provider-root
+   variable). `find_package` for governed third-party code is forbidden
+   (it can silently bind system/vcpkg/PATH copies); the build is
+   hermetic to the workspace.
+2. **Pin**: the workspace lock node IS the pin (selected once, advanced
+   by a lock transaction); no consumer-local SHA remains. A consumer's
+   spot-verification checks the singleton HEAD against the LOCKED node
+   commit and fails closed on mismatch.
 3. **Consumption**: `add_subdirectory("${QIVEN_THIRD_PARTY_ROOT}/packages/<name>"
    "${CMAKE_BINARY_DIR}/tp/<name>")` then link `qiven::tp::<name>`.
-   Consumers never add third-party include paths of their own and never
-   re-declare third-party flags.
+   Per-package consumption WITHOUT directory-level `EXCLUDE_FROM_ALL`
+   (the LNK1104 law); the adapter's materialize() helper
+   (`EXCLUDE_FROM_ALL` provider shape) is for first-party providers and
+   is deliberately NOT applied to consumed externals. Consumers never
+   add third-party include paths of their own and never re-declare
+   third-party flags.
 4. **Spot verification (defense in depth)**: the singleton's own gate
    verifies every provenance; a consumer MAY additionally run the
    verifier against the singleton root in its gate (cheap; the
-   runtime does).
+   runtime does — locked-node identity plus every provenance digest).
 5. **Style/whitespace gates** never apply to the singleton tree (it is
    not inside the consumer repository at all); v1's exclusions become
    moot, and the pinned formatter never touches upstream code.
