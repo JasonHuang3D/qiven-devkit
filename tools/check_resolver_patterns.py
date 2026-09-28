@@ -49,23 +49,50 @@ PATH_EXCEPTIONS = {
 }
 OPERATOR_INSTANCE_REPOS = {"qiven-foundation", "qiven-runtime"}
 
-CMAKE_FILES = ("CMakeLists.txt",)
+CMAKE_FILES = ("cmakelists.txt",)
 CMAKE_SUFFIX = ".cmake"
 CONFIG_SUFFIXES = (".json", ".yaml", ".yml", ".cmake", ".props", ".vsixmanifest")
-PIN_KEYS = re.compile(r"devkit_pin|QIVEN_DEVKIT_PIN|QIVEN_DRAFT_PIN")
+PIN_KEYS = re.compile(r"devkit_pin|QIVEN_DEVKIT_PIN|QIVEN_DRAFT_PIN", re.I)
 SIBLING_PATH = re.compile(r"\.\./qiven-[a-z-]+|\"qiven-(?:devkit|draft)-root\"", re.I)
 CMAKE_ENV_VARS = re.compile(r"QIVEN_(?:DEVKIT|DRAFT)_ROOT")
-DEVKIT_IMPORT = re.compile(r"(?:sys\.path|importlib|PYTHONPATH)[^\n]*\.\./qiven-devkit", re.I)
-TOOLCHAIN_REF = re.compile(r"qiven-toolchain-win")
-LOCK_REF = re.compile(r"workspace\.lock\.json")
+# R3: a devkit sibling reference in Python is the sanctioned launcher
+# shape ONLY when the same file carries the bootstrap identity-check
+# marker; an unguarded import path (literal or Path-composed) is the
+# forbidden fallback class. Adjacency: the reference must sit on a line
+# with path/import machinery - prose citations of law documents and
+# kit-payload absolute locators are a recorded residual, not imports.
+DEVKIT_REF_LINE = re.compile(
+    r"[^\n]*(?:qiven-devkit)[^\n]*", re.I)
+PATH_MACHINERY = re.compile(r"Path|parent|sys\.path|importlib|\.\./", re.I)
+IDENTITY_MARKER = re.compile(
+    r"bootstrap|_bootstrap_identity|BootstrapDevkitMismatch|gate-configure", re.I)
+TOOLCHAIN_REF = re.compile(r"qiven-toolchain-win", re.I)
+LOCK_REF = re.compile(r"workspace\.lock\.json", re.I)
 
 
 def is_config(path: Path) -> bool:
-    return path.suffix.lower() in CONFIG_SUFFIXES or path.name in CMAKE_FILES
+    return path.suffix.lower() in CONFIG_SUFFIXES or path.name.lower() in CMAKE_FILES
 
 
 def strip_cmake_comments(text: str) -> str:
-    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+    # bracket comments (#[[ ... ]]) are stripped as blocks; line comments
+    # at the first # (F4: law text inside comments is not a pattern)
+    out_lines: list[str] = []
+    in_block = False
+    for line in text.splitlines():
+        if in_block:
+            if "]]" in line:
+                in_block = False
+                line = line.split("]]", 1)[1]
+            else:
+                out_lines.append("")
+                continue
+        stripped = line.lstrip()
+        if stripped.startswith("#[["):
+            in_block = True
+            line = line.split("#[[", 1)[0]
+        out_lines.append(line.split("#", 1)[0])
+    return "\n".join(out_lines)
 
 
 def iter_files(repo: Path):
@@ -90,7 +117,8 @@ def scan_repo(repo: Path, repo_name: str, findings: list[str]) -> None:
         except OSError:
             continue
         name = path.name
-        if name in CMAKE_FILES or name.endswith(CMAKE_SUFFIX):
+        lowered = name.lower()
+        if lowered in CMAKE_FILES or lowered.endswith(CMAKE_SUFFIX):
             functional = strip_cmake_comments(text)
             for match in CMAKE_ENV_VARS.finditer(functional):
                 findings.append(f"R1 {repo_name}/{rel}: CMake env var {match.group(0)}")
@@ -102,13 +130,18 @@ def scan_repo(repo: Path, repo_name: str, findings: list[str]) -> None:
         # are documentation, not pins.
         if is_config(path) and PIN_KEYS.search(text):
             findings.append(f"R2 {repo_name}/{rel}: consumer-local workspace pin key")
-        if name.endswith(".py"):
-            if rel not in PATH_EXCEPTIONS:
-                for match in DEVKIT_IMPORT.finditer(text):
-                    findings.append(f"R3 {repo_name}/{rel}: devkit sibling import fallback")
+        if lowered.endswith(".py"):
+            if rel not in PATH_EXCEPTIONS and not IDENTITY_MARKER.search(text):
+                for line_match in DEVKIT_REF_LINE.finditer(text):
+                    if PATH_MACHINERY.search(line_match.group(0)):
+                        findings.append(f"R3 {repo_name}/{rel}: devkit sibling reference without"
+                                        " the bootstrap identity-check marker")
+                        break
             if TOOLCHAIN_REF.search(text) and not LOCK_REF.search(text):
-                findings.append(f"R4 {repo_name}/{rel}: toolchain path without the lock check")
-        if name == "qiven_operator.py":
+                findings.append(f"R4 {repo_name}/{rel}: toolchain path without the lock check"
+                                " (co-occurrence marker; constructed-name evasion is a recorded"
+                                " residual)")
+        if lowered == "qiven_operator.py":
             allowed = repo_name in OPERATOR_INSTANCE_REPOS and rel == "tools/qiven_operator.py"
             if not allowed and repo_name != "qiven-devkit":
                 findings.append(f"R5 {repo_name}/{rel}: vendored operator copy "

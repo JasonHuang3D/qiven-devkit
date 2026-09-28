@@ -48,12 +48,16 @@ def main() -> int:
         code, out = run_gate(repo)
         assert code == 1 and "R2" in out, f"P2: {code} {out}"
 
-        # P3: devkit sibling import fallback in Python
+        # P3: devkit sibling import fallback in Python - both the literal
+        # path form and the Path-composed form WITHOUT the identity marker
         repo = build_fixture(tmp, "r3", {
             "tools/launch.py": "import sys\nsys.path.insert(0, '../qiven-devkit')\n",
+            "tools/launch2.py": "import importlib\n"
+                                "CHECKOUT = ROOT.parent / 'qiven-devkit'\n"
+                                "main = importlib.import_module('qiven_operator').main\n",
         })
         code, out = run_gate(repo)
-        assert code == 1 and "R3" in out, f"P3: {code} {out}"
+        assert code == 1 and out.count("R3") == 2, f"P3: {code} {out}"
 
         # P4: toolchain path without the lock identity check
         repo = build_fixture(tmp, "r4", {
@@ -70,12 +74,20 @@ def main() -> int:
         assert code == 1 and "R5" in out, f"P5: {code} {out}"
 
         # P6: the documented exceptions and the lock-bound shape pass (the
-        # operator instance exception is keyed on the repository name)
+        # operator instance exception is keyed on the repository name);
+        # the guarded launcher (identity marker present) and bracket-
+        # comment law text also pass
         repo = build_fixture(tmp, "qiven-foundation", {
             "tools/qiven_operator.py": "LOCK = 'workspace.lock.json'\n"
                                        "TOOLCHAIN = 'qiven-toolchain-win'\n",
-            "CMakeLists.txt": "# siblings or checks a consumer-local pin (comment-only)\n",
+            "CMakeLists.txt": "#[[\nLaw text: the retired ../qiven-devkit sibling discovery.\n]]\n"
+                              "# siblings or checks a consumer-local pin (comment-only)\n",
             "docs/history.md": "the devkit_pin era (prose record)\n",
+            "tools/launcher.py": "import importlib\n"
+                                 "CHECKOUT = ROOT.parent / 'qiven-devkit'\n"
+                                 "_bootstrap_identity(CHECKOUT, node)  # the guard\n"
+                                 "main = importlib.import_module('qiven_operator').main\n",
+            "tools/citation.py": "LAW = 'qiven-devkit docs/engineering/law.md (docstring)'\n",
         })
         code, out = run_gate(repo)
         assert code == 0, f"P6: {code} {out}"

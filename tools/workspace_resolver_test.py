@@ -632,13 +632,52 @@ def main() -> int:
         error_23b = _resolve_typed(control_23, mode="authoritative", trust_policy=policy_23)
         assert error_23b.kind == "UntrustedControlRevision", f"R23: {error_23b.kind}"
 
-        # case 3: a declaration-origin flip is manifest-class, never routine
-        _advance_node(moved_23, "fixture-provider", "c" * 40, "d" * 40,
-                      origin="repository-manifest")
-        _git(["add", "-A"], control_23)
-        _git(["commit", "-q", "-m", "origin flip"], control_23)
-        error_23c = _resolve_typed(control_23, mode="authoritative", trust_policy=policy_23)
+        # case 3 (fresh fixture so the chain is PURE): a declaration-origin
+        # flip is manifest-class, never routine
+        r23c_root = root / "r23c"
+        r23c_root.mkdir()
+        control_23c, lock_23c = _fixture_workspace(r23c_root)
+        head_23c = _git(["rev-parse", "HEAD"], control_23c)
+        manifest_23c = json.loads((control_23c / "workspace.json").read_text(encoding="utf-8-sig"))
+        flipped = json.loads(json.dumps(lock_23c))
+        flipped["nodes"]["fixture-provider"]["declaration"]["origin"] = "repository-manifest"
+        flipped["generation"] = wr.generation_digest(
+            manifest_23c, {k: v for k, v in flipped.items() if k != "generation"})
+        (control_23c / "workspace.lock.json").write_text(
+            json.dumps(flipped, indent=2) + "\n", encoding="utf-8", newline="\n")
+        _git(["add", "-A"], control_23c)
+        _git(["commit", "-q", "-m", "origin flip"], control_23c)
+        policy_23c = root / "trust-r23c.json"
+        policy_23c.write_text(json.dumps({
+            "schema": "qiven-workspace-control-trust-v1",
+            "admitted_control_revisions": [head_23c],
+        }), encoding="utf-8", newline="\n")
+        error_23c = _resolve_typed(control_23c, mode="authoritative", trust_policy=policy_23c)
         assert error_23c.kind == "UntrustedControlRevision", f"R23: {error_23c.kind}"
+
+        # case 4 (fresh fixture): a pure declaration-cache swap with NO node
+        # movement is a graph edit, never a routine advance
+        r23d_root = root / "r23d"
+        r23d_root.mkdir()
+        control_23d, lock_23d = _fixture_workspace(r23d_root)
+        head_23d = _git(["rev-parse", "HEAD"], control_23d)
+        manifest_23d = json.loads((control_23d / "workspace.json").read_text(encoding="utf-8-sig"))
+        swapped = json.loads(json.dumps(lock_23d))
+        swapped["nodes"]["fixture-provider"]["declaration"]["digest"] = "sha256:" + "e" * 64
+        swapped["nodes"]["fixture-provider"]["declaration"]["blob"] = "f" * 40
+        swapped["generation"] = wr.generation_digest(
+            manifest_23d, {k: v for k, v in swapped.items() if k != "generation"})
+        (control_23d / "workspace.lock.json").write_text(
+            json.dumps(swapped, indent=2) + "\n", encoding="utf-8", newline="\n")
+        _git(["add", "-A"], control_23d)
+        _git(["commit", "-q", "-m", "cache swap"], control_23d)
+        policy_23d = root / "trust-r23d.json"
+        policy_23d.write_text(json.dumps({
+            "schema": "qiven-workspace-control-trust-v1",
+            "admitted_control_revisions": [head_23d],
+        }), encoding="utf-8", newline="\n")
+        error_23d = _resolve_typed(control_23d, mode="authoritative", trust_policy=policy_23d)
+        assert error_23d.kind == "UntrustedControlRevision", f"R23: {error_23d.kind}"
 
 
         # R10: preflight end-to-end through the LOCKED devkit resolver binary.
