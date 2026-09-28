@@ -587,6 +587,59 @@ def main() -> int:
             "R22: clean control at the admitted revision must resolve in authoritative mode"
         )
 
+        # R23 (WR-8 mechanization): the ratified routine-advance rule is
+        # enforced mechanically - a PURE node-advancement commit above the
+        # closest admitted ancestor auto-admits (the admitted-list chase
+        # dies); foreign files and declaration-origin flips stay
+        # explicit-admission class.
+        r23_root = root / "r23"
+        r23_root.mkdir()
+        control_23, lock_23 = _fixture_workspace(r23_root)
+        policy_23 = root / "trust-r23.json"
+        head_23 = _git(["rev-parse", "HEAD"], control_23)
+        manifest_23 = json.loads((control_23 / "workspace.json").read_text(encoding="utf-8-sig"))
+
+        def _advance_node(lock_src: dict, node: str, commit: str, tree: str,
+                          origin: str | None = None) -> dict:
+            moved = json.loads(json.dumps(lock_src))
+            moved["nodes"][node]["commit"] = commit
+            moved["nodes"][node]["tree"] = tree
+            if origin is not None:
+                moved["nodes"][node]["declaration"]["origin"] = origin
+            moved["generation"] = wr.generation_digest(
+                manifest_23, {k: v for k, v in moved.items() if k != "generation"})
+            (control_23 / "workspace.lock.json").write_text(
+                json.dumps(moved, indent=2) + "\n",
+                encoding="utf-8", newline="\n")
+            return moved
+
+        # case 1: pure node advancement auto-admits
+        moved_23 = _advance_node(lock_23, "fixture-provider", "a" * 40, "b" * 40)
+        _git(["add", "-A"], control_23)
+        _git(["commit", "-q", "-m", "routine advance: fixture-provider node"], control_23)
+        policy_23.write_text(json.dumps({
+            "schema": "qiven-workspace-control-trust-v1",
+            "admitted_control_revisions": [head_23],
+        }), encoding="utf-8", newline="\n")
+        receipt_23 = wr.resolve(control_23, {}, None, "authoritative", policy_23)
+        assert receipt_23["trusted"] is True, "R23: pure advance must auto-admit"
+        assert receipt_23.get("auto_admitted"), "R23: auto-admission note missing"
+
+        # case 2: a foreign file in the chain stays explicit-admission class
+        (control_23 / "notes.md").write_text("foreign\n", encoding="utf-8", newline="\n")
+        _git(["add", "-A"], control_23)
+        _git(["commit", "-q", "-m", "foreign file"], control_23)
+        error_23b = _resolve_typed(control_23, mode="authoritative", trust_policy=policy_23)
+        assert error_23b.kind == "UntrustedControlRevision", f"R23: {error_23b.kind}"
+
+        # case 3: a declaration-origin flip is manifest-class, never routine
+        _advance_node(moved_23, "fixture-provider", "c" * 40, "d" * 40,
+                      origin="repository-manifest")
+        _git(["add", "-A"], control_23)
+        _git(["commit", "-q", "-m", "origin flip"], control_23)
+        error_23c = _resolve_typed(control_23, mode="authoritative", trust_policy=policy_23)
+        assert error_23c.kind == "UntrustedControlRevision", f"R23: {error_23c.kind}"
+
 
         # R10: preflight end-to-end through the LOCKED devkit resolver binary.
         fixture_devkit = root / "qiven-devkit"
@@ -629,7 +682,7 @@ def main() -> int:
         assert preflight_receipt["workspace_generation"] == lock_r10["generation"], "R10: generation"
         assert preflight_receipt["released"] is True and preflight_receipt["shadow_only"] is True, "R10: release flags"
 
-    print("[ OK ] workspace-resolver self-test (R1-R22)")
+    print("[ OK ] workspace-resolver self-test (R1-R23)")
     return 0
 
 
