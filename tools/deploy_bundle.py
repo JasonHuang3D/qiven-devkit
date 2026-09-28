@@ -249,7 +249,29 @@ def deploy(repo_arg: str, profile_override: str | None) -> int:
         # --- build (release) ----------------------------------------------
         build = policy["build"]
         if not policy.get("skip_build", False):
-            configure = run(["cmake", "--preset", build.get("configure_preset", "vs2022-x64")], repo)
+            # WR-5 adapter-generation binding: configure must run through
+            # the workspace bootstrap (gate-configure), which resolves the
+            # locked providers and emits QIVEN_RESOLUTION_FILE; a bare
+            # `cmake --preset` fails typed on every repo under the binding.
+            # Defect found live 2026-09-29 (v48): the deploy path predated
+            # the WR-5 cutover (last receipt 2026-09-22) and had never been
+            # re-run; fixed here at the tooling owner instead of detouring.
+            workspace = repo.parent
+            control = pathlib.Path(os.environ.get(
+                "QIVEN_WORKSPACE_CONTROL", str(workspace / "qiven-workspace")))
+            devkit = pathlib.Path(__file__).resolve().parent.parent
+            bootstrap = control / "bootstrap" / "qiven-bootstrap.py"
+            if not bootstrap.is_file():
+                return fail(
+                    f"workspace bootstrap not found at {bootstrap}; the deploy "
+                    "build requires the WR-5 resolution path (no bare configure)")
+            configure = run(
+                [sys.executable, str(bootstrap), "gate-configure",
+                 "--control", str(control), "--devkit", str(devkit),
+                 "--repo", repo.name, "--repo-root", str(repo),
+                 "--preset", build.get("configure_preset", "vs2022-x64"),
+                 "--cmake", "cmake"],
+                repo)
             if configure.returncode != 0:
                 return fail(f"configure failed: {configure.stderr[-800:]}")
             built = run(
