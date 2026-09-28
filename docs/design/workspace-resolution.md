@@ -1,19 +1,19 @@
 # Workspace Resolution — Devkit Design Landing
 
-Status: accepted program (ADR-0052, qiven-context 2026-09-24); WR-0
-DELIVERED and owner-accepted 2026-09-25; WR-1 DELIVERED (schemas +
-resolver + bootstrap + the published qiven-workspace control
-repository, shadow mode) and its trust policy ACCEPTED by owner H1
-(admitted control revision `1743d921…`; authoritative bootstrap
-additionally requires a compatible selection — the typed
-BaselineConflict on the context devkit pin stands until WR-6);
-**WR-2 DELIVERED** (shadow preflight + legacy-pin comparator with
-per-class verdicts; Profile B permanent regression; live report at
-[`workspace-resolution/wr2-report.md`](workspace-resolution/wr2-report.md)
-— Foundation/Draft/ThirdParty classes at equality, Devkit class an
-explicit WR-6 discrepancy). Next owner gate: the WR-3 Foundation
-cutover decision (Profile J pilot). The normative program documents
-are the single source of truth:
+Status: accepted program (ADR-0052, qiven-context 2026-09-24);
+**DELIVERED END TO END 2026-09-28 (WR-0..WR-8)** — every dependency
+edge declares through repository-owned manifests (`.qiven/dependencies.json`;
+zero census-origin/shadow-only declarations), the forbidden-resolver-
+pattern gate is live in the publication gate across the workspace, the
+routine-advance rule is MECHANIZED in the resolver (semantic diff-shape
+auto-admission), the E7 cutover is accepted and executed (ADR-0058:
+`index rebuild` requires `--workspace-lock`, fail-closed on
+non-cutover-grade closures), and the workspace resolves the full graph
+AUTHORITATIVELY (shadow_only=False). The former typed BaselineConflict
+on the context devkit pin was RESOLVED by the WR-6 pin deletion. The
+stage-by-stage history (WR-0 census, shadow-mode rollout, per-class
+cutover equality, comparator receipts) lives in the wr-reports below.
+The normative program documents are the single source of truth:
 
 - qiven-docs `accepted/2026-09-24/00-qiven-workspace-dependency-resolution-program.md`
   (governance laws WG-1..WG-10)

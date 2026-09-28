@@ -6,11 +6,11 @@ Qiven Devkit defines how a Qiven repository is created, safely adopted, and kept
 
 - **qiven-toolchain-win** owns pinned executable build tools such as CMake and clang-format.
 - **qiven-devkit** owns repository templates, shared engineering conventions, explicit bootstrap/synchronization tooling, and the shared Qiven Operator runtime.
-- **qiven-workspace** owns ecosystem version composition: the control repository (`JasonHuang3D/qiven-workspace`) is live, its generation-bound lock selects revisions, and the workspace resolver is the accepted dependency endpoint (ADR-0052; WR-1..WR-3 delivered; foundation/math/draft/runtime resolve through it — state only the tested rollout, not a universal transition).
+- **qiven-workspace** owns ecosystem version composition: the control repository (`JasonHuang3D/qiven-workspace`) is live, its generation-bound lock selects revisions, and the workspace resolver is the accepted dependency endpoint (ADR-0052; WR-0..WR-8 DELIVERED end to end 2026-09-28: every workspace repository declares its dependencies through a repository-owned manifest and the graph resolves authoritatively).
 - Runtime repositories such as **qiven-foundation** own their APIs, implementation, tests, domain architecture, and repository-specific Operator policy.
 
-Devkit materializes an ordinary snapshot into each generated repository. Generated repositories contain their own scripts,
-engineering protocol, and Operator runtime and never call back into a Devkit checkout. They remain independently usable after generation.
+Devkit materializes an ordinary snapshot into each generated repository. Generated repositories carry their own scripts and engineering
+protocol, and invoke the shared Qiven Operator through the workspace: their launcher runs the bootstrap identity-check against the workspace lock and then imports the Devkit operator from the LOCKED devkit node (WR-6; the former vendored operator copies and the never-call-back model are retired). They remain independently usable after generation.
 
 ## Authority resolution
 
