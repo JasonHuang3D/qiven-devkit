@@ -42,9 +42,9 @@ copy retirement precondition :207; exits :211-214).
 | Exit criterion | Evidence |
 | --- | --- |
 | The Context-specific QIVEN_DEVKIT_ROOT → sibling → import path is no longer normal | the chain is deleted from context's launcher; the bootstrap identity-check (commit+tree vs the lock node) precedes every import |
-| Every Operator invocation reports WorkspaceGeneration and exact Devkit node | info + gate payloads carry workspace_generation / devkit_node / workspace_mode (verified live: context info reports generation `ea7d1822…`, node `2992d8d…`) |
-| Wrong local Devkit revision fails before Operator code executes | the launcher runs the bootstrap preflight (identity-check) before `importlib.import_module`; evidence-live this window — twice the bootstrap rejected a moved devkit checkout with the typed `BootstrapDevkitMismatch` before any operator code ran |
-| Template version drift can no longer silently select an older Operator | no vendored operator copy remains in any repository; the single implementation is the lock's devkit node (math/draft had been silently running a 215-line-older operator) |
+| Every Operator invocation reports WorkspaceGeneration and exact Devkit node | EVERY payload-producing command reports (info, gate, run, ci start, exec start, exec status) — the fields are workspace_generation, devkit_node (the LOCK's selection), devkit_head (the checkout actually executing) and devkit_drift (explicit when they differ) |
+| Wrong local Devkit revision fails before Operator code executes | the launcher runs the bootstrap preflight (identity-check) before `importlib.import_module`; evidence-live this window — twice the bootstrap rejected a moved devkit checkout with the typed `BootstrapDevkitMismatch` before any operator code ran; the launcher also SURFACES the preflight's bootstrap_notes (a dirty-devkit shadow label is printed, never swallowed) |
+| Template version drift can no longer silently select an older Operator | no vendored operator copy remains in any repository; the single implementation is the lock's devkit node (math/draft had been silently running a 215-line-older operator); devkit_drift makes checkout-vs-lock divergence explicit in every payload |
 
 Launcher-rule compliance (:200-205): identifies repo + workspace ✓;
 invokes bootstrap ✓; no Devkit path fallback ✓; no consumer-local
@@ -58,10 +58,18 @@ standing context→devkit BaselineConflict).
   this batch ran through a launcher or the bootstrap). CI does not
   invoke the operator layer at all — the runtime/math CI units call
   the workspace bootstrap directly for configure/build/test and have
-  run green on that path since v29/v31; the fresh owner-dispatched run
-  at the WR-5-bumped snapshot remains the standing open row (explicit-
-  dispatch law). The retirement therefore rides the standing CI
-  evidence vehicle, disclosed here rather than re-proven in-batch.
+  run green on that path since v29/v31; a fresh in-session-dispatched
+  run at the WR-5-bumped snapshot closes the CI leg freshly (receipt
+  recorded in the session checkpoint). The operator-layer entry point
+  (launcher) is CI-unexercised because CI never runs operators —
+  disclosed; the workspace-root launcher is the post-window
+  consolidation point.
+- **Lock-state currency**: this report cites lock transactions by their
+  control commits (`3f02af6` devkit-node transaction, `6503288`
+  published-head conform, `18d9303` math/draft advances, `7990ed2`
+  devkit report-head advance) rather than by generation literals — the
+  generation moves with every intra-batch transaction; the reviewed
+  state is the control HEAD at review time.
 - **The census-reported BaselineConflict note persists**: the context
   node's census-wr0 declaration still carries the legacy_consumer_pin
   note describing the (now-deleted) pin; the resolver reports the
