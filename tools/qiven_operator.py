@@ -1425,6 +1425,36 @@ def _head() -> str:
     return completed.stdout.strip()
 
 
+def _workspace_identity() -> dict[str, str | None]:
+    """WR-6 (ADR-0052 doc 02): every Operator invocation reports the
+    WorkspaceGeneration and the exact Devkit node it executes from. The
+    control locator is QIVEN_WORKSPACE_CONTROL or the workspace sibling;
+    outside a workspace the fields report None with a standalone note
+    (visible, never guessed). Reporting is evidence - revision
+    ENFORCEMENT stays in the launcher's bootstrap identity-check."""
+    control = Path(os.environ.get("QIVEN_WORKSPACE_CONTROL",
+                                  ROOT.parent / "qiven-workspace")).resolve()
+    lock_path = control / "workspace.lock.json"
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {"workspace_generation": None, "devkit_node": _head(),
+                "workspace_mode": "standalone (no workspace lock at the control locator)"}
+    node = lock.get("nodes", {}).get("qiven-devkit")
+    commit = node.get("commit") if isinstance(node, dict) else None
+    if not isinstance(commit, str) or len(commit) != 40:
+        return {"workspace_generation": None, "devkit_node": _head(),
+                "workspace_mode": "standalone (lock has no qiven-devkit node)"}
+    return {"workspace_generation": str(lock.get("generation")),
+            "devkit_node": commit,
+            "workspace_mode": "workspace"}
+
+
+def _workspace_identity_fields(payload: dict[str, Any]) -> None:
+    identity = _workspace_identity()
+    payload.update(identity)
+
+
 def _remote_branch_head(branch: str) -> str:
     ref = f"refs/heads/{branch}"
     completed = _git("ls-remote", "--heads", "origin", ref)
@@ -1802,6 +1832,7 @@ def main(argv: list[str] | None = None) -> int:
                 "root": str(ROOT),
                 "head": _head(),
             }
+            _workspace_identity_fields(payload)
             if args.json:
                 _print_json(payload)
             else:
@@ -1831,6 +1862,7 @@ def main(argv: list[str] | None = None) -> int:
                 "duration_seconds": round(time.monotonic() - started, 3),
                 "results": [asdict(result) for result in results],
             }
+            _workspace_identity_fields(payload)
             _write_gate_receipt(payload)
             if args.json:
                 _print_json(_spill_large_logs(payload))
