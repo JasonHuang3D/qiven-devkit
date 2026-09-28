@@ -41,21 +41,35 @@ ADR-0052 assigns Devkit the resolver implementation surface:
 - the static gate that prevents new governed root+pin/sibling-resolution
   patterns after migration (WR-8).
 
-## What does NOT change until cutover
+## What did NOT change across the migration (historical scope note)
 
-- The current shim-plus-pin / external-root pattern remains the VALID,
-  in-force consumption mechanism for every repository until its dependency
-  class passes its own WR cutover (`../conventions/cross-repo-cmake.md` is
-  the operative convention meanwhile).
+> The two sections below describe the MIGRATION-STAGE rules that governed
+> the program while it ran (2026-09-24..2026-09-28). They are retained as
+> the record of how the transition was controlled; the delivered end
+> state supersedes the first bullet — every dependency class HAS passed
+> its WR cutover and `../conventions/cross-repo-cmake.md` now carries the
+> delivered registry.
+
+- During the migration, the shim-plus-pin / external-root pattern
+  remained the valid, in-force consumption mechanism for every
+  repository until its dependency class passed its own WR cutover
+  (`../conventions/cross-repo-cmake.md` was the operative convention
+  meanwhile).
 - ADR-0048 process custody, ADR-0049 H1-kit self-containment, and the
-  long-command routing contract (ADR-0051, still proposed at landing time)
-  bind whatever entrypoint lands; changed routed command forms are re-tested
-  against the deployed hook router, and changed H1 launchers/packages are
-  re-tested for self-containment, in the same batch as the change.
-- CA-1 (TCA source lock) proceeds on its own bounded schedule; WR-0/WR-1
-  run in parallel and add no CA-1 gate.
+  long-command routing contract (ADR-0051, accepted 2026-09-24) bind
+  whatever entrypoint lands; changed routed command forms are re-tested
+  against the deployed hook router, and changed H1 launchers/packages
+  are re-tested for self-containment, in the same batch as the change.
+  (Still in force.)
+- CA-1 (TCA source lock) proceeded on its own bounded schedule;
+  WR-0/WR-1 ran in parallel and added no CA-1 gate. (Historical; CA-1
+  completed 2026-09-28.)
 
-## Entry sequencing (owner-gated)
+## Entry sequencing (owner-gated) — historical
+
+> The sequencing gate below governed the program START (the WR-0
+> sealed-outputs authorization). It executed as written and is closed;
+> see the wr-reports for the delivered record.
 
 WR-0 only first: machine-readable resolver census (reusing the CA-0
 inventory), the Profile B conflict fixture, the before-migration Profile J

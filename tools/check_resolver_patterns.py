@@ -6,7 +6,9 @@ Static checks that the retired dependency-resolution architecture cannot
 be reintroduced through normal paths:
 
   R1  CMake sibling discovery      - ../qiven-* or QIVEN_DEVKIT_ROOT /
-      QIVEN_DRAFT_ROOT in CMake files outside comment lines
+      QIVEN_DRAFT_ROOT in CMake files outside comment lines; the same
+      env-var/sibling-fallback class in .cmd/.bat launchers (rem/::
+      comments stripped; the qiven.cmd thin-launcher exception honored)
   R2  consumer-local workspace pins - devkit_pin / QIVEN_DEVKIT_PIN keys
   R3  Devkit sibling import fallback - ../qiven-devkit on Python import
       paths outside the documented exceptions
@@ -39,6 +41,7 @@ SCANNED_REPOS = [
     "qiven-runtime",
     "qiven-docs",
     "qiven-toolchain-win",
+    "qiven-third-party-win",
     "qiven-workspace",
 ]
 
@@ -55,8 +58,10 @@ OPERATOR_INSTANCE_REPOS = {"qiven-foundation", "qiven-runtime"}
 CMAKE_FILES = ("cmakelists.txt",)
 CMAKE_SUFFIX = ".cmake"
 CONFIG_SUFFIXES = (".json", ".yaml", ".yml", ".cmake", ".props", ".vsixmanifest")
+LAUNCHER_SUFFIXES = (".cmd", ".bat")
 PIN_KEYS = re.compile(r"devkit_pin|QIVEN_DEVKIT_PIN|QIVEN_DRAFT_PIN", re.I)
 SIBLING_PATH = re.compile(r"\.\./qiven-[a-z-]+|\"qiven-(?:devkit|draft)-root\"", re.I)
+BATCH_SIBLING_PATH = re.compile(r"\.\.[\\/]qiven-[a-z-]+", re.I)
 CMAKE_ENV_VARS = re.compile(r"QIVEN_(?:DEVKIT|DRAFT)_ROOT", re.I)
 # R3: a devkit sibling reference in Python is the sanctioned launcher
 # shape ONLY when the same file carries the bootstrap identity-check
@@ -75,6 +80,19 @@ LOCK_REF = re.compile(r"workspace\.lock\.json", re.I)
 
 def is_config(path: Path) -> bool:
     return path.suffix.lower() in CONFIG_SUFFIXES or path.name.lower() in CMAKE_FILES
+
+
+def strip_batch_comments(text: str) -> str:
+    # batch launchers: drop rem lines and :: label comments; keep the rest
+    # (the R1 launcher class lives in set/if/echo-active lines)
+    out_lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.lstrip().lower()
+        if stripped.startswith("rem ") or stripped == "rem" or stripped.startswith("::"):
+            out_lines.append("")
+        else:
+            out_lines.append(line)
+    return "\n".join(out_lines)
 
 
 def strip_cmake_comments(text: str) -> str:
@@ -156,6 +174,20 @@ def scan_repo(repo: Path, repo_name: str, findings: list[str]) -> None:
             if not allowed and repo_name != "qiven-devkit":
                 findings.append(f"R5 {repo_name}/{rel}: vendored operator copy "
                                 "(outside the documented instances)")
+        # R1 launcher class: batch transport wrappers carrying the retired
+        # env-var/sibling-fallback resolution (the 2026-09-28 v44 finding:
+        # a deploy.cmd resolved devkit via QIVEN_DEVKIT_ROOT with no
+        # identity-check). rem/:: comments are documentation, not patterns;
+        # the documented thin-launcher exception (qiven.cmd) is honored.
+        if lowered.endswith(LAUNCHER_SUFFIXES):
+            if rel in PATH_EXCEPTIONS:
+                pass
+            else:
+                functional = strip_batch_comments(text)
+                for match in CMAKE_ENV_VARS.finditer(functional):
+                    findings.append(f"R1 {repo_name}/{rel}: launcher env var {match.group(0)}")
+                for match in BATCH_SIBLING_PATH.finditer(functional):
+                    findings.append(f"R1 {repo_name}/{rel}: launcher sibling path {match.group(0)}")
 
 
 def main(argv: list[str] | None = None) -> int:
