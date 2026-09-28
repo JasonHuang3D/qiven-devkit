@@ -5,6 +5,51 @@ mode, delegated per-batch H2). Stage law: ADR-0052 decision 3; normative
 scope qiven-docs `accepted/2026-09-24/02-*` §7 WR-7 (:208-220); the
 governance amendment vehicle is qiven-context `decisions/ADR-0058.md`.
 
+## The cutover EXECUTED (H1#2 accepted 2026-09-28)
+
+The owner accepted the cutover (AskUserQuestion, "接受+立即切换（推荐）")
+on the green receipt at generation `28b0a163`. The runtime cutover batch
+landed and published (runtime main `085c58d` through `0d4f286`/`bdc428f`/
+`c4b0c95`; gate:local PASS at each substantive head):
+
+- **The selector gate**: `index rebuild` now REQUIRES `--workspace-lock`
+  and fails closed unless the freshly built closure is cutover-grade
+  equal to the workspace selection (tier-1 + tier-2, no shadow-only
+  node). Live-proven BOTH ways at the published head: the stale-lock
+  fixture (context node reverted to f16011b — the v42 RED class)
+  reproduces the typed failure (StaleNode + FilterSetMismatch rows,
+  exit 1); the real lock passes the gate AND completes the first full
+  live index build through it (ActivationGeneration
+  `2b41f1ce…`, 367 sources, 19 rules, exit 0).
+- **Provenance (ADR-0058 d6)**: the parent WorkspaceGeneration rides a
+  per-generation sidecar `workspace-provenance.json` (written on build,
+  refreshed on content-identical reuse) — NEVER in index-manifest.json
+  (byte-finality untouched, verified 0 occurrences) and never in any
+  digest (ActivationGeneration unchanged by provenance, test-pinned).
+  `cognition activate` validates the axis against the sidecar; receipts
+  carry it in the envelope (journal column lazily migrated; legacy loads
+  read honest empty).
+- **A real design-contract defect found and fixed by the live proof**:
+  the canonical policy's P4-on-demand rule (qiven-docs deliberation
+  reference) could never satisfy the closure-containment law — the CA-1
+  design says P4 records "enter ONLY when a P4 rule references them;
+  the path filter stays closed", i.e. out-of-closure BY DESIGN. The
+  containment law now binds P0-P3 only; a P4 out-of-closure source is an
+  on-demand reference riding the digest-bound policy table, never a
+  fabricated closure row (regression row in tests/activation_index.cpp).
+- **Diagnostics law**: `index rebuild` names the failing rule source /
+  duplicate rule id before the typed fault (the lock-update
+  failing-repository probe's sibling).
+
+Terminal state: comparator green at generation `9364bdff` (context
+`465402c` / devkit `ae3b470` / foundation `6906ea1` / runtime `085c58d`,
+all repository-manifest); control chain e279fab → 9662cde → 51c6ec8 →
+32b0326 → 35b2edd → 5e937bd → 9142074 → fac899e (the E7.1 same-window
+cadence exercised live: every publication → one lock advance, minutes of
+latency, zero manual interventions; the admitted-list chase is batched
+per the ratified auto-admission rule — the WR-8 mechanization
+candidate).
+
 ## Delivered
 
 - **The TCA shadow comparator** (v42, runtime main `6b884a0` / head
