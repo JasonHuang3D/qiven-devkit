@@ -95,6 +95,18 @@
         "{python}",
         "tools/workspace_profile_b_test.py"
       ]
+    },
+    "resolver-patterns": {
+      "argv": [
+        "{python}",
+        "tools/check_resolver_patterns.py"
+      ]
+    },
+    "resolver-patterns-tests": {
+      "argv": [
+        "{python}",
+        "tools/check_resolver_patterns_test.py"
+      ]
     }
   },
   "gates": {
@@ -109,6 +121,8 @@
       "workspace-bootstrap-tests",
       "workspace-shadow-tests",
       "workspace-profile-b-tests",
+      "resolver-patterns",
+      "resolver-patterns-tests",
       "commit-subjects",
       "devkit-regression",
       "diff-check",

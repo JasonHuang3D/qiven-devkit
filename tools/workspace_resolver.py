@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import time
@@ -282,11 +283,22 @@ def _check_trust(control: Path, mode: str, trust_policy: Path | None,
                 f"control origin {origin_url} is not the permitted repository {permitted}",
             )
     admitted = policy.get("admitted_control_revisions", [])
+    auto_admitted = False
     if control_head not in admitted:
-        raise ResolutionError(
-            "UntrustedControlRevision",
-            f"control revision {control_head} is not admitted by {trust_policy}",
-        )
+        auto_admitted = _routine_advance_admissible(control, admitted)
+        if not auto_admitted:
+            raise ResolutionError(
+                "UntrustedControlRevision",
+                f"control revision {control_head} is not admitted by {trust_policy}",
+            )
+    receipt = {"trusted": True, "control_revision": control_head}
+    if auto_admitted:
+        # WR-8 mechanization of the ratified routine-advance rule: the
+        # diff-shape check below IS the admission; the policy file's list
+        # catches up in batches (the chase - recording a policy edit moves
+        # qiven-context main, which requires the next advance - is
+        # structural, not an authority gap).
+        receipt["auto_admitted"] = "routine-advance diff-shape rule (ratified 2026-09-25)"
     if not control_transaction:
         # F3: admission is over the control COMMIT, but the lock and the
         # declarations are read from the working tree — a dirty control
@@ -301,7 +313,69 @@ def _check_trust(control: Path, mode: str, trust_policy: Path | None,
                 f"({dirty.splitlines()[0]}); lock and declarations are read from "
                 f"the working tree, not from the admitted commit",
             )
-    return {"trusted": True, "control_revision": control_head}
+    return receipt
+
+
+def _routine_advance_admissible(control: Path, admitted: list) -> bool:
+    """The ratified routine-advance rule, mechanized (WR-8): a control
+    commit whose diff from the closest admitted ancestor is limited to
+    workspace.lock.json node advancement (commit/tree/generation and the
+    declaration blob/digest/path fields the advancement writes) plus the
+    declarations/ cache entries that advancement writes is
+    auto-admitted. Manifest/census/schema/bootstrap changes (origin
+    flips, new files outside declarations/, any non-advance content)
+    are NOT routine advances and require explicit admission."""
+    if not admitted:
+        return False
+    base = None
+    for revision in admitted:
+        # closest admitted ancestor: must be an ancestor of HEAD
+        probe = subprocess.run(
+            ["git", "-C", str(control), "merge-base", "--is-ancestor", revision, "HEAD"],
+            capture_output=True, timeout=GIT_TIMEOUT)
+        if probe.returncode == 0:
+            candidate = _git(["rev-list", "--count", f"{revision}..HEAD"], control)
+            steps = int(candidate) if candidate.isdigit() else (1 << 30)
+            if base is None or steps < base[1]:
+                base = (revision, steps)
+    if base is None:
+        return False
+    changed = _git(["diff", "--name-only", f"{base[0]}..HEAD"], control).split()
+    for name in changed:
+        if name == "workspace.lock.json":
+            continue
+        if name.startswith("declarations/") and name.endswith(".json"):
+            continue
+        return False
+    # content shape: the lock diff may only move node commit/tree/generation
+    # and the declaration blob/digest/path fields
+    patch = _git(["diff", f"{base[0]}..HEAD", "--", "workspace.lock.json"], control)
+    for line in patch.splitlines():
+        if not (line.startswith("+") or line.startswith("-")) or line.startswith(("+++", "---")):
+            continue
+        body = line[1:].strip().rstrip(",")
+        if any(body.startswith(key) for key in (
+                '"commit"', '"tree"', '"generation"', '"blob"', '"digest"', '"path"')):
+            continue
+        if body in ("{", "}", "{},"):
+            continue
+        if re.match(r'^"[0-9a-f]{40}"$', body) or re.match(r'^"sha256:[0-9a-f]{64}"$', body):
+            continue
+        if re.match(r'^"declarations/[^"]+\.json"$', body):
+            continue
+        return False
+    # origin flips are manifest-class (never routine): verify no
+    # declaration origin changed between base and HEAD
+    def _origins(revision: str) -> dict:
+        try:
+            lock = json.loads(_git(["show", f"{revision}:workspace.lock.json"], control))
+        except ValueError:
+            return {}
+        return {node: node_data.get("declaration", {}).get("origin")
+                for node, node_data in lock.get("nodes", {}).items()}
+    if _origins(base[0]) != _origins("HEAD"):
+        return False
+    return True
 
 
 def _load_declaration(node_id: str, node: dict, control: Path, checkout: Path | None) -> tuple[dict, bool]:
@@ -532,6 +606,8 @@ def resolve(control: Path, checkouts: dict[str, str], workspace_root: Path | Non
         "workspace_control_revision": _git(["rev-parse", "HEAD"], control) if (control / ".git").exists() else None,
         "workspace_generation": generation,
         "mode": mode,
+        "trusted": trust.get("trusted", False),
+        "auto_admitted": trust.get("auto_admitted"),
         "shadow_only": any_census or mode != "authoritative",
         "legacy_resolution_used": True,
         "nodes": node_receipts,
@@ -799,6 +875,7 @@ def _validate_effective(control: Path, manifest: dict, effective_lock: dict,
         "workspace_generation": generation,
         "mode": mode,
         "trusted": trust.get("trusted", False),
+        "auto_admitted": trust.get("auto_admitted"),
         "shadow_only": any_census or mode != "authoritative",
         "legacy_resolution_used": True,
         "nodes": node_receipts,

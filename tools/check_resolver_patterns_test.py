@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+"""Self-test for the WR-8 forbidden resolver-pattern gate (P1-P6).
+
+Fixture trees carry the forbidden shapes; the gate must flag each and
+pass a clean tree. Exit 0 pass / 1 fail."""
+
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+GATE = Path(__file__).resolve().parent / "check_resolver_patterns.py"
+
+
+def run_gate(repo: Path) -> tuple[int, str]:
+    result = subprocess.run(
+        [sys.executable, str(GATE), "--repo", str(repo)],
+        capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
+    return result.returncode, result.stdout + result.stderr
+
+
+def build_fixture(tmp: Path, name: str, files: dict[str, str]) -> Path:
+    repo = tmp / name
+    for rel, text in files.items():
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8", newline="\n")
+    return repo
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory() as tmp_name:
+        tmp = Path(tmp_name)
+
+        # P1: CMake sibling discovery in functional (non-comment) lines
+        repo = build_fixture(tmp, "r1", {
+            "CMakeLists.txt": "# never resolves siblings (law text)\n"
+                              "set(QIVEN_DEVKIT_ROOT \"${CMAKE_SOURCE_DIR}/../qiven-devkit\")\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 1 and "R1" in out, f"P1: {code} {out}"
+
+        # P2: a consumer-local pin in configuration
+        repo = build_fixture(tmp, "r2", {
+            ".qiven/config.json": "{\"devkit_pin\": {\"sha\": \"deadbeef\"}}\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 1 and "R2" in out, f"P2: {code} {out}"
+
+        # P3: devkit sibling import fallback in Python
+        repo = build_fixture(tmp, "r3", {
+            "tools/launch.py": "import sys\nsys.path.insert(0, '../qiven-devkit')\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 1 and "R3" in out, f"P3: {code} {out}"
+
+        # P4: toolchain path without the lock identity check
+        repo = build_fixture(tmp, "r4", {
+            "tools/toolchain.py": "ROOT = '../qiven-toolchain-win'\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 1 and "R4" in out, f"P4: {code} {out}"
+
+        # P5: a vendored operator copy outside the documented instances
+        repo = build_fixture(tmp, "r5", {
+            "tools/qiven_operator.py": "def main():\n    pass\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 1 and "R5" in out, f"P5: {code} {out}"
+
+        # P6: the documented exceptions and the lock-bound shape pass (the
+        # operator instance exception is keyed on the repository name)
+        repo = build_fixture(tmp, "qiven-foundation", {
+            "tools/qiven_operator.py": "LOCK = 'workspace.lock.json'\n"
+                                       "TOOLCHAIN = 'qiven-toolchain-win'\n",
+            "CMakeLists.txt": "# siblings or checks a consumer-local pin (comment-only)\n",
+            "docs/history.md": "the devkit_pin era (prose record)\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 0, f"P6: {code} {out}"
+
+    print("[ OK ] resolver-patterns self-test (P1-P6)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
