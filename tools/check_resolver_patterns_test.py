@@ -123,7 +123,39 @@ def main() -> int:
         code, out = run_gate(repo)
         assert code == 0, f"P8: {code} {out}"
 
-    print("[ OK ] resolver-patterns self-test (P1-P8)")
+        # P9: R6 - process-global handler-install vocabulary in the two
+        # I0-census-declared gap trees fails typed (vendored sqlite3 and
+        # linked context-draft; the "zero unknown sites" claim is
+        # mechanically proven, not declared)
+        repo = build_fixture(tmp / "p9a", "qiven-third-party-win", {
+            "packages/sqlite3/src/evil_patch.c": "#include <signal.h>\n"
+                                                 "signal(SIGINT, my_handler);\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 1 and "R6" in out, f"P9a: {code} {out}"
+        repo = build_fixture(tmp / "p9b", "qiven-context-draft", {
+            "src/legacy.cpp": "_set_invalid_parameter_handler(my_handler);\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 1 and "R6" in out, f"P9b: {code} {out}"
+
+        # P10: R6 scoping - clean gap trees pass, and the same vocabulary
+        # in a NON-R6 repository (foundation's legitimate installer class)
+        # does not fire (R6 covers only the census-declared gap trees)
+        repo = build_fixture(tmp / "p10a", "qiven-third-party-win", {
+            "packages/sqlite3/src/sqlite3.c": "int sqlite3_open(const char *f, void **db)\n"
+                                              "{ return 0; }\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 0, f"P10a: {code} {out}"
+        repo = build_fixture(tmp / "p10b", "qiven-foundation", {
+            "src/crt_failure.cpp": "_set_invalid_parameter_handler(qiven_invalid_parameter);\n"
+                                   "SetConsoleCtrlHandler(console_handler, TRUE);\n",
+        })
+        code, out = run_gate(repo)
+        assert code == 0, f"P10b: {code} {out}"
+
+    print("[ OK ] resolver-patterns self-test (P1-P10)")
     return 0
 
 
