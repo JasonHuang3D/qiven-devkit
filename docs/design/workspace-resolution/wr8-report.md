@@ -25,7 +25,10 @@ propagation-measurement duty.
   machinery adjacency + the bootstrap identity-check marker exemption),
   R4 toolchain-without-lock co-occurrence, R5 vendored operator copies
   outside the two documented instances. The default scan covers all
-  eight workspace repositories. P1-P6 self-test rows.
+  eight workspace repositories. P1-P6 self-test rows. [Extended
+  2026-09-28, v44 maintenance: the scan covers NINE repositories
+  (qiven-third-party-win and the control repository included) and the
+  R1 class also covers .cmd/.bat launchers; self-test P1-P8.]
 - **The forbidden class removed from the live tree** (found by the
   gate's first live run — the pre-WR-5 shapes had survived in the
   non-build repos): foundation's operator toolchain locator,
@@ -61,7 +64,7 @@ propagation-measurement duty.
 
 | Exit criterion | Evidence |
 | --- | --- |
-| A new repository cannot accidentally reintroduce the old architecture | the pattern gate runs in the devkit publication gate over all eight workspace repositories; every forbidden class has a typed rule + self-test row |
+| A new repository cannot accidentally reintroduce the old architecture | the pattern gate runs in the devkit publication gate over all eight workspace repositories [nine since the 2026-09-28 v44 extension, launcher classes included]; every forbidden class has a typed rule + self-test row |
 | No shadow-only census declaration remains in any authoritative graph | node scan at control c4dc4a9: zero shadow-only declarations; the census file is sealed history |
 | One governed lock update selects a shared dependency only after provider compatibility + consumer gates | the lock-update transaction validates candidate content before commit (WR-3 law, unchanged); the auto-admission shape rule mechanically excludes non-advance graph edits |
 | Active repository gates pass | gate:local PASS at every published head this batch (devkit 2b4a7a-lineage, foundation b3d4225, math 6410421, draft faf3688); the non-Windows CI question does not arise (the workspace CI units are Windows-bound; no authoritative non-Windows job exists to relabel) |
