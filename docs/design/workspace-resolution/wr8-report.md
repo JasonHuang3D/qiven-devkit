@@ -103,3 +103,16 @@ continues if the owner directs more windows.
   (wr6-report residual, unchanged).
 - Unreadable-file skip + UTF-16 blindness in the pattern scanner
   (round-2 note): low realism, recorded.
+- **Devkit-self scan carve-out** (v45 R2 finding, 2026-09-29):
+  `SCANNED_REPOS` covers the nine consumer/control repositories but
+  not qiven-devkit itself — the gate does not scan its own canonical
+  tree (self-referential fixtures and the pattern source would need a
+  carve-out layer). Compensating enforcement: the canonical
+  `tools/toolchain.py` and `tools/qiven_operator.py _toolchain()` are
+  lock-identity-checked as of v45 R2 (the WR-5 shape, same as the
+  consumer copies), and the WR-6 launcher contract tests pin the
+  bootstrap shape. A future devkit-self scan with fixture carve-outs
+  remains the recorded hardening item; until then "the forbidden
+  class removed from the live tree" is proven for the nine scanned
+  repositories and enforced-by-construction for devkit's toolchain
+  paths, not mechanically scanned for devkit's whole tree.

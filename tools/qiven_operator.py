@@ -1066,8 +1066,30 @@ def _sweep_exec_records(console: Console | None = None, *, quiet: bool = True) -
     return actions
 
 
+def _locked_toolchain_commit() -> str:
+    """WR-5: the locked qiven-toolchain-win node commit (typed fail)."""
+    control = Path(os.environ.get("QIVEN_WORKSPACE_CONTROL",
+                                  ROOT.parent / "qiven-workspace")).resolve()
+    lock_path = control / "workspace.lock.json"
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OperatorError(f"workspace lock unreadable at {lock_path}: {exc}") from exc
+    node = lock.get("nodes", {}).get("qiven-toolchain-win")
+    commit = node.get("commit") if isinstance(node, dict) else None
+    if not isinstance(commit, str) or len(commit) != 40:
+        raise OperatorError("workspace lock has no qiven-toolchain-win node commit")
+    return commit
+
+
 def _toolchain() -> dict[str, str]:
     root = Path(os.environ.get("QIVEN_TOOLCHAIN_ROOT", ROOT.parent / "qiven-toolchain-win")).resolve()
+    locked = _locked_toolchain_commit()
+    head = _run_capture(["git", "-C", str(root), "rev-parse", "HEAD"], cwd=root)
+    head_sha = head.stdout.strip() if head.returncode == 0 else ""
+    if head_sha != locked:
+        raise OperatorError(f"toolchain checkout at {head_sha[:12] or '<unreadable>'} != "
+                            f"locked node {locked[:12]}; advance the workspace lock deliberately")
     manifest = root / "toolchain.json"
     if not manifest.is_file():
         raise OperatorError(f"toolchain manifest not found: {manifest}")
