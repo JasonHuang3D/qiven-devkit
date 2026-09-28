@@ -65,7 +65,7 @@ Each Operator task runs in a separate child process rooted at the repository, so
 
 Managed files are shared conventions. `tools/sync-repo.cmd` can update them after an all-or-nothing hash preflight. The list is
 stored in `templates/cpp-library/managed-files.cmake` and includes formatting/editor policy, presets, local developer tools (engineering standards are Devkit-canonical per ADR-0046 — `docs/engineering/` here — and not part of the managed set),
-Qiven Operator, `AGENTS.md`, and the engineering protocol.
+`AGENTS.md`, and the engineering protocol. Since WR-6 (template 0.1.10, 2026-09-28) the managed set no longer carries the Qiven Operator: generated repositories launch through the workspace bootstrap identity-check and import the LOCKED devkit operator; the grandfathered repository-owned instances (foundation, runtime) are a recorded wr6-report consolidation residual.
 
 Bootstrap-only files are starting points expected to diverge: `.gitignore`, `README.md`, `CMakeLists.txt`, and
 `.github/workflows/ci.yml`. Synchronization never overwrites them.
