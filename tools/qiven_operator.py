@@ -1435,7 +1435,9 @@ def _workspace_identity() -> dict[str, str | None | bool]:
     workspace the fields report None with a standalone note (visible,
     never guessed). Reporting is evidence - revision ENFORCEMENT stays
     in the launcher's bootstrap identity-check."""
-    executing_head = _head()
+    operator_checkout = Path(__file__).resolve().parents[1]
+    head_probe = _run_capture(["git", "rev-parse", "HEAD"], cwd=operator_checkout)
+    executing_head = head_probe.stdout.strip() if head_probe.returncode == 0 else "<unreadable>"
     control = Path(os.environ.get("QIVEN_WORKSPACE_CONTROL",
                                   ROOT.parent / "qiven-workspace")).resolve()
     lock_path = control / "workspace.lock.json"
@@ -1924,6 +1926,7 @@ def main(argv: list[str] | None = None) -> int:
                             "branch": args.branch, "head": args.head}
             payload = _ci_watch(config, args.profile, console, args.timeout,
                                 args.receipt or console.json_mode, identity)
+            _workspace_identity_fields(payload)
             return payload.pop("_exit")
 
         if args.command == "exec":
@@ -1962,6 +1965,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.exec_command == "stop":
                 record = _read_exec_record(args.run_id)
                 payload, exit_code = _exec_stop(record, console)
+                _workspace_identity_fields(payload)
                 if args.json:
                     _print_json(payload)
                 return exit_code
@@ -1974,6 +1978,7 @@ def main(argv: list[str] | None = None) -> int:
                         if record is not None:
                             runs.append(_exec_snapshot(record))
                 payload = {"status": "ok", "runs": runs}
+                _workspace_identity_fields(payload)
                 if args.json:
                     _print_json(payload)
                 else:
@@ -1988,6 +1993,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.exec_command == "sweep":
                 actions = _sweep_exec_records(console, quiet=False)
                 payload = {"status": "ok", "actions": actions}
+                _workspace_identity_fields(payload)
                 if args.json:
                     _print_json(payload)
                 return 0
@@ -1995,7 +2001,12 @@ def main(argv: list[str] | None = None) -> int:
         raise OperatorError("unsupported command")
     except OperatorError as exc:
         if args.json:
-            _print_json({"status": "error", "error": str(exc)})
+            error_payload = {"status": "error", "error": str(exc)}
+            try:
+                _workspace_identity_fields(error_payload)
+            except Exception:
+                pass
+            _print_json(error_payload)
         else:
             console.emit("fail", str(exc))
         return 2
