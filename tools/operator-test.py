@@ -154,7 +154,12 @@ def wait_until(predicate, timeout: float, interval: float = 0.1):
 
 def main() -> int:
     global checks
-    with tempfile.TemporaryDirectory(prefix="qiven-operator-test-") as temp:
+    # The exec-custody sections detach watchdog processes whose log handles
+    # can outlive the last assertion by milliseconds; the fixture tree is
+    # disposable OS-temp state, so a racing unlink at teardown is suppressed
+    # rather than allowed to fail the suite (WinError 32 under Py3.14 onexc).
+    with contextlib.suppress(PermissionError), \
+            tempfile.TemporaryDirectory(prefix="qiven-operator-test-") as temp:
         repo = Path(temp) / "repo"
         generate(repo)
         for relative in (
