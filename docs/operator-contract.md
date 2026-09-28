@@ -20,18 +20,23 @@ Standard-library only; Python 3.9+ (`QIVEN_PYTHON` override honored).
 - Devkit owns the Operator MECHANISM; each repository owns its
   declarative policy (`.qiven/operator.json`: tasks, gates, CI
   profiles).
-- Three migration states exist today and must not be conflated:
+- Two ownership states exist and must not be conflated:
   1. **Vendored copies** (historical): repositories generated before
-     ADR-0046 carry their own operator snapshot.
-  2. **Shim + pin** (ADR-0046 migration stage): the repository's
-     `tools/qiven.py` discovers and defers to a pinned Devkit
-     revision (qiven-context is the standing example; its pin is the
-     WR-6 reconciliation target).
-  3. **Workspace-resolved** (ADR-0052 endpoint): the workspace control
-     lock (`qiven-workspace/workspace.lock.json`) selects revisions;
+     ADR-0046 carry their own operator snapshot; the generation
+     template no longer materializes this shape (v44 template 0.1.10
+     retirement), and surviving grandfathered instances are tracked
+     as fail-closed sync conflicts pending the wr6-report
+     consolidation residual.
+  2. **Workspace-resolved** (ADR-0052 endpoint, DELIVERED through
+     WR-8, 2026-09-28): the workspace control lock
+     (`qiven-workspace/workspace.lock.json`) selects revisions
+     (repository-manifest declarations, `shadow_only: false` on all
+     nodes); each repository's `tools/qiven.py` is a thin launcher
+     that runs the bootstrap identity-check BEFORE any Devkit import
+     (WR-6; no `QIVEN_DEVKIT_ROOT`, no consumer-local pin), and
      `qiven-bootstrap.py gate-configure` supplies the resolution file
-     to CMake. WR-3 moved foundation/math/draft/runtime onto this
-     path; state only the tested rollout, not a universal transition.
+     to CMake. The rollout is universal across the governed workspace;
+     the former ADR-0046 shim+pin stage is historical record.
 
 ## Command surface (current)
 

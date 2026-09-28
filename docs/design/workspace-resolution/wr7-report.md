@@ -108,6 +108,17 @@ candidate).
 
 ## Honest residuals
 
+> Snapshot note (2026-09-28, post-window): the bullets below record
+> the state AT THE WR-7 H1 STOPS, before the same-window H1
+> adjudications and before WR-8. Terminal updates: the resolver
+> learned the routine-advance diff-shape check and auto-admits
+> mechanically (WR-8, R23); qiven-docs converted to a repository
+> manifest at `4b6f22f` (WR-8 census retirement — zero shadow-only
+> nodes remain); ADR-0058 was ACCEPTED by owner H1#1 and the cutover
+> ACCEPTED + EXECUTED (H1#2; runtime `085c58d`; terminal green
+> cutover-grade receipts at generations `9364bdff` then `e84d6599`,
+> full-graph authoritative validate PASS `shadow_only=False`).
+
 - **The admission-list chase (E7.4's first measured finding)**: the
   trust-policy admitted list lives in qiven-context, so every
   policy-recording publication moves context main, requiring another lock
@@ -118,6 +129,7 @@ candidate).
   authority for routine-advance class; the mechanical list is a lagging
   mirror. WR-8 improvement candidate: the resolver learns the
   routine-advance diff-shape check and auto-admits mechanically.
+  [RESOLVED by WR-8 mechanization — see snapshot note.]
 - **Same-window lock-entry cadence**: two context publications this
   window each produced one control advance (e279fab conversion +
   9662cde routine) — minutes of latency, zero manual interventions;
@@ -125,12 +137,14 @@ candidate).
 - **qiven-docs remains a census shadow-only node** (graph-level
   shadow_only=True) — outside the TCA corpus, no effect on the
   cutover-grade receipt; its repository manifest is the WR-8 census
-  retirement item.
+  retirement item. [RESOLVED by WR-8 — see snapshot note.]
 - The comparator run used the shadow-mode bootstrap build (the
   authoritative gate at the current control head awaits the policy
   catch-up — the chase above); the receipt itself is mode-independent
   (it reads the lock file, not the trust state), and the admission
   chain is evidenced by the e279fab authoritative probe.
+  [SUPERSEDED by the H1#2 cutover execution — see snapshot note.]
 - ADR-0058 remains PROPOSED until the owner H1#1; nothing in the
   selector has switched (no ACTIVE pointer moved — the comparator is
-  non-mutating by law).
+  non-mutating by law). [RESOLVED — ACCEPTED and EXECUTED; see
+  snapshot note.]
