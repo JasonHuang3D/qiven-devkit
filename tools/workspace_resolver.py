@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 import subprocess
 import sys
 import time
@@ -324,20 +323,29 @@ def _routine_advance_admissible(control: Path, admitted: list) -> bool:
     declarations/ cache entries that advancement writes is
     auto-admitted. Manifest/census/schema/bootstrap changes (origin
     flips, new files outside declarations/, any non-advance content)
-    are NOT routine advances and require explicit admission."""
+    are NOT routine advances and require explicit admission. The lock
+    shape is compared SEMANTICALLY (parsed base vs parsed head), not by
+    diff-line filtering: a declaration-cache change without a node
+    commit change is a graph edit, not an advancement, and every
+    non-advance lock field (origin, shadow_only, platform, note,
+    schema_version, workspace_id, node set) must be identical."""
     if not admitted:
         return False
     base = None
-    for revision in admitted:
-        # closest admitted ancestor: must be an ancestor of HEAD
-        probe = subprocess.run(
-            ["git", "-C", str(control), "merge-base", "--is-ancestor", revision, "HEAD"],
-            capture_output=True, timeout=GIT_TIMEOUT)
-        if probe.returncode == 0:
-            candidate = _git(["rev-list", "--count", f"{revision}..HEAD"], control)
-            steps = int(candidate) if candidate.isdigit() else (1 << 30)
-            if base is None or steps < base[1]:
-                base = (revision, steps)
+    try:
+        for revision in admitted:
+            # closest admitted ancestor: must be an ancestor of HEAD
+            probe = subprocess.run(
+                ["git", "-C", str(control), "merge-base", "--is-ancestor", revision, "HEAD"],
+                capture_output=True, timeout=GIT_TIMEOUT)
+            if probe.returncode == 0:
+                candidate = _git(["rev-list", "--count", f"{revision}..HEAD"], control)
+                steps = int(candidate) if candidate.isdigit() else (1 << 30)
+                if base is None or steps < base[1]:
+                    base = (revision, steps)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ResolutionError(
+            "RevisionUnavailable", f"routine-advance probe failed: {error}") from error
     if base is None:
         return False
     changed = _git(["diff", "--name-only", f"{base[0]}..HEAD"], control).split()
@@ -347,34 +355,57 @@ def _routine_advance_admissible(control: Path, admitted: list) -> bool:
         if name.startswith("declarations/") and name.endswith(".json"):
             continue
         return False
-    # content shape: the lock diff may only move node commit/tree/generation
-    # and the declaration blob/digest/path fields
-    patch = _git(["diff", f"{base[0]}..HEAD", "--", "workspace.lock.json"], control)
-    for line in patch.splitlines():
-        if not (line.startswith("+") or line.startswith("-")) or line.startswith(("+++", "---")):
+    try:
+        base_lock = json.loads(_git(["show", f"{base[0]}:workspace.lock.json"], control))
+        head_lock = json.loads(_git(["show", "HEAD:workspace.lock.json"], control))
+    except (ResolutionError, ValueError) as error:
+        return False  # unreadable/unparseable lock history: never auto-admit
+
+    def _nodes(lock: dict) -> dict:
+        nodes = lock.get("nodes")
+        return nodes if isinstance(nodes, dict) else {}
+
+    base_nodes, head_nodes = _nodes(base_lock), _nodes(head_lock)
+    if set(base_nodes) != set(head_nodes):
+        return False  # node addition/removal is not an advancement
+    moved = set()
+    for node_id, head_node in head_nodes.items():
+        base_node = base_nodes[node_id]
+        if not isinstance(head_node, dict) or not isinstance(base_node, dict):
+            return False
+        commit_moved = head_node.get("commit") != base_node.get("commit")
+        tree_moved = head_node.get("tree") != base_node.get("tree")
+        if tree_moved and not commit_moved:
+            return False
+        head_decl = head_node.get("declaration", {})
+        base_decl = base_node.get("declaration", {})
+        if not isinstance(head_decl, dict) or not isinstance(base_decl, dict):
+            return False
+        decl_changed = any(head_decl.get(key) != base_decl.get(key)
+                           for key in ("path", "blob", "digest"))
+        if decl_changed and not commit_moved:
+            return False  # a cache swap without a node move is a graph edit
+        if set(head_node) != set(base_node) or set(head_decl) != set(base_decl):
+            return False  # field additions/removals are not advancements
+        for key in head_node:
+            if key in ("commit", "tree"):
+                continue
+            if head_node[key] != base_node[key]:
+                return False  # origin/shadow_only/platform/note/... changed
+        for key in head_decl:
+            if key in ("path", "blob", "digest"):
+                continue
+            if head_decl[key] != base_decl[key]:
+                return False
+        if commit_moved:
+            moved.add(node_id)
+    if not moved:
+        return False  # an advancement must advance at least one node
+    for key, value in head_lock.items():
+        if key in ("generation", "nodes"):
             continue
-        body = line[1:].strip().rstrip(",")
-        if any(body.startswith(key) for key in (
-                '"commit"', '"tree"', '"generation"', '"blob"', '"digest"', '"path"')):
-            continue
-        if body in ("{", "}", "{},"):
-            continue
-        if re.match(r'^"[0-9a-f]{40}"$', body) or re.match(r'^"sha256:[0-9a-f]{64}"$', body):
-            continue
-        if re.match(r'^"declarations/[^"]+\.json"$', body):
-            continue
-        return False
-    # origin flips are manifest-class (never routine): verify no
-    # declaration origin changed between base and HEAD
-    def _origins(revision: str) -> dict:
-        try:
-            lock = json.loads(_git(["show", f"{revision}:workspace.lock.json"], control))
-        except ValueError:
-            return {}
-        return {node: node_data.get("declaration", {}).get("origin")
-                for node, node_data in lock.get("nodes", {}).items()}
-    if _origins(base[0]) != _origins("HEAD"):
-        return False
+        if base_lock.get(key) != value:
+            return False  # workspace_id/schema_version/... changed
     return True
 
 
