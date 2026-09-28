@@ -37,6 +37,9 @@ SCANNED_REPOS = [
     "qiven-foundation",
     "qiven-math",
     "qiven-runtime",
+    "qiven-docs",
+    "qiven-toolchain-win",
+    "qiven-workspace",
 ]
 
 # R3/R5 exceptions: the bootstrap/launcher mechanism and the two recorded
@@ -54,7 +57,7 @@ CMAKE_SUFFIX = ".cmake"
 CONFIG_SUFFIXES = (".json", ".yaml", ".yml", ".cmake", ".props", ".vsixmanifest")
 PIN_KEYS = re.compile(r"devkit_pin|QIVEN_DEVKIT_PIN|QIVEN_DRAFT_PIN", re.I)
 SIBLING_PATH = re.compile(r"\.\./qiven-[a-z-]+|\"qiven-(?:devkit|draft)-root\"", re.I)
-CMAKE_ENV_VARS = re.compile(r"QIVEN_(?:DEVKIT|DRAFT)_ROOT")
+CMAKE_ENV_VARS = re.compile(r"QIVEN_(?:DEVKIT|DRAFT)_ROOT", re.I)
 # R3: a devkit sibling reference in Python is the sanctioned launcher
 # shape ONLY when the same file carries the bootstrap identity-check
 # marker; an unguarded import path (literal or Path-composed) is the
@@ -75,22 +78,25 @@ def is_config(path: Path) -> bool:
 
 
 def strip_cmake_comments(text: str) -> str:
-    # bracket comments (#[[ ... ]]) are stripped as blocks; line comments
-    # at the first # (F4: law text inside comments is not a pattern)
+    # bracket comments at ANY level (#[[ .. ]], #[=[ .. ]=], ...) are
+    # stripped as blocks; line comments at the first # (F4: law text
+    # inside comments is not a pattern)
     out_lines: list[str] = []
-    in_block = False
+    closer = ""
     for line in text.splitlines():
-        if in_block:
-            if "]]" in line:
-                in_block = False
-                line = line.split("]]", 1)[1]
+        if closer:
+            if closer in line:
+                line = line.split(closer, 1)[1]
+                closer = ""
             else:
                 out_lines.append("")
                 continue
         stripped = line.lstrip()
-        if stripped.startswith("#[["):
-            in_block = True
-            line = line.split("#[[", 1)[0]
+        opened = re.match(r"#\[=*\[", stripped)
+        if opened:
+            opener = opened.group(0)  # "#[[" or "#=[" or "#==[" ...
+            closer = "]" + "=" * opener.count("=") + "]"
+            line = line.split(opener, 1)[0]
         out_lines.append(line.split("#", 1)[0])
     return "\n".join(out_lines)
 
@@ -105,6 +111,11 @@ def iter_files(repo: Path):
         # .qiven is CONFIG (the historical pin home) - only its live
         # runtime-state subdir and generated cache are excluded
         if parts[:2] == (".qiven", "runtime"):
+            continue
+        # the control repository's census/ is the SEALED WR-0 record:
+        # its legacy_consumer_pin entries are recorded evidence of the
+        # retired mechanism, not live configuration
+        if parts[0] == "census":
             continue
         yield path
 
@@ -127,8 +138,12 @@ def scan_repo(repo: Path, repo_name: str, findings: list[str]) -> None:
         # R2 scoping: a live pin lives in configuration (the historical
         # mechanism was operator.json/CMake) - prose records (ADR/session/
         # memory/audit history) and tests that BAN the key by naming it
-        # are documentation, not pins.
+        # are documentation, not pins; CMake-family configs are searched
+        # with their comments stripped (law text is not a pattern).
         if is_config(path) and PIN_KEYS.search(text):
+            if lowered.endswith(CMAKE_SUFFIX) or lowered in CMAKE_FILES:
+                if not PIN_KEYS.search(strip_cmake_comments(text)):
+                    continue
             findings.append(f"R2 {repo_name}/{rel}: consumer-local workspace pin key")
         if lowered.endswith(".py"):
             if rel not in PATH_EXCEPTIONS and not IDENTITY_MARKER.search(text):
