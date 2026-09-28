@@ -17,6 +17,20 @@ be reintroduced through normal paths:
       identity check
   R5  vendored operator copies      - qiven_operator.py outside the
       devkit home and the two documented repository-owned instances
+  R6  process-global handler installs in the I0-declared gap trees -
+      the C++ diagnostics I0 census (qiven-runtime
+      docs/design/cpp-diagnostics-i0-census.md section 2.5) could not
+      line-audit qiven-third-party-win (vendored sqlite3) or
+      qiven-context-draft (compiled first-party code linked into every
+      governed executable); this class scans their tracked-tree C/C++
+      sources for the census's process-wide handler-install vocabulary
+      and fails typed on any site outside the admitted map, so "zero
+      unknown process-global handler sites for linked images" is
+      mechanically proven instead of declared. Raw-text scan (git-grep
+      parity with the census method - a commented mention fires and is
+      classified by a human); the Foundation/runtime install surfaces
+      are census-covered and stay outside R6 scope (their mechanical
+      duplicate-installer gate arrives with the I1/I3 diagnostics work).
 
 Narrowly documented exceptions (doc 02 WR-8: "with narrowly documented
 bootstrap exceptions"): the control-repository bootstrap + thin launcher
@@ -76,6 +90,23 @@ IDENTITY_MARKER = re.compile(
     r"bootstrap|_bootstrap_identity|BootstrapDevkitMismatch|gate-configure", re.I)
 TOOLCHAIN_REF = re.compile(r"qiven-toolchain-win", re.I)
 LOCK_REF = re.compile(r"workspace\.lock\.json", re.I)
+
+# R6 (I0 census section 2.5 gap closure): process-global handler-install
+# vocabulary over the two census-declared unaudited trees. Admitted sites
+# map repo -> {relative posix paths}; empty today (both trees scan clean
+# at adoption - the gate's first run is the classification proof).
+HANDLER_REPOS = ("qiven-third-party-win", "qiven-context-draft")
+CPP_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx", ".inl")
+HANDLER_INSTALL = re.compile(
+    r"SetConsoleCtrlHandler|SetUnhandledExceptionFilter|"
+    r"_set_invalid_parameter_handler|_set_abort_behavior|"
+    r"set_terminate|_set_purecall_handler|AddVectoredExceptionHandler|"
+    r"SetErrorMode|_CrtSetReportMode|_set_se_translator|"
+    r"\bsignal\s*\(")
+HANDLER_ADMITTED = {
+    "qiven-third-party-win": set(),
+    "qiven-context-draft": set(),
+}
 
 
 def is_config(path: Path) -> bool:
@@ -188,6 +219,17 @@ def scan_repo(repo: Path, repo_name: str, findings: list[str]) -> None:
                     findings.append(f"R1 {repo_name}/{rel}: launcher env var {match.group(0)}")
                 for match in BATCH_SIBLING_PATH.finditer(functional):
                     findings.append(f"R1 {repo_name}/{rel}: launcher sibling path {match.group(0)}")
+        # R6: process-global handler-install vocabulary in the two
+        # I0-census-declared gap trees (vendored sqlite3 + linked
+        # context-draft); any site outside the admitted map fails typed.
+        if repo_name in HANDLER_REPOS and lowered.endswith(CPP_SUFFIXES):
+            if rel not in HANDLER_ADMITTED.get(repo_name, set()):
+                match = HANDLER_INSTALL.search(text)
+                if match:
+                    token = match.group(0).strip()
+                    findings.append(f"R6 {repo_name}/{rel}: process-global handler "
+                                    f"install vocabulary ({token}) outside the "
+                                    f"admitted map")
 
 
 def main(argv: list[str] | None = None) -> int:
