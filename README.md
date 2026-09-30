@@ -63,19 +63,23 @@ Each Operator task runs in a separate child process rooted at the repository, so
 
 ## Managed and bootstrap-only files
 
-Managed files are shared conventions. `tools/sync-repo.cmd` can update them after an all-or-nothing hash preflight. The list is
-stored in `templates/cpp-library/managed-files.cmake` and includes formatting/editor policy, presets, local developer tools (engineering standards are Devkit-canonical per ADR-0046 — `docs/engineering/` here — and not part of the managed set),
-`AGENTS.md`, and the engineering protocol. Since WR-6 (template 0.1.10, 2026-09-28) the managed set no longer carries the Qiven Operator: generated repositories launch through the workspace bootstrap identity-check and import the LOCKED devkit operator; the grandfathered repository-owned instances (foundation, runtime) are a recorded wr6-report consolidation residual.
+Managed files are shared conventions. `python tools/sync_repo.py` can update them after an all-or-nothing hash preflight. The list is
+stored in `templates/cpp-library/managed-files.cmake` and includes formatting/editor policy, presets, and local developer tools (engineering standards are Devkit-canonical per ADR-0046 — `docs/engineering/` here — and not part of the managed set),
+plus `AGENTS.md`. Since WR-6 (template 0.1.10, 2026-09-28) the managed set no longer carries the Qiven Operator: generated repositories launch through the workspace bootstrap identity-check and import the LOCKED devkit operator; the grandfathered repository-owned instances (foundation, runtime) are a recorded wr6-report consolidation residual.
 
 Bootstrap-only files are starting points expected to diverge: `.gitignore`, `README.md`, `CMakeLists.txt`, and
 `.github/workflows/ci.yml`. Synchronization never overwrites them.
 
 ## Generate a C++ library repository
 
+*(Entrypoints renamed 2026-09-19, commit `440f8bc`: the former
+`new-cpp-library.cmd`/`adopt-cpp-library.cmd`/`sync-repo.cmd`/`test.cmd`
+wrappers are gone; the Python tools below are the live surface.)*
+
 On Windows:
 
 ```bat
-tools\new-cpp-library.cmd D:\JasonWork\qiven-math qiven-math qiven-math qiven-math qiven::math qiven::math QIVEN_MATH_BUILD_TESTS qiven-math
+python tools\new_cpp_library.py D:\JasonWork\qiven-math qiven-math qiven-math qiven-math qiven::math qiven::math QIVEN_MATH_BUILD_TESTS qiven-math
 ```
 
 Arguments are destination, repository name, CMake project name, CMake target name, CMake alias, C++ namespace, test option,
@@ -88,7 +92,7 @@ The platform-neutral core can also be called with CMake script mode; see `tools/
 Adoption is an explicit two-phase operation. First inspect the complete deterministic plan without changing the target:
 
 ```bat
-tools\adopt-cpp-library.cmd check ^
+python tools\adopt_cpp_library.py check ^
   D:\JasonWork\qiven-foundation ^
   qiven-foundation ^
   qiven-foundation ^
@@ -102,7 +106,7 @@ tools\adopt-cpp-library.cmd check ^
 If the check reports no conflicts, apply the same plan:
 
 ```bat
-tools\adopt-cpp-library.cmd apply ^
+python tools\adopt_cpp_library.py apply ^
   D:\JasonWork\qiven-foundation ^
   qiven-foundation ^
   qiven-foundation ^
@@ -122,7 +126,7 @@ divergent managed file and never changes bootstrap-only or unrelated domain file
 ## Synchronize managed files
 
 ```bat
-tools\sync-repo.cmd D:\JasonWork\qiven-math
+python tools\sync_repo.py D:\JasonWork\qiven-math
 ```
 
 Generation records state schema 2 in `.qiven/generated-state.cmake`: the complete managed path set plus a SHA-256 hash for
@@ -134,7 +138,7 @@ updates leave normal reviewable Git diffs. Schema changes require an explicit mi
 ## Test
 
 ```bat
-tools\test.cmd
+python tools\operator-test.py
 ```
 
 Tests use disposable fixture directories only. The suite includes Operator generation, JSON/human output separation, heartbeat/no-color behavior, task environment and working-directory isolation, fail-fast sequencing, parallel execution, exact-HEAD validation, real clean-tree gates, and asynchronous CI exact-remote-head dispatch preconditions.

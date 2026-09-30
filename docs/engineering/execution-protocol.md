@@ -27,8 +27,10 @@ document repeats none of them and overrides none of them.
   before publication.
 - Prefer the repository Operator (`tools\qiven.py`) for gates and tasks;
   `--verbose` staged output is legible to humans and agents alike.
-  Long or unknown-duration commands route through `qiven exec`
-  (canonical hang contract).
+  Long or unknown-duration in-session commands route through the
+  harness background re-call (hook-deny → `run_in_background: true`;
+  ADR-0051); `qiven exec` is for custody classes only (survival-
+  requiring runs, owner kits, past-timeout work, unbounded sweeps).
 
 ## Commits
 
