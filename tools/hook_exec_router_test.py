@@ -464,6 +464,15 @@ def main() -> int:
 
     router.GIT_NETWORK_ROUTING_ENABLED = saved_git_flag
 
+    # failure-guidance law (owner direction 2026-10-01): the detour-prone
+    # denial templates lead with the panic-guard line BEFORE the
+    # instruction body — guidance first, then the actionable instruction.
+    for template, label in ((router._DENY_INTERACTIVE, "interactive"),
+                            (router._DENY_SWEEP_TEMPLATE, "sweep-unbounded")):
+        if not template.startswith("[qiven-hook] 别慌张"):
+            failures += 1
+            print(f"[FAIL] guidance guard line not first in {label} denial template")
+
     # suspension sentinel: at the shipped default (suspended), a raw git
     # network command passes end-to-end. If this fails after flipping the
     # default back to True, update this test deliberately.

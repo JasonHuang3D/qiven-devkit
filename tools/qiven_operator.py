@@ -103,6 +103,61 @@ class OperatorError(RuntimeError):
     pass
 
 
+# ===========================================================================
+# Failure guidance (owner direction 2026-10-01: GLM-first-consumer output)
+#
+# A FAIL line pulls the consuming agent's attention into the failure
+# detail and away from the governing contracts (the aggressive-bugfix
+# bias: seeing FAIL, agents skip contracts and start "fixing"). The
+# FIRST lines a consumer sees on a failure surface are therefore
+# GUIDANCE, not the failure text: the known wrong-response pattern for
+# the class, the lawful procedure, and the exact pointer. The failure
+# detail itself always follows UNMODIFIED (evidence law - failure text
+# is never rewritten to soothe). Denial-shaped surfaces (the hook
+# router) stay instruction-first by design: their denial IS the
+# guidance. Emitted once per surface kind per invocation.
+# ============================================================================
+
+_FAILURE_GUIDANCE = {
+    "task": (
+        "[qiven] 别慌张：这不是你第一次遇到这类失败，先分类，不要立即动手改或绕路。\n"
+        "[qiven] Do NOT: weaken the gate, comment out a test, lower warnings, or re-run\n"
+        "[qiven]       blind (testing-standard §11 - the gate is the acceptance proof).\n"
+        "[qiven] FIRST: read the failing task's output BELOW and NAME the failure class;\n"
+        "[qiven]       a timeout is a classification event, never a verdict.\n"
+        "[qiven] Procedure + profiles: docs/engineering/execution-protocol.md."
+    ),
+    "exact-head": (
+        "[qiven] 别慌张：exact-head 是字符串精确比对，不是模糊匹配。\n"
+        "[qiven] The gate pins the EXACT head: pass the FULL 40-char sha (an abbreviated\n"
+        "[qiven]       sha fails the compare even when it names the same commit).\n"
+        "[qiven] If HEAD moved since the invocation: commit/stash first, then re-run at\n"
+        "[qiven]       the new full sha. Do NOT bypass or re-point the check."
+    ),
+    "exec": (
+        "[qiven] 别慌张：exec 的失败/退出码都有既定处置，不要换路径绕行。\n"
+        "[qiven] Exit codes: child code observed / 124 still-running OR indeterminate\n"
+        "[qiven]       (key on the payload status field, not the code alone) /\n"
+        "[qiven]       1 expired (business code unknown, never guessed) / 2 operator error.\n"
+        "[qiven] Procedure: docs/conventions/operator-usage.md (exec section)."
+    ),
+}
+
+
+def _emit_failure_guidance(console: "Console", kind: str) -> None:
+    text = _FAILURE_GUIDANCE.get(kind)
+    if not text:
+        return
+    emitted = getattr(console, "_guidance_emitted", None)
+    if emitted is None:
+        emitted = set()
+        console._guidance_emitted = emitted
+    if kind in emitted:
+        return
+    emitted.add(kind)
+    console.block(text)
+
+
 def _load_config() -> dict[str, Any]:
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -865,15 +920,18 @@ def _exec_terminal_response(exec_id: str, current: dict[str, Any], console: Cons
                      f"exec {exec_id}: exit {code} ({current.get('duration_seconds', 0)}s)")
         return dict(snapshot, status="done"), code
     if state == "expired":
+        _emit_failure_guidance(console, "exec")
         console.emit("fail", f"exec {exec_id}: lease expired at {current.get('deadline_utc')} (tree killed, code unknown)")
         return dict(snapshot, status="expired"), 1
     if state == "error":
         detail = str(current.get("error") or "watchdog error")
+        _emit_failure_guidance(console, "exec")
         console.emit("fail", f"exec {exec_id}: {detail}")
         return dict(snapshot, status="error"), 2
     if state == "stopped":
         console.emit("ok", f"exec {exec_id}: stopped")
         return dict(snapshot, status="stopped"), 0
+    _emit_failure_guidance(console, "exec")
     console.emit("wait", f"exec {exec_id}: indeterminate exit (no living supervisor observed it)")
     return dict(snapshot, status="indeterminate"), EXEC_EXIT_STILL_RUNNING
 
@@ -914,6 +972,7 @@ def _exec_start_frontend(argv: list[str], timeout_seconds: float, max_lifetime: 
         record["error"] = f"could not spawn watchdog: {exc}"
         _write_exec_record(record)
         detail = f"exec start failed (watchdog spawn): {exc}"
+        _emit_failure_guidance(console, "exec")
         console.emit("fail", detail)
         return {"status": "error", "error": detail, "argv": argv}, 2
     # from here the WATCHDOG owns the record: its first write carries pid,
@@ -1229,6 +1288,7 @@ def _run_process(name: str, spec: dict[str, Any], console: Console) -> Result:
             if console.verbose:
                 console.block(output)
             return Result(name, "pass", 0, duration, output=output)
+        _emit_failure_guidance(console, "task")
         console.emit("fail", f"{name}: exit {returncode} ({duration:.2f}s)")
         console.block(output)
         return Result(name, "fail", int(returncode), duration, output=output)
@@ -1262,6 +1322,7 @@ def _builtin(name: str, spec: dict[str, Any], console: Console, expect_head: str
         actual = completed.stdout.strip()
         if completed.returncode or actual != expected:
             detail = f"expected {expected}, got {actual or '<unresolved>'}"
+            _emit_failure_guidance(console, "exact-head")
             console.emit("fail", f"{name}: {detail}")
             return Result(name, "fail", 1, time.monotonic() - started, detail=detail, output=completed.stdout)
     elif kind == "gate_proof":
