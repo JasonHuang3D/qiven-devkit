@@ -132,7 +132,8 @@ Semantics that matter to a caller:
   [10, 86400], completion reap with output grace, `CREATE_NO_WINDOW`
   children, batch `cmd.exe /d /c call` boundary; the 2026-09-23
   orphaned-process incident is the governing precedent; regression
-  suite C1-C10 rides the operator-tests gate task).**
+  cases C1-C3, C5-C10 ride the operator-tests gate task — see
+  exec-custody §5 for the id map).**
 - The child runs detached with stdout/stderr to a durable log under
   `.generated-temp/operator/exec/<id>.log`; the run record (`<id>.json`)
   carries the custody identity: `pid`, `watchdog_pid`, `job_name`,
@@ -143,7 +144,8 @@ Semantics that matter to a caller:
   through an explicit `cmd.exe /d /c call <abs path>`, and a path-like
   argv[0] is resolved against the repository ROOT before spawning. The
   operator-tests gate task carries the regression suite (capture, batch
-  chains, grandchild consoles, custody laws C1-C10).
+  chains, grandchild consoles, custody cases C1-C3, C5-C10; C4/C11-C16
+  fold into the G2 semantics checks — exec-custody §5).
 - While supervising, exec heartbeats every ~5s (`running for Ns, log X
   bytes`). Heartbeat is the liveness discriminator — with beats, extending
   the budget deliberately is correct; silence means investigate the log,

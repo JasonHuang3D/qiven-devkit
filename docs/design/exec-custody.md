@@ -3,7 +3,9 @@
 Status: design for the 2026-09-23 emergency stabilization batch
 (owner direction: full review of devkit tooling after the v19 post-session
 process-leak incident; design-first law applies — this document precedes
-the implementation commits in the same batch).
+the implementation commits in the same batch). Delivered 2026-09-23
+(ADR-0048); §2 and §4 are the STANDING custody invariants — cited as
+the single invariants home by `docs/conventions/operator-usage.md`.
 
 ## 1. Basis and incident
 
@@ -175,8 +177,10 @@ watchdog-alive-only, recorded as a platform gap, not silently claimed.
 
 ## 5. Test spine
 
-Named regression classes (each maps to a numbered case group in
-`tools/operator-test.py`):
+Named regression classes (grep the id in `tools/operator-test.py`;
+ids C1-C3, C5-C10 appear literally there under group G3 — C4 and
+C11-C16 have no standalone case: their substance is folded into the
+G2 exit-code/semantics prose checks, so grep miss ≠ untested):
 
 - C1 node-reuse leak: a primary that exits while a grandchild lingers ->
   after grace, grandchild is DEAD (the msbuild class).
@@ -185,7 +189,7 @@ Named regression classes (each maps to a numbered case group in
 - C3 custodian death: kill the watchdog -> child dies within seconds
   (kill-on-close).
 - C4 front-end 124 preserved; child continues; and later dies by lease
-  with no further caller.
+  with no further caller (folded into G2, not a standalone id).
 - C5 stop kills job-orphaned members (members whose parent already
   exited).
 - C6 task custody: gate task spawning a lingering grandchild -> task
@@ -195,13 +199,15 @@ Named regression classes (each maps to a numbered case group in
   JSON).
 - C9 records carry the custody identity fields.
 - C10 heartbeat freshness is observable in status while running.
-- C11 exit-code mirroring and indeterminate semantics unchanged.
+- C11 exit-code mirroring and indeterminate semantics unchanged
+  (folded into G2).
 - C12-C16 the 2026-09-23 window/capture regression suite unchanged
-  (batch chains, UTF-8, 1 MB+ output, stdin EOF, `.cmd` wrapping).
+  (batch chains, UTF-8, 1 MB+ output, stdin EOF, `.cmd` wrapping;
+  folded into G2).
 - Router: chained exec after `&&` classifies (leading whitespace
   tolerance, closing OBL-20260923T224500Z-A7B8C9); tree-sweep commands
-  (`find /root`, `dir /s`, `grep -r`) are long-class; `find "literal"
-  file` (filter form) stays allowed.
+  split scoped/unbounded per the v4.3 class table (unbounded sweeps are
+  exec-custody class; `find "literal" file` filter form stays allowed).
 
 ## 6. Dependencies and rollout
 

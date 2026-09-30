@@ -31,7 +31,7 @@ otherwise. Deviation requires an architecture document in the deviating repo.
 | C/C++ headers | `snake_case.hpp` | `byte_cursor.hpp`, `hashing.hpp` |
 | C/C++ sources | `snake_case.cpp` mirroring the header | `byte_cursor.cpp` |
 | Python | `snake_case.py` | `check_toolchain.py`, `format_sources.py` |
-| Batch | lowercase, hyphens allowed, no spaces | `bootstrap.cmd`, `sync-repo.cmd` |
+| Batch | lowercase, hyphens allowed, no spaces | `qiven.cmd`, `bootstrap.cmd` |
 | Shell | lowercase, `.sh`, hyphens allowed | `bootstrap.sh` |
 | CMake modules | `snake_case.cmake` or `CMakeLists.txt` | `managed-files.cmake` |
 | Markdown docs | `snake_case.md` or the established `PascalCase` for top-level specs | `foundation.md`, `pit-regression-map.md` |
@@ -39,8 +39,8 @@ otherwise. Deviation requires an architecture document in the deviating repo.
 ## Branch naming
 
 - `<designation>/<kebab-topic>` where the designation is the acting role or
-  owner-granted session name: `jason-brother/*`, `jason-worker/*`,
-  `zcode/*`, `jason-extended-cognition/*`.
+  owner-granted session name: `jason-extended-cognition/*`, `zcode/*`
+  (legacy spellings `jason-brother/*`, `jason-worker/*` remain valid).
 - The branch name is convenience; the commit message trailer carries the
   binding identity (see the canonical operating contract, "Commit identity
   attribution").

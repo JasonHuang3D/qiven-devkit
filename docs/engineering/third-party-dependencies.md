@@ -201,8 +201,10 @@ target_include_directories(qiven::tp::<name> INTERFACE "${CMAKE_CURRENT_SOURCE_D
 
 1. Resolve the exact upstream artifact + its PUBLISHED digest
    (algorithm named).
-2. Download/clone via the Qiven Operator (`exec start` — the hook
-   router enforces routing for raw transfer commands).
+2. Download/clone as a backgrounded re-call (`run_in_background: true`;
+   the router denies the raw call — ADR-0051 and §2 above). `qiven exec
+   start` custody only for survival-class fetches or ones past the
+   harness Bash timeout ceiling.
 3. Extract under `.generated-temp/`, copy ONLY needed source/headers/
    binaries + LICENSE into `packages/<name>/`.
 4. Generate the per-file digest list mechanically; write README +
