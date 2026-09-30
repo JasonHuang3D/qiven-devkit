@@ -52,7 +52,9 @@ Repository policy is declarative: `.qiven/operator.json` names tasks
 `{clang_format}`, `{toolchain_root}`; builtin task kinds: `exact_head`,
 `git_diff_check`, `git_clean_tree`, `gate_proof`), gate
 sequences (with parallel groups), and CI profiles (workflow +
-inputs). Deploy policy is separate: `.qiven/deploy.json` (schema
+inputs). Launcher/locator environment: `QIVEN_WORKSPACE_CONTROL`,
+`QIVEN_DEVKIT_CHECKOUT` (and the full locator precedence:
+qiven-workspace README "Locator vocabulary"). Deploy policy is separate: `.qiven/deploy.json` (schema
 `qiven-deploy-policy-v1`; law: `docs/engineering/deployment.md`).
 Mechanism changes land in Devkit with its test suite; policy
 changes are repository-local.
