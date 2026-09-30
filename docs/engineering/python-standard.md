@@ -173,7 +173,9 @@ mandatory for any code that spawns processes on Windows:
 1. Every tool with engineering semantics carries a self-test that a
    gate task executes (the operator-tests / router-tests pattern), and
    every fixed defect adds its regression case to that suite — the
-   2026-09-23 incident's custody laws each have a named case (C1-C10).
+   2026-09-23 incident's custody laws each have a named case (C1-C3,
+   C5-C10 literal ids; C4/C11-C16 folded — map in
+   `docs/design/exec-custody.md` §5).
 2. Tests generate their own disposable fixtures (temp trees), assert
    cleanup where custody is the contract (a leaked test process is a
    failed test, not a green one), and never touch the developer's

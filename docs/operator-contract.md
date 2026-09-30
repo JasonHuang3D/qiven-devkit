@@ -51,7 +51,9 @@ file does not restate them.
 ## Policy surface
 
 Repository policy is declarative: `.qiven/operator.json` names tasks
-(argv with `{python}`/`{cmake}`/`{ctest}` substitutions), gate
+(argv substitutions: `{root}`, `{python}`, `{cmake}`, `{ctest}`,
+`{clang_format}`, `{toolchain_root}`; builtin task kinds: `exact_head`,
+`git_diff_check`, `git_clean_tree`, `gate_proof`), gate
 sequences (with parallel groups), and CI profiles (workflow +
 inputs). Deploy policy is separate: `.qiven/deploy.json` (schema
 `qiven-deploy-policy-v1`; law: `docs/engineering/deployment.md`).
