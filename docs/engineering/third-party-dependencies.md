@@ -228,44 +228,29 @@ digest" — investigate, re-vendor deliberately, or restore.
 "If our own foundation were a third-party library cloned from GitHub —
 would the current CMake consumption be right?" Answered honestly:
 
-- Foundation/draft consumption historically used sibling source
-  checkout + in-consumer `add_subdirectory` build + an exact-SHA pin
-  validated at configure; since WR-3/WR-4 the delivered shape is the
+- For first-party layers the delivered shape (since WR-3/WR-4) is the
   workspace adapter (`QIVEN_RESOLUTION_FILE`) materializing the
-  lock-selected revision, with the lock node identity-checked at
-  configure (consumer-local pins are retired). For CO-DEVELOPED
-  first-party layers local-source co-evolution remains the intent of
-  the model ("layer model", ADR-0039/0046) — the lock, not a
-  consumer pin, is what selects the revision.
+  lock-selected revision, identity-checked at configure; co-developed
+  layers keep local-source co-evolution intent (layer model,
+  ADR-0039/0046). The lock, not a consumer pin, selects the revision.
 - It is NOT the right model for third-party code: no per-repo
-  vendoring (that is what v2 removes), no network at configure, no
-  per-repo flag adaptation, and binary reuse questions do not arise
-  because classes S/H compile once per consumer build tree by design.
+  vendoring, no network at configure, no per-repo flag adaptation;
+  classes S/H compile once per consumer build tree by design.
 - **Pin coverage is the workspace lock's job (owner direction
-  2026-09-23 closed the v2 gap; WR-3/WR-4/WR-5 moved every governed
-  external into the lock):** foundation, draft and the singleton are
-  workspace lock nodes identity-checked at configure/consumption. The
-  earlier "revisit on first drift incident" deferral was REJECTED
-  practice: revisit-trigger deferrals for cheap, visible compliance
-  work do not fire (owner: "看到了就做" — see
-  qiven-context MEM-20260923T183500Z-B4C5D6). Moving any node is an
+  2026-09-23):** foundation, draft and the singleton are lock nodes
+  identity-checked at configure/consumption. Revisit-trigger deferrals
+  for cheap, visible compliance work do not fire (owner: "看到了就做"
+  — qiven-context MEM-20260923T183500Z-B4C5D6). Moving any node is an
   explicit lock transaction with full gates.
 
-## Review record
+## Review record (self-review 2026-09-23, v2, distilled)
 
-Self-review 2026-09-23 (v2, pre-publication):
-
-1. Singleton naming: `-win` follows toolchain-win precedent; a
-   portable-source-only future can split without consumer changes
-   (the target name and root resolution stay stable).
-2. Class P `MAP_IMPORTED_CONFIG_*` rule: the example maps Debug→Release
-   only as the documented shape for config-subset prebuilts; a
-   full-config prebuilt ships all four configurations instead.
-   Decided: require all four where upstream provides them, explicit
-   mapping where not.
-3. Consumer spot-verification kept OPTIONAL (the singleton gate is the
-   authority; mandatory double-checks in every consumer gate multiply
-   keys for marginal assurance) — the runtime keeps its task as the
-   exemplar.
-4. The v1 migration (runtime's `third_party/` removal) rides the same
-   batch as the standard so no state ever satisfies both versions.
+1. Singleton naming `-win` follows toolchain-win precedent; a
+   portable-source split would not change target names.
+2. Class P config rule: ship all four configurations where upstream
+   provides them; explicit `MAP_IMPORTED_CONFIG_*` mapping where not
+   (same rule as the §4.2 code comment).
+3. Consumer spot-verification stays OPTIONAL (the singleton gate is
+   the authority; the runtime task is the exemplar).
+4. The v1 migration rode the same batch as this standard so no state
+   ever satisfied both versions.

@@ -4,12 +4,12 @@ This document is the SINGLE CANONICAL quality law for Python in every
 `qiven-*` repository (ADR-0046: Devkit owns engineering standards;
 repositories carry no copies). It exists because Python code in this
 workspace executes REAL work on a REAL machine — builds, tests, process
-custody, publication gates — and its defects are not lint noise: the
-2026-09-23 post-session incident (dozens of orphaned msbuild/cmd
-processes and a ghost find.exe holding ~70% CPU until an OS restart)
-was caused by a Python tool whose survival semantics were unbounded and
-whose cleanup was behavioral instead of mechanical. Sloppy Python is an
-operational hazard here, not a style problem.
+custody, publication gates. Governing precedent: the 2026-09-23
+post-session incident (orphaned msbuild/cmd processes + a ghost
+find.exe, ~70% CPU, OS restart required; evidence:
+`evidence/audits/2026-09-23-exec-process-leak-incident.md` in
+qiven-context, ADR-0048).
+Sloppy Python is an operational hazard here, not a style problem.
 
 This standard applies to `tools/*.py`, the Operator runtime, hook
 scripts, and any Python the repositories ship. It binds humans and AI
@@ -101,12 +101,10 @@ mandatory for any code that spawns processes on Windows:
    initialized, append-only, no re-entrancy).
 5. The Operator runtime stays a SINGLE FILE. Multi-file refactors of it
    are forbidden without an owner decision: the distribution constraint
-   is load-bearing. (WR-6, 2026-09-28: the workspace-locked devkit node
-   is the canonical source every launcher imports after the bootstrap
-   identity-check; managed-snapshot copies survive only in the
-   grandfathered repositories recorded in the wr6-report residual.)
-   Internal structure compensates: section banners,
-   one-concern-per-block, no dead code, no leftover scaffolding.
+   is load-bearing (workspace-resolved distribution: operator-contract
+   "Ownership and distribution states"). Internal structure compensates:
+   section banners, one-concern-per-block, no dead code, no leftover
+   scaffolding.
 6. Dead code, unused constants, commented-out experiments, and
    "temporarily" disabled checks are removed before commit — the diff
    tells one story (implementation-standard §14).
@@ -186,24 +184,15 @@ mandatory for any code that spawns processes on Windows:
    (`_run_capture`, `shutil.which`), never to bypass the code under
    test's own semantics.
 
-## 9. Review record
+## 9. Review record (self-review 2026-09-23, distilled)
 
-Self-review 2026-09-23 (pre-publication):
-
-1. Single-file operator constraint kept despite size pressure — the
-   managed-snapshot distribution model is the reason the operator
-   exists per repository at all; internal section discipline is the
-   compensating control.
-2. §2's rules are deliberately incident-derived rather than exhaustive
-   Windows guidance; generic platform knowledge lives in
-   implementation-standard §9, this file records what WE burned
-   ourselves on and must never repeat.
-3. The stdlib-only rule (§1.4) does not forbid vendoring Python
-   dependencies under the third-party standard's class model; it
-   forbids IMPLICIT dependency acquisition. An explicit
-   PROVENANCE-recorded Python package follows the third-party law
-   instead.
-4. No automated detector yet for §1.1/§1.2 (e.g. a lint that rejects
-   `subprocess.Popen` outside custody helpers) — recorded as the first
-   candidate if manual review shows drift (engineering README
-   "protocol evolution" question 5).
+1. Single-file operator constraint kept despite size pressure;
+   internal section discipline is the compensating control.
+2. §2 is deliberately incident-derived, not exhaustive Windows
+   guidance (generic platform law: implementation-standard §9).
+3. The stdlib-only rule (§1.4) forbids IMPLICIT dependency acquisition
+   only; an explicit PROVENANCE-recorded Python package follows the
+   third-party law instead.
+4. No automated detector yet for §1.1/§1.2 — first candidate if manual
+   review shows drift (engineering README "protocol evolution"
+   question 5).

@@ -78,7 +78,7 @@ Follow established naming unless the task specification deliberately changes it.
 
 Comments are for non-obvious intent, invariants, platform quirks, ownership/lifetime constraints, or important trade-offs. Do not narrate syntax or write tutorial essays in source files.
 
-Repository `.clang-format` is authoritative. Use the repository's real formatting tooling — the format task (`python tools\format_sources.py --fix` / `--check`; the earlier `tools\format.cmd` / `tools\format-check.cmd` spellings never existed in the managed tool tree and are retired) — then inspect the actual diff. Never modify formatting policy as a side effect of an unrelated feature.
+Repository `.clang-format` is authoritative. Use the repository's real formatting tooling — the format task (`python tools\format_sources.py --fix` / `--check`; retired-spelling note: testing-standard §8) — then inspect the actual diff. Never modify formatting policy as a side effect of an unrelated feature.
 
 ## 12. Build configuration
 

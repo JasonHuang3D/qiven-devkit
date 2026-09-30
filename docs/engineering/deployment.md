@@ -68,12 +68,14 @@ installer.
 
 Implemented by the Devkit-owned `tools/deploy_bundle.py`; repositories
 declare task metadata (what to bundle) in `.qiven/deploy.json` (schema
-`qiven-deploy-policy-v1`) and a
+`qiven-deploy-policy-v1`; fields: `products`, `docs.readme_template`,
+`docs.extras[]`, `licenses.repo`, `version`, `build`, `product`) and a
 thin transport launcher resolves the Devkit checkout through the
 workspace (WR-6 shape: the launcher runs the bootstrap identity-check
 against the workspace lock BEFORE any Devkit import — no
 `QIVEN_DEVKIT_ROOT` variable and no consumer-local pin; the locked
-devkit node is the only admitted source).
+devkit node is the only admitted source). Deploy exit codes: 0 success;
+1 precondition/assembly/smoke failure; 2 usage error.
 
 Steps (the script enforces the order and fails closed at each):
 
@@ -155,17 +157,12 @@ No remote publication, no code signing, no auto-update, no delta
 bundles. Each becomes its own standard if a real requirement appears;
 until then the deploy task does not grow those features.
 
-## Review record
+## Review record (self-review 2026-09-23, distilled)
 
-Self-review 2026-09-23: (1) overwrite-same-identity rule chose atomic
-redeploy over immutable versions+counter suffixes — workspace bundles
-are regenerable artifacts, and unbounded unique directories would
-accumulate forever inside the workspace; the manifest retains
-`deployed_at` + previous digest for audit. (2) Smoke commands are
-declared per-repo policy (metadata), not hardcoded in the Devkit
-script — the repository owns what "works" means for its products.
-(3) `.staging-<pid>` under the deploy root keeps staging inside the
-boundary; a crash leaves a stale staging dir which the next deploy
-cleans (same-prefix sweep) — noted in the script. (4) Bundle README
-generation is template + metadata, preventing doc drift; the template
-lives in the repository (repo-owned), assembled by the script.
+1. Same-identity re-deploy is atomic overwrite (manifest keeps
+   `deployed_at` + previous digest for audit).
+2. Smoke commands are per-repo policy metadata, not Devkit-hardcoded.
+3. `.staging-<pid>` staging stays inside the deploy root; the next
+   deploy sweeps stale same-prefix dirs.
+4. Bundle README generation is repo-owned template + metadata
+   (prevents doc drift).

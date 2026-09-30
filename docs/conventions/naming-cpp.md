@@ -22,9 +22,9 @@ codebase: when in doubt, match what Foundation already does.
 - Acronyms inside type names: keep uppercase only when the acronym is the
   established domain name and at most three letters (`LLM`, `LLMClientTool`,
   `H2Evidence`). Do not invent new all-caps runs longer than three letters.
-- Type aliases: `snake_case` (`using usize = std::size_t;`,
-  `using RevisionId`—no: `RevisionId` is a type, so PascalCase; the alias NAME
-  follows type rules because it introduces a type).
+- Type aliases: the alias NAME follows type rules — `PascalCase` when
+  it introduces a type (`using RevisionId = ...`); `snake_case` only
+  for non-type aliases (`using usize = std::size_t;`).
 - Enums: `enum class` only. The enum name is `PascalCase` (`WorkMode`,
   `QuarantineState`); enumerators are `PascalCase` (`SupervisedForeground`,
   `Isolated`). Enumerators are always fully qualified at use sites

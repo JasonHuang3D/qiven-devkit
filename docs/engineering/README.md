@@ -48,18 +48,20 @@ never by role-to-role handoffs.
 
 ## Instruction precedence
 
-Resolve conflicts by source class — canonical qiven-context cognition first, then this Devkit engineering law, then repository architecture, then the task specification (the operative procedure is the Devkit README's "Authority resolution" section; the root `AGENTS.md` is a self-hosting pointer and defines no precedence itself). A feature specification may specialize ordinary implementation details for one feature, but it may not silently override repository-wide architecture or safety rules. Deliberate exceptions must be explicit.
+Resolve conflicts by source class per the Devkit README's "Authority
+resolution" section (canonical qiven-context cognition first; the root
+`AGENTS.md` defines no precedence itself). A feature specification may
+specialize ordinary implementation details for one feature, but it may
+not silently override repository-wide architecture or safety rules.
+Deliberate exceptions must be explicit.
 
 ## Protocol evolution
 
-These documents are expected to evolve when evidence shows that the existing protocol failed to prevent a recurring class of mistake.
-
-When a process failure occurs, ask:
+When a process failure occurs, fix the underlying protocol or detector
+rather than relying on a warning being remembered. The five questions:
 
 1. Was the feature specification ambiguous?
 2. Was a shared engineering rule missing?
 3. Was the rule present but too vague to be operational?
 4. Was it contradicted by another instruction?
 5. Should the rule become an automated check instead of prose?
-
-Fix the underlying protocol or detector when appropriate rather than relying on the same warning being remembered manually in future sessions.

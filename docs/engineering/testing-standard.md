@@ -90,7 +90,9 @@ python tools\format_sources.py --fix
 python tools\format_sources.py --check
 ```
 
-(The earlier `tools\format.cmd` / `tools\format-check.cmd` spellings never existed in the managed tool tree and are retired.)
+(The earlier `tools\format.cmd` / `tools\format-check.cmd` spellings
+never existed in the managed tool tree and are retired — this section
+is the canonical note.)
 
 `git add -N` is PROHIBITED for formatter exposure (2026-09-21 scar): an intent-to-add entry holds an EMPTY blob, and any later `git checkout -- .` restores that empty blob over the real file content - silent data loss. The formatter's enumeration is a pure read; keep it that way. Inspect the diff afterward because a formatter can legitimately change more text than expected.
 
@@ -142,11 +144,7 @@ Do not claim unexecuted environments are verified.
 
 ## 14. Human-facing test runner output
 
-Test entry points such as `test.cmd`, `test.sh`, or equivalent repository-level runners are human-facing engineering tools. Their output quality is part of maintainability and operational reliability.
-
-Prefer a compact structured layout with stable status tags such as `[ RUN]`, `[WAIT]`, `[ OK ]`, and `[FAIL]`. Use color when the terminal supports it, while retaining a deterministic plain-text path for CI, redirected output, and explicit no-color operation.
-
-A runner should normally:
+Test entry points such as `test.cmd`, `test.sh`, or equivalent repository-level runners are human-facing engineering tools; their output discipline (markers, buffering, heartbeat, no invented progress) is Python-standard §6 law. Testing-specific duties: a runner should normally:
 
 - identify the repository/ref or exact HEAD when practical;
 - acknowledge suite start immediately;

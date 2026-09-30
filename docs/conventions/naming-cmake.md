@@ -7,12 +7,10 @@ Applies to every `qiven-*` C++ repository.
 - Library target: raw target `qiven-<name>` with a `qiven::<snake_name>`
   namespaced alias. The alias component uses snake_case, never dashes
   (`qiven::foundation` over `qiven-foundation`, `qiven::math` over
-  `qiven-math`). (Corrected 2026-09-21: the earlier text required a bare
-  unprefixed raw target, which no repository followed; the reference
-  implementation, qiven-foundation, is normative. Corrected 2026-09-26:
-  the former exemplars `qiven::dcr_win` / `qiven-host` /
-  `qiven-dcr-win-app` named repositories deleted with their history
-  forfeited — live repositories are the only naming exemplars.)
+  `qiven-math`). Reference implementation: qiven-foundation is
+  normative (pre-2026-09-21 text differed; deleted-repository exemplars
+  removed 2026-09-26 — live repositories are the only naming
+  exemplars).
 - Test executables: `qiven-<repo>-<topic>` (`qiven-foundation-byte-cursor`,
   `qiven-context-draft-persistence`).
 - App executables: `qiven-<repo>` when the app is the repository's primary

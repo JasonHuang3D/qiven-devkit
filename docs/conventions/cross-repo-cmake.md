@@ -8,17 +8,12 @@ contrast — what is deliberately NOT allowed. Established 2026-09-23
 (v19 review) to make every external-target reference uniform.
 
 > **Status under ADR-0052 (2026-09-28): the Workspace Resolution
-> program is DELIVERED end to end (WR-0..WR-8) and this migration-stage
-> pattern is SUPERSEDED.** The delivered endpoint is in force: CMake
-> consumes the generated, validated resolution
-> (`qiven_workspace_require` from the workspace adapter) and performs
-> no repository discovery or revision selection (WG-1/WG-4); every
-> dependency edge is a repository-manifest declaration in the workspace
-> lock. The stage-by-stage text below is retained as the record of how
-> the migration was executed; where a row below predates its class
-> cutover, the registry in section 4 states the delivered shape.
-> Landing doc: `../design/workspace-resolution.md`; program documents:
-> qiven-docs `accepted/2026-09-24/`.
+> program is DELIVERED (WR-0..WR-8); this migration-stage body is
+> SUPERSEDED — the delivered endpoint is in force** (CMake consumes the
+> generated resolution via `qiven_workspace_require`, no repository
+> discovery; where a row below predates its class cutover, the section 4
+> registry states the delivered shape; text retained as the migration
+> record). Landing doc: `../design/workspace-resolution.md`.
 
 ## 1. The one consumption pattern
 

@@ -41,12 +41,9 @@ Standard-library only; Python 3.9+ (`QIVEN_PYTHON` override honored).
 ## Usage law — single home
 
 Command surface, gate/run/ci/exec semantics, hook-router routing,
-custody and exit-code contracts: `docs/conventions/operator-usage.md`
-(its own header declares it the single usage reference). The binding
-process/output laws (per-task child processes, state-based markers,
-bounded custody, indeterminate-never-guessed, `[qiven-hook]`
-provenance) are stated there and in the engineering standards; this
-file does not restate them.
+custody, exit codes and process/output laws:
+`docs/conventions/operator-usage.md` plus the engineering standards —
+this file does not restate them.
 
 ## Policy surface
 
