@@ -7,6 +7,24 @@ each repository's `AGENTS.md` → `docs/conventions/README.md` (this index)
 → here, and `collaboration/operating-contract.md` rule 5 names this file
 for the hang-contract execution path.
 
+## Output discipline and failure guidance
+
+Human output is state-based (`[ RUN]` / `[WAIT]` / `[ OK ]` / `[FAIL]`
+markers, flushed); progress reports observable state only. On FAILURE
+surfaces (a failing gate/run task, an exact-head mismatch, exec
+expired/error/indeterminate) the FIRST lines the consumer sees are a
+`[qiven]` GUIDANCE banner — the known wrong-response pattern for the
+class (do-not-weaken/do-not-bypass), the lawful first action, and the
+exact procedure pointer — followed by the failure detail UNMODIFIED
+(evidence law: failure text is never rewritten). The banner fires once
+per surface kind per invocation; `--json` mode omits it (machine
+consumers key on the payload). Hook-router DENIALS are a different
+surface: instruction-first by design (the denial IS the guidance), with
+a panic-guard line on the detour-prone templates (interactive,
+unbounded sweep). Law origin: owner direction 2026-10-01 (GLM
+first-consumer output; the aggressive-bugfix bias on seeing FAIL).
+Regression pins: operator-test G1b; router-tests guidance-guard block.
+
 ## Entry and discovery
 
 Two entries: `tools\qiven.cmd` (Windows) and `tools/qiven.py` (everywhere,

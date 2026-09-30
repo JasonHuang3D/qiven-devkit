@@ -260,7 +260,8 @@ _DENY_SWEEP_SCOPED_TEMPLATE = (
 # reframed by OBL-D5E6F7: operational session end kills nothing, so an
 # unbounded background sweep can outlive the session - the ghost class).
 _DENY_SWEEP_TEMPLATE = (
-    "{tag} unbounded filesystem tree sweep (no explicit in-repo path, escapes the workspace\n"
+    f"{_HOOK_TAG} 别慌张：照下面的指令做即可，不要绕路（不要改用 run_in_background，不要缩小扫描来绕过）。\n"
+    f"{_HOOK_TAG} unbounded filesystem tree sweep (no explicit in-repo path, escapes the workspace\n"
     "root, or names a heavy tree like .venv/node_modules/third-party): this class runs under\n"
     "the Qiven Operator lease - custody must not depend on this session's lifetime (ghost-\n"
     "process class, ADR-0051 s5); run_in_background is NOT sufficient here. Route it:\n"
@@ -271,6 +272,7 @@ _DENY_SWEEP_TEMPLATE = (
     "files only), which pass this hook raw (v4.3)."
 )
 _DENY_INTERACTIVE = (
+    f"{_HOOK_TAG} 别慌张：这不是要修复的失败——照指令换非交互形式即可，不要绕路。\n"
     f"{_HOOK_TAG} interactive command invoked raw: it suspends the shell awaiting a human\n"
     "and hangs the tool call (2026-09-19 modal incident class). Use the non-interactive\n"
     "form instead (git add <paths> / git commit -m <msg>; native Write/Edit tools for file\n"

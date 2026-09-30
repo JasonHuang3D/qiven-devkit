@@ -277,6 +277,39 @@ def main() -> int:
         check(not marker_c.exists(), "G1.failfast-stopped", "fail-fast gate executed a later stage")
         check("[ RUN]" not in failed.stdout and "[FAIL]" not in failed.stdout, "G1.failfast-json-purity")
 
+        # G1b: failure-guidance law (owner direction 2026-10-01): in human
+        # mode the [qiven] guidance banner precedes the first [FAIL] line,
+        # the failure detail stays verbatim, and the banner fires once per
+        # invocation (the recency the consuming agent actually sees).
+        human = run(
+            [sys.executable, OPERATOR, "gate", "--name", "fixture-fail-fast"],
+            cwd=repo,
+            expect=1,
+        )
+        lines = human.stdout.splitlines()
+        first_fail = next(i for i, l in enumerate(lines) if l.startswith("[FAIL]"))
+        first_guidance = next(i for i, l in enumerate(lines) if l.startswith("[qiven]"))
+        check(first_guidance < first_fail, "G1b.guidance-before-fail",
+              f"guidance@{first_guidance} fail@{first_fail}")
+        check(sum(1 for l in lines if "别慌张" in l) == 1, "G1b.guidance-once")
+        check(any(": exit " in l for l in lines[first_fail:first_fail + 2]),
+              "G1b.detail-verbatim")
+
+        # G1b.exact-head: the wrong-head class leads with its own guidance
+        # (full-sha compare) before the [FAIL] line.
+        bad_head = run(
+            [sys.executable, OPERATOR, "gate", "--name", "fixture-isolation",
+             "--expect-head", "0" * 40],
+            cwd=repo,
+            expect=1,
+        )
+        bh = bad_head.stdout.splitlines()
+        bh_fail = next(i for i, l in enumerate(bh) if l.startswith("[FAIL]"))
+        check(any(l.startswith("[qiven]") for l in bh[:bh_fail]),
+              "G1b.exact-head-guidance-first")
+        check(any("40-char" in l for l in bh[:bh_fail]),
+              "G1b.exact-head-guidance-content")
+
         isolation = run(
             [sys.executable, OPERATOR, "--json", "gate", "--name", "fixture-isolation"],
             cwd=repo,
