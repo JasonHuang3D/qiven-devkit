@@ -1,6 +1,8 @@
 # @REPOSITORY_NAME@
 
-Bootstrap repository for the `@CMAKE_ALIAS@` C++ library.
+Bootstrap repository for the `@CMAKE_ALIAS@` C++ library and application.
 
 This README is bootstrap-only and belongs to this repository after generation. Replace it with domain documentation as the
-library is designed. Shared engineering conventions are under `docs/engineering/`.
+library is designed. Engineering standards are canonical in the Devkit
+(`docs/engineering/` THERE, ADR-0046 — this repository carries no local copies;
+`AGENTS.md` is the pointer).
