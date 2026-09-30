@@ -171,10 +171,14 @@ Semantics that matter to a caller:
   WITHOUT `MSBUILDDISABLENODEREUSE=1` (or `/nr:false`): worker nodes
   deliberately survive their primary and would strand past the
   completion notification (ADR-0048 §3 / ADR-0051 §3).
-- Do not run sweep-class commands backgrounded: sweeps need exec's
-  lease custody (ADR-0051 §5).
+- Do not run UNBOUNDED sweep-class commands backgrounded: only the
+  registry's v4.3 custody subclass (heavy/no-path/escaping sweeps)
+  needs exec's lease custody — `git grep`/`git ls-files` run raw and
+  repo-scoped bounded sweeps deny→background by design
+  (long-command-registry v4.3, 2026-09-26; ADR-0051 decision 5's
+  dated scope note).
 
-## The hook router (backstop) — 2026-09-23 review, v4 semantics 2026-09-24
+## The hook router (backstop) — 2026-09-23 review, v4 semantics 2026-09-24 (v4.3 subclasses since 2026-09-26)
 
 The PreToolUse Bash hook (`tools/hook_exec_router.py`, registered in the
 workspace `.zcode/config.json`) denies RAW long-class and interactive
