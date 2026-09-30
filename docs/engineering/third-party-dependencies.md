@@ -48,9 +48,14 @@ mechanically different; each has its own layout and CMake shape.
 | **F** | fetched-source | upstream archive fetched ONCE at acquisition into the singleton | becomes class S after landing (§3) |
 
 Class F is an acquisition mode, not a steady state: network fetching
-happens exactly once, INTO the singleton, at (re)vendoring time, via
-the Qiven Operator (hang-contract rule 5). Consumer builds never touch
-the network — `FetchContent`/`ExternalProject` at consumer configure
+happens exactly once, INTO the singleton, at (re)vendoring time, and is
+ordinary in-session long work under ADR-0051 — the fetch tool is a
+network-acquisition class member, so the hook router denies the raw call
+and instructs the `run_in_background` re-call (owner adjudication
+2026-10-01); `qiven exec` custody applies only when a fetch must survive
+the session or exceed the harness Bash timeout ceiling (large archives,
+resumable needs). Consumer builds never touch the
+network — `FetchContent`/`ExternalProject` at consumer configure
 time is FORBIDDEN (a consumer configure must stay offline and
 reproducible from the singleton checkout alone).
 

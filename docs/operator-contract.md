@@ -47,12 +47,16 @@ Standard-library only; Python 3.9+ (`QIVEN_PYTHON` override honored).
   default.
 - `qiven ci start <profile>` — exact-remote-identity dispatch through
   `gh`; asynchronous by contract (no sleeps, no latest-run guessing).
-- `qiven ci watch <run...> --repo <name> --expect-head <sha>` —
-  identity-bound, observation-only CI runner (ADR-0051-era addition):
-  locks onto the exact head SHA with a same-head decoy guard,
-  10-second internal polling in a detached bounded process, clean
-  output, JSON receipt, inherently terminating.
-- `qiven exec start/status/stop/list` — detached bounded custody for
+- `qiven ci watch [PROFILE]` (or explicit identity `--repo O/N
+  --workflow W --branch B --head SHA`) — identity-bound,
+  observation-only CI runner (ADR-0051-era addition): locks onto the
+  exact head SHA with a same-head decoy guard, bounded internal polling
+  (`--timeout` minutes, default 60 — inherently terminating), clean
+  output, JSON receipt. It runs in the CALLER's foreground by design:
+  place it under the harness's `run_in_background` (gate-class denial →
+  guarded re-call); it does NOT self-detach and never routes through
+  `qiven exec` (a watch observes a REMOTE run — ADR-0051).
+- `qiven exec start/status/stop/list/sweep` — detached bounded custody for
   survival-class commands (ADR-0048): watchdog + KILL_ON_JOB_CLOSE
   Job-Object tree lifetime + lease; `CREATE_NO_WINDOW` children; the
   harness's `run_in_background` remains the default for ordinary

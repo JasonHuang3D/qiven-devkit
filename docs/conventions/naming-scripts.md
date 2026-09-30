@@ -47,5 +47,8 @@ environment failures terminate fast with the reason on stderr).
 ## Where scripts live
 
 - Repository tools live in that repository's `tools/`.
-- Scripts shared across repositories belong to the Devkit operator layer and
-  are rolled out as managed snapshots — never copied ad hoc.
+- Scripts shared across repositories belong to the Devkit operator layer;
+  since WR-6 (2026-09-28) repositories reach that layer through the
+  workspace bootstrap identity-check importing the LOCKED devkit node —
+  never copied ad hoc (the former managed-snapshot rollout survives only
+  in the grandfathered instances recorded in the wr6-report residual).
