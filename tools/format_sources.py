@@ -30,6 +30,12 @@ def main() -> int:
         print("[FAIL] git ls-files failed")
         return 1
     files = [line for line in listing.stdout.splitlines() if line.strip()]
+    # Third-party law (docs/engineering/third-party-dependencies.md, this
+    # repository): vendored trees are pristine upstream content under
+    # provenance digests — never formatted. Kept byte-aligned with the
+    # managed template twin (templates/cpp-library/managed/tools/
+    # format_sources.py.in — the .in is the source for generated repos).
+    files = [name for name in files if not name.startswith("third_party/")]
     mode_args = ["--dry-run", "--Werror"] if mode == "--check" else ["-i"]
     failures = 0
     for name in files:

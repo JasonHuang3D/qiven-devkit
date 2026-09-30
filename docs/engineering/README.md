@@ -15,7 +15,7 @@ Repository architecture remains repository-owned. These documents define **how**
 - `testing-standard.md` — semantic test design, validation profiles, adversarial/concurrency posture, and local evidence requirements.
 - `execution-protocol.md` — branch, batch, commit, validation, publication, stopping, blocker, and escalation procedure.
 - `feature-spec.md` — the specification contract used to define implementation-ready work before implementation begins (owner-authored or session-authored alike).
-- `third-party-dependencies.md` — the hermetic third-party consumption law: modes, vendored layout, PROVENANCE pin records, digest verification, CMake consumption and compile-flag adaptation, patch and license policy, operator-routed acquisition (2026-09-23).
+- `third-party-dependencies.md` — the hermetic third-party consumption law: modes, vendored layout, PROVENANCE pin records, digest verification, CMake consumption and compile-flag adaptation, patch and license policy, acquisition routed per ADR-0051 (background re-call; exec custody for survival-class fetches, owner adjudication 2026-10-01).
 - `deployment.md` — workspace-bounded continuous deployment: bundle layout, versioning, digests, docs and licenses, smoke validation (2026-09-23).
 - `h1-kit.md` — executable H1 acceptance packages: tool-built kits (binaries + ready configs + launchers + rollback + generated guide), owner-facing content law, template-trust law (2026-09-23, born from the MVP-4 deny-118 incident).
 - `design-first-workflow.md` — the design-before-code gate for production batches, its required document shape and enumerated exceptions (2026-09-23).

@@ -108,19 +108,13 @@ qiven exec sweep                                terminate expired runs, finalize
 
 Semantics that matter to a caller:
 
-- **Bounded process custody (v2, 2026-09-23 incident redesign;
-  `docs/design/exec-custody.md`).** Every exec run has a WATCHDOG
-  custodian holding a Windows Job Object (`KILL_ON_JOB_CLOSE`) that
-  contains the ENTIRE run tree. The kernel, not agent discipline,
-  enforces: the tree dies no later than its lease (`--max-lifetime`,
-  default 3600 s, clamped to [10, 86400]); if the watchdog dies for any
-  reason the tree dies with it instantly; and when the primary command
-  exits, surviving tree members (the MSBuild node-reuse leak class) are
-  terminated after a 1.5 s output grace. A session can no longer leave
-  invisible build processes burning CPU behind it — the 2026-09-23
-  incident (dozens of msbuild/cmd orphans + a ghost find.exe surviving
-  the session and the IDE exit) is the governing precedent. Children also
-  run with `MSBUILDDISABLENODEREUSE=1`.
+- **Bounded process custody (v2, ADR-0048; invariants live in ONE place:
+  `docs/design/exec-custody.md` §2/§4 — watchdog custodian +
+  `KILL_ON_JOB_CLOSE` Job-Object tree lifetime, lease clamped
+  [10, 86400], completion reap with output grace, `CREATE_NO_WINDOW`
+  children, batch `cmd.exe /d /c call` boundary; the 2026-09-23
+  orphaned-process incident is the governing precedent; regression
+  suite C1-C10 rides the operator-tests gate task).**
 - The child runs detached with stdout/stderr to a durable log under
   `.generated-temp/operator/exec/<id>.log`; the run record (`<id>.json`)
   carries the custody identity: `pid`, `watchdog_pid`, `job_name`,
@@ -185,106 +179,45 @@ Semantics that matter to a caller:
 
 The PreToolUse Bash hook (`tools/hook_exec_router.py`, registered in the
 workspace `.zcode/config.json`) denies RAW long-class and interactive
-commands and, since v4 (ADR-0051), instructs the `run_in_background`
-re-call (with the node-reuse guard for build/gate classes; sweeps still
-get the exec pattern). It is a backstop, never the contract; it fails
-open on unparseable input and cannot catch indirection (`BASE=<tool>;
-$BASE ...`). Its classification table is pinned by
+commands and instructs the ADR-0051 re-call. It is a backstop, never the
+contract; it fails open on unparseable input and cannot catch indirection
+(`BASE=<tool>; $BASE ...`). Its classification table is pinned by
 `tools/hook_exec_router_test.py` (gate task `router-tests`).
 
-Long classes (each entry earned by an observed incident or by class
-logic — additions need a case in the test table):
+Operative routing (the member lists, thresholds and per-class evidence
+live in ONE place — `qiven-context collaboration/long-command-registry.md`,
+owner-governed; the router implements it and the test table pins it —
+do not restate members here):
 
-- builds/toolchains: cmake `-S/-B/--preset/--build/--install`, ctest,
-  msbuild, devenv, `cl.exe`, `link.exe`, `dotnet build/test`;
-- repo gate/tool entrypoints that sweep or build: `format_sources.py`,
-  the format entrypoints, the pinned formatter binary, `test_all.py`,
-  pytest, `deploy_bundle.py`/`deploy.cmd` (the 2026-09-23 vendored
-  amalgamation format hang is the governing incident);
-- network acquisition: the transfer tools (curl-class and the
-  PowerShell equivalents), `pip install/download`, `npm install/ci/run
-  build`, `git clone`, `git submodule update/sync`, `gh run watch` (the
-  raw transfer-tool slip during the SQLite acquisition is the incident);
-- filesystem tree sweeps (2026-09-23 ghost find.exe incident): `find`
-  with a path-argument form (`find /d/...`, `find D:\...`, flags then
-  path), `grep -r/--recursive`, `dir /s` — the Windows text-FILTER form
-  (`find /i "text" file`) stays raw;
-- interactive class (separate verdict; suspends the shell awaiting a
-  human — the 2026-09-19 modal incident class): editors, git
-  interactive/patch modes, `cmake --open`.
+- **build / gate-class / repo-tool / network classes, and repo-scoped
+  bounded sweeps**: denied raw with the exact re-call instruction
+  ("re-issue THIS EXACT command with run_in_background: true"). Build
+  and gate classes additionally require the `MSBUILDDISABLENODEREUSE=1`
+  env prefix (or `/nr:false`) on the re-call — the router denies again
+  until the guard is present (ADR-0048 §3 / ADR-0051 §3).
+- **Unbounded/heavy/escaping filesystem sweeps**: exec lease custody
+  ONLY (the ghost-process class; a background task's session-end
+  lifetime is uncharacterized) — see "What NOT to do" above.
+- **Interactive class**: denied, NO exec form (interactivity is the
+  denial itself, not a duration class).
+- **git push/fetch/pull**: measured-transfer class, SUSPENDED since
+  2026-09-24 (owner direction) — raw git-network commands currently
+  pass this hook unprobed; the probe machinery is unchanged underneath
+  and reinstatement is owner-only.
+- **`qiven exec/info/status` stay raw**; `git grep`/`git ls-files` stay
+  raw (tracked files only, v4.3).
+- Classification is PER SEGMENT (an exec wrapper in one segment never
+  launders a raw long command in another; post-`&&`/`;`/`|` segments
+  are lstripped before classification, OBL-A7B8C9); quoted spans are
+  ignored (prose false-positives were blocking real authoring — a
+  payload hidden inside quotes is NOT classified).
+- Every denial is prefixed `[qiven-hook]` with its evidence (owner
+  direction: an unattributed denial splits the receiving agent's
+  reasoning). Oversized foreground output is bounded natively by the
+  harness (>~25-30KB auto-persists with a ~2KB preview + path).
 
-`git fetch`/`git pull`/`git push` are NOT blanket classes — see the v3
-section below (measured per invocation; SUSPENDED since 2026-09-24, owner
-direction — raw git-network commands currently pass this hook unprobed
-until the owner reinstates the measured judgment).
-
-## v3 (2026-09-23, owner review): measured git, gate routing, provenance
-
-- **Registry of record**: the canonical class list lives in
-  `qiven-context collaboration/long-command-registry.md` (owner-governed
-  thresholds and evidence); this router implements it.
-- **git push/fetch/pull are MEASURED** (SUSPENDED since 2026-09-24, owner
-  direction: raw `git push/fetch/pull` currently pass unprobed; the probe
-  machinery below is the historical mechanism, reinstatement is
-  owner-only): the hook probes first (push:
-  upstream ahead-count over 25 → deny; then a `push --dry-run` within a
-  5 s budget. fetch/pull: a `fetch --dry-run`; fast AND changeless →
-  allow). `git clone` stays unconditional (nothing local to probe).
-  Every denial carries the measurement.
-- **`qiven gate/run/ci` invoked raw are denied** (superseded by v4 below:
-  since ADR-0051 the denial instructs the `run_in_background` re-call, not
-  exec guidance; minutes-class; they block the session shell); `qiven
-  exec/info/status` stay raw. Classification is PER SEGMENT: an exec wrapper in
-  one segment never launders a raw long command in another. Segments
-  following `&&`/`;`/`|` arrive with leading whitespace and are
-  lstripped before classification — chained exec invocations classify
-  correctly (OBL-20260923T224500Z-A7B8C9, closed 2026-09-23).
-- **Every denial is prefixed `[qiven-hook]`** with its evidence, so the
-  receiving agent can attribute the verdict (no ambiguous denials —
-  owner direction: an unattributed denial splits the agent's
-  reasoning).
-- **Quote-awareness**: segment splitting and class matching ignore
-  quoted spans (commit messages, PR prose). Deliberate trade-off: a
-  payload hidden inside quotes (`bash -c "..."`) is not classified —
-  the operator exec path is the sanctioned wrapper for deliberate
-  long work, and prose false-positives were blocking real authoring.
-- **Operator timers**: every task result appends to
-  `.generated-temp/operator/task-durations.jsonl` and gate receipts
-  carry per-task `duration_seconds` — the evidence base for refining
-  the class split (e.g. re-allowing short `qiven run` tasks) by an
-  owner-recorded registry change, not guesswork.
-
-## v4 (2026-09-24, ADR-0051): background re-call routing
-
-- **Cost law**: every intermediate LLM round-trip re-sends the live
-  session context. Supervising a long command through polls
-  (`exec status`, foreground `sleep && tail`) costs O(polls × context);
-  the harness's `run_in_background` is one call + one completion
-  notification. The deny → re-call loop costs exactly one cheap denied
-  call — the denial itself is the teacher, delivered as an actionable
-  tool-result instruction.
-- **Routing**: build / gate-class / repo-tool / network classes are
-  denied raw with the exact re-call instruction ("re-issue THIS EXACT
-  command with run_in_background: true"). Build and gate classes
-  additionally require the `MSBUILDDISABLENODEREUSE=1` env prefix (or
-  `/nr:false` / `/nodeReuse:false`) on the re-call — the router denies
-  again until the guard is present (ADR-0048 §3 defense in depth
-  extended to the background path).
-- **Sweeps stay exec** (rescoped by v4.3, 2026-09-26: repo-scoped bounded
-  sweeps with explicit in-scope paths deny→background; only the
-  heavy/no-path/escaping subclass keeps the lease — see "What NOT to do"
-  above): a background task's session-end lifetime is
-  uncharacterized (ADR-0051 residual R1); the ghost-process class gets
-  the lease. `git clone` remains network-class; measured
-  push/fetch/pull denials would instruct the background re-call (moot
-  while git-network routing is SUSPENDED, v3 note above).
-- **Oversized foreground output needs no insurance**: the harness
-  natively persists >~25-30KB tool output to a file and returns a
-  ~2KB preview + path (probed 2026-09-24). PostToolUse hooks cannot
-  rewrite tool results, so this native mechanism is the only sound
-  implementation of that safety net; deliberate `> file` redirection
-  remains good practice for known-chatty commands.
-- **The user-level `run_in_background` block is removed** (it
-  contradicted this routing and the exec detour simultaneously); the
-  global AGENTS.md carries the new law. Hooks load at session start
-  only — the flip is effective for sessions started after the change.
+Router/revision history (v3 2026-09-23 measured-git + provenance laws;
+v4 2026-09-24 ADR-0051 background routing + cost law; v4.3 2026-09-26
+sweep subclass split; user-level hook layer removal): the canonical
+record is the registry + ADR-0051 and git history; per-task duration
+evidence accrues to `.generated-temp/operator/task-durations.jsonl`.

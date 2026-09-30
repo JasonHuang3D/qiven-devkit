@@ -51,21 +51,24 @@ Human output can retain the stable state layout while disabling ANSI color:
 tools\qiven.cmd --no-color gate --expect-head <sha>
 ```
 
-CI dispatch is explicitly asynchronous:
+CI dispatch is explicitly asynchronous — `tools\qiven.cmd ci start full`
+validates the local Git context, requires the named `origin` branch to
+point at the exact local HEAD, dispatches the configured workflow through
+`gh`, and returns immediately (no sleeps, no "latest"-run guessing).
 
-```bat
-tools\qiven.cmd ci start full
-```
-
-The command validates the local Git context, requires the named `origin` branch to point at the exact local HEAD, dispatches the configured workflow through `gh`, reports the branch and exact HEAD it submitted, and returns immediately. It does not use hard-coded sleeps, discover a "latest" run, or poll merely to make a remote asynchronous job look synchronous.
-
-Each Operator task runs in a separate child process rooted at the repository, so task-local environment or working-directory changes do not leak into sibling tasks or the interactive CMD prompt. Shared mechanism is managed by Devkit; repository policy lives in `.qiven/operator.json`. The current operator contract (including `ci watch` observation and `exec` bounded custody) is [`docs/operator-contract.md`](docs/operator-contract.md); the Phase-1 design history is preserved at `docs/legacy/design/operator-phase1.md`.
+Usage law — command surface, routing, custody, exit codes, `ci watch`
+observation — has a single home:
+[`docs/conventions/operator-usage.md`](docs/conventions/operator-usage.md).
+Ownership/distribution states:
+[`docs/operator-contract.md`](docs/operator-contract.md) (Phase-1 design
+history: `docs/legacy/design/operator-phase1.md`). Shared mechanism is
+managed by Devkit; repository policy lives in `.qiven/operator.json`.
 
 ## Managed and bootstrap-only files
 
 Managed files are shared conventions. `python tools/sync_repo.py` can update them after an all-or-nothing hash preflight. The list is
 stored in `templates/cpp-library/managed-files.cmake` and includes formatting/editor policy, presets, and local developer tools (engineering standards are Devkit-canonical per ADR-0046 — `docs/engineering/` here — and not part of the managed set),
-plus `AGENTS.md`. Since WR-6 (template 0.1.10, 2026-09-28) the managed set no longer carries the Qiven Operator: generated repositories launch through the workspace bootstrap identity-check and import the LOCKED devkit operator; the grandfathered repository-owned instances (foundation, runtime) are a recorded wr6-report consolidation residual.
+plus `AGENTS.md`. The managed set carries no Qiven Operator (WR-6 retirement — see "Responsibility boundaries" above; grandfathered instances are a recorded wr6-report consolidation residual).
 
 Bootstrap-only files are starting points expected to diverge: `.gitignore`, `README.md`, `CMakeLists.txt`, and
 `.github/workflows/ci.yml`. Synchronization never overwrites them.

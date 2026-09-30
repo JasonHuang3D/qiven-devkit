@@ -53,6 +53,16 @@ jobs:
     # expansion); per-unit gating lives at step level via the plan output
     # keyed by matrix.id (windows|linux|macos match the plan output names).
     steps:
+      # STANDALONE BOOTSTRAP SHAPE (pre-workspace-admission): a freshly
+      # generated repository is not yet a node in the workspace lock, so
+      # this unit configures with the runner's host cmake. On admission
+      # to the workspace the windows unit switches to the WR-5 law shape
+      # (qiven-workspace + qiven-toolchain-win checked out at the locked
+      # nodes; configure via qiven-bootstrap.py gate-configure; build/test
+      # through the toolchain's explicit cmake/ctest paths — runner-PATH
+      # cmake stops building governed code). Reference implementation:
+      # qiven-runtime .github/workflows/ci.yml; law:
+      # qiven-devkit docs/design/workspace-resolution/wr5-report.md.
       - uses: actions/checkout@v6
         if: ${{ needs.plan.outputs[matrix.id] == 'true' }}
       - run: cmake -S . -B build -D@TEST_OPTION_NAME@=ON

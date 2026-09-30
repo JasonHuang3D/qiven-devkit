@@ -67,7 +67,8 @@ installer.
 ## 3. Production procedure (one operator task: `deploy`)
 
 Implemented by the Devkit-owned `tools/deploy_bundle.py`; repositories
-declare task metadata (what to bundle) in `.qiven/operator.json` and a
+declare task metadata (what to bundle) in `.qiven/deploy.json` (schema
+`qiven-deploy-policy-v1`) and a
 thin transport launcher resolves the Devkit checkout through the
 workspace (WR-6 shape: the launcher runs the bootstrap identity-check
 against the workspace lock BEFORE any Devkit import — no

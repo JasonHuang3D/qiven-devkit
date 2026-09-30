@@ -1,5 +1,13 @@
 # Qiven Operator Phase 1
 
+> **[SEALED DESIGN HISTORY — superseded.]** This is the Phase-1 design
+> record (2026-09 era), preserved as history. It is NOT current law:
+> the operator contract today is `docs/operator-contract.md`
+> (ownership/distribution) + `docs/conventions/operator-usage.md`
+> (usage law). Statements below that contradict those files — e.g. the
+> never-call-back model and per-repository copies — are retired
+> (ADR-0046/0052, WR-6/WR-8).
+
 Qiven Operator is the shared local engineering orchestration layer for Qiven repositories. Windows CMD remains a thin entry point; Python owns orchestration, human-facing output, process execution, validation semantics, and asynchronous service integration.
 
 ## Phase 1 goals
