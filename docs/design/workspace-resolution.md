@@ -11,8 +11,11 @@ auto-admission), the E7 cutover is accepted and executed (ADR-0058:
 non-cutover-grade closures), and the workspace resolves the full graph
 AUTHORITATIVELY (shadow_only=False). The former typed BaselineConflict
 on the context devkit pin was RESOLVED by the WR-6 pin deletion. The
-stage-by-stage history (WR-0 census, shadow-mode rollout, per-class
-cutover equality, comparator receipts) lives in the wr-reports below.
+stage-by-stage history: the STANDING record (wr6 consolidation
+residual, wr7/wr8 cutover + gate receipts) lives in the wr-reports
+below; the closed early-stage records (WR-0 census/budgets/baselines,
+WR-2 shadow migration, WR-3 pilot) are museum at
+`docs/legacy/design/workspace-resolution/`.
 The normative program documents are the single source of truth:
 
 - qiven-docs `accepted/2026-09-24/00-qiven-workspace-dependency-resolution-program.md`

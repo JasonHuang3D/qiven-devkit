@@ -19,8 +19,11 @@ If a configuration is missing, add a preset — do not improvise one-off flags.
 
 - Compilers and tools come from `qiven-toolchain-win` via the toolchain
   manifest; the host PATH is not the source of truth for tool versions.
-- Set `QIVEN_TOOLCHAIN_ROOT` only when the toolchain checkout is not a
-  sibling of the repository.
+- Since WR-5 (ADR-0052, 2026-09-28) the root LOCATOR is env/sibling
+  (`QIVEN_TOOLCHAIN_ROOT` when the checkout is not a sibling), but the
+  selected REVISION is the workspace lock's `qiven-toolchain-win` node,
+  identity-checked at use (`tools/toolchain.py` fails closed on
+  mismatch) — never a hand-pinned commit.
 
 ## In-source builds are forbidden
 

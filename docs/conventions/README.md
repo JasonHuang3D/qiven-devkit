@@ -38,11 +38,9 @@ predates them. Known deviations at codification time:
 
 - `qiven-context-draft`: ~~constants use the `k`-prefix~~ — remediated
   2026-09-20 (V-4 rename; no `k`-prefixed constants remain).
-- `qiven-context-draft`: service methods used `PascalCase` (`Work`,
-  `BuildBundle`, ...) while Foundation methods are `snake_case`. Target rule:
-  Foundation style wins. Remediation landed 2026-09-20 as branch
-  `jason-extended-cognition/naming-remediation` (mechanical rename, draft
-  local gate PASS); remove this entry once that branch is merged.
+- `qiven-context-draft`: ~~service methods used `PascalCase`~~ —
+  remediated 2026-09-20 (the naming-remediation rename landed and the
+  merge is verified: draft public methods are `snake_case`; entry
+  struck 2026-10-01).
 
-New code follows the rules immediately; the two renames above are the only
-grandfathered deviations.
+No grandfathered deviations remain.

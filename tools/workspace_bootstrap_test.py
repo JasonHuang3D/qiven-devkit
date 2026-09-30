@@ -163,6 +163,13 @@ def main() -> int:
     for forbidden in ("listdir", "glob(", "iterdir"):
         assert forbidden not in text, f"B7a: bootstrap performs sibling discovery ({forbidden})"
 
+    # B7b: OBL-20260925T051500Z-A9B0C1 item (1) — the gate-configure cmake
+    # subprocess must be timeout-bounded (a hung `cmake --preset` terminates
+    # the gate with the typed ConfigureTimeout exit, never hangs it). Static
+    # contract pin: a behavioral leg would burn the real 900 s budget.
+    assert "timeout=CONFIGURE_TIMEOUT" in text, "B7b: configure subprocess is unbounded"
+    assert "ConfigureTimeout" in text, "B7b: no typed configure-timeout branch"
+
     with tempfile.TemporaryDirectory() as tmp_name:
         root = Path(tmp_name)
         control, devkit, lock = _fixture(root)
