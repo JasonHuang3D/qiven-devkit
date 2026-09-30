@@ -22,10 +22,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+# locator legs assume the machine has no ambient devkit-locator override
+os.environ.pop("QIVEN_DEVKIT_CHECKOUT", None)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -114,8 +118,14 @@ def _run_bootstrap(control: Path, devkit: Path | None, *extra: str) -> subproces
     argv = [sys.executable, str(BOOTSTRAP), "--control", str(control)]
     if devkit is not None:
         argv += ["--devkit", str(devkit)]
+    # bytecode stays OUT of the fixture devkit: the fixture carries no
+    # .gitignore, so a tools/__pycache__/ dir reads as an untracked-dirty
+    # checkout at the B5 strict-clean leg (found live 2026-10-01: B2's
+    # add -A + reset --hard incidentally swallowed B1's pyc, masking the
+    # class until B8 re-ran the resolver after the reset)
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
     return subprocess.run(argv + list(extra), capture_output=True, text=True,
-                          timeout=180, encoding="utf-8", errors="replace")
+                          timeout=180, encoding="utf-8", errors="replace", env=env)
 
 
 def _error_type(result: subprocess.CompletedProcess) -> str:
@@ -191,10 +201,26 @@ def main() -> int:
         )
         _git(["reset", "-q", "--hard", "HEAD~1"], devkit)
 
-        # B3: no Devkit locator at all fails typed.
-        result = _run_bootstrap(control, None)
+        # B3: no Devkit locator at all fails typed. Re-scoped 2026-10-01
+        # (v53 owner-adjudicated locator symmetry): the fixture control's
+        # sibling qiven-devkit now resolves by DEFAULT (see B8), so B3 runs
+        # from a relocated control copy that has NO sibling and no mapping.
+        lonely_root = root / "lonely"
+        lonely_root.mkdir()
+        lonely_control = lonely_root / "control"
+        shutil.copytree(control, lonely_control)
+        result = _run_bootstrap(lonely_control, None)
         assert result.returncode == 1 and _error_type(result) == "RevisionUnavailable", (
             f"B3: {_error_type(result)}"
+        )
+
+        # B8: sibling default locator (v53 locator symmetry, R3-F6): with no
+        # flag/env/local mapping, the control checkout's sibling qiven-devkit
+        # (probed by the resolver file) resolves and identity-checks — the
+        # configure-task path and the WR-6 launcher path resolve identically.
+        result = _run_bootstrap(control, None)
+        assert result.returncode == 0 and json.loads(result.stdout)["released"] is True, (
+            f"B8: {_error_type(result)}"
         )
 
         # B4: duplicate lock keys fail typed at the bootstrap subset stage.
@@ -224,7 +250,7 @@ def main() -> int:
         result = _run_bootstrap(control, None)
         assert result.returncode == 0 and json.loads(result.stdout)["released"] is True, "B6: mapping leg"
 
-    print("[ OK ] workspace-bootstrap contract test (B1-B7)")
+    print("[ OK ] workspace-bootstrap contract test (B1-B8)")
     return 0
 
 
