@@ -9,13 +9,10 @@ needing to have read a conversation or the canonical context repository.
 
 ## Why the rules live here and not in qiven-context
 
-The canonical context repository records decisions and history, but it is read
-only at cold boot of that one repository. The failure mode observed repeatedly
-in 2026-09: conventions recorded in context were not seen by sessions working
-in other repositories. Rules that must hold inside a repository have to be
-discoverable INSIDE that repository — hence: canonical text here, pointer in
-every managed `AGENTS.md` (the one document an LLM is required to read before
-working).
+Rules that must hold inside a repository must be discoverable INSIDE
+that repository (the 2026-09 observed failure: context-recorded rules
+were never seen by sessions working elsewhere). Canonical text here;
+pointer in every managed `AGENTS.md`.
 
 ## Documents
 
@@ -25,22 +22,14 @@ working).
 | [naming-filesystem.md](naming-filesystem.md) | Repository layout, folder purposes, file naming per language, branch naming |
 | [naming-scripts.md](naming-scripts.md) | Batch (.cmd/.bat), shell (.sh), and Python tool scripts: files, flags, exit codes |
 | [naming-cmake.md](naming-cmake.md) | CMake: targets, presets, options, functions, test registration |
-| [cross-repo-cmake.md](cross-repo-cmake.md) | Consuming targets defined outside the consuming repository: the one consumption pattern, external-root registry, pin discipline, and what is deliberately not allowed (2026-09-23; migration stage under ADR-0052 — workspace resolution is the accepted endpoint, see `../design/workspace-resolution.md`) |
+| [cross-repo-cmake.md](cross-repo-cmake.md) | Consuming targets defined outside the consuming repository: the one consumption pattern, external-root registry, pin discipline, and what is deliberately not allowed (status banner in-file; landing shape: `../design/workspace-resolution.md`) |
 | [cmake-usage.md](cmake-usage.md) | CMake usage law: presets as the only entry, toolchain pinning, forbidden invocations |
-| [build-performance.md](build-performance.md) | Build-performance policy: measurement duty, PCH//MP levers, linker notes, banned list, revisit triggers |
-| [operator-usage.md](operator-usage.md) | Qiven Operator canonical usage: gate/run/ci/exec, exit codes, hang-contract execution path |
+| [build-performance.md](build-performance.md) | Build-performance policy: measurement duty, PCH and /MP levers, linker notes, banned list, revisit triggers || [operator-usage.md](operator-usage.md) | Qiven Operator canonical usage: gate/run/ci/exec, exit codes, hang-contract execution path |
 | [agent-entry.md](agent-entry.md) | AGENTS.md policy: pointer-only entry files, hard size limit, authority stays canonical |
 
 ## Known deviations (tracked, not hidden)
 
-The rules were codified 2026-09-20 after the fact; some existing code
-predates them. Known deviations at codification time:
-
-- `qiven-context-draft`: ~~constants use the `k`-prefix~~ — remediated
-  2026-09-20 (V-4 rename; no `k`-prefixed constants remain).
-- `qiven-context-draft`: ~~service methods used `PascalCase`~~ —
-  remediated 2026-09-20 (the naming-remediation rename landed and the
-  merge is verified: draft public methods are `snake_case`; entry
-  struck 2026-10-01).
-
-No grandfathered deviations remain.
+Rules codified 2026-09-20. Both codification-time deviations (draft
+`k`-prefix constants; draft `PascalCase` service methods) were
+remediated 2026-09-20; the last entry was struck 2026-10-01
+(owner-recorded). No grandfathered deviations remain.

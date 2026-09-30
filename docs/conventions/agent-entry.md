@@ -10,15 +10,13 @@ Every managed repository carries exactly one root `AGENTS.md`, and it is a
   its whole job.
 - Roles, typed handoffs, execution authority and workflow are canonical in
   `JasonHuang3D/qiven-context` (collaboration contracts, loaded at cold
-  boot; ADR-0035 role bindings, ADR-0036 typed handoffs). Duplicating them
-  per-repo produced six near-identical ~8.5 KB contract copies that every
-  repo entry paid for again in tokens, without any repo being able to change
-  them correctly alone (2026-09-21 decision).
+  boot; ADR-0035 role bindings, ADR-0036 typed handoffs). Per-repo
+  duplication was retired 2026-09-21 (six near-identical ~8.5 KB copies:
+  every repo entry paid again, none changeable alone).
 - Engineering law lives in this conventions tree and in the Devkit's
   `docs/engineering/` (single canonical copy, ADR-0046 2026-09-22 —
-  repositories carry only the AGENTS.md pointer; the former per-repo
-  copies are retired); architecture lives in each repository's
-  `docs/architecture/`.
+  repositories carry only the AGENTS.md pointer); architecture lives in
+  each repository's `docs/architecture/`.
 
 ## Required shape (managed template)
 

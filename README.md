@@ -2,15 +2,25 @@
 
 Qiven Devkit defines how a Qiven repository is created, safely adopted, and kept aligned with shared engineering conventions.
 
+## First-class consumer (owner direction 2026-09-30, C-059)
+
+The consumer of every devkit/workspace CLI surface is the **local
+agent** (ZCode + GLM), not a human — the owner's own direct-usage
+probability is 0. The primary UX metric of every surface is **model
+consumability**: correct-form recall, selection without a denial round
+trip, machine-readable output. Human-facing terminal rendering is a
+secondary view of the same result. Docs and tool surfaces are written
+for this consumer.
+
 ## Responsibility boundaries
 
 - **qiven-toolchain-win** owns pinned executable build tools such as CMake and clang-format.
 - **qiven-devkit** owns repository templates, shared engineering conventions, explicit bootstrap/synchronization tooling, and the shared Qiven Operator runtime.
-- **qiven-workspace** owns ecosystem version composition: the control repository (`JasonHuang3D/qiven-workspace`) is live, its generation-bound lock selects revisions, and the workspace resolver is the accepted dependency endpoint (ADR-0052; WR-0..WR-8 DELIVERED end to end 2026-09-28: every workspace repository declares its dependencies through a repository-owned manifest and the graph resolves authoritatively).
+- **qiven-workspace** owns ecosystem version composition: the control repository (`JasonHuang3D/qiven-workspace`) is live, its generation-bound lock selects revisions, and the workspace resolver is the accepted dependency endpoint (ADR-0052; WR-0..WR-8 delivered end-to-end 2026-09-28).
 - Runtime repositories such as **qiven-foundation** own their APIs, implementation, tests, domain architecture, and repository-specific Operator policy.
 
 Devkit materializes an ordinary snapshot into each generated repository. Generated repositories carry their own scripts and engineering
-protocol, and invoke the shared Qiven Operator through the workspace: their launcher runs the bootstrap identity-check against the workspace lock and then imports the Devkit operator from the LOCKED devkit node (WR-6; the former vendored operator copies and the never-call-back model are retired). They remain independently usable after generation.
+protocol, and invoke the shared Qiven Operator through the workspace: their launcher runs the bootstrap identity-check against the workspace lock and then imports the Devkit operator from the LOCKED devkit node (WR-6). They remain independently usable after generation.
 
 ## Authority resolution
 
@@ -27,34 +37,17 @@ When instructions conflict, resolve by source class, not by file order:
 
 Qiven Operator is the Python orchestration layer behind human-facing engineering commands. Windows CMD is intentionally a thin entry point; Python owns process execution, layout/color, buffered logs, heartbeat output, parallel task groups, fail-fast gates, exact Git validation, and asynchronous CI dispatch semantics.
 
-A generated repository can run its default local gate with:
+The default local gate (works in this repository and in any generated one):
 
 ```bat
-tools\qiven.cmd gate
+tools\qiven.cmd gate --expect-head <full 40-char sha>
 ```
 
-An exact candidate gate can require the expected HEAD:
-
-```bat
-tools\qiven.cmd gate --expect-head <sha>
-```
-
-Machine consumers can request JSON by placing the global flag before the command:
-
-```bat
-tools\qiven.cmd --json gate --expect-head <sha>
-```
-
-Human output can retain the stable state layout while disabling ANSI color:
-
-```bat
-tools\qiven.cmd --no-color gate --expect-head <sha>
-```
-
-CI dispatch is explicitly asynchronous — `tools\qiven.cmd ci start full`
-validates the local Git context, requires the named `origin` branch to
-point at the exact local HEAD, dispatches the configured workflow through
-`gh`, and returns immediately (no sleeps, no "latest"-run guessing).
+Global flags go before the command: `--json` (machine-readable),
+`--no-color` (stable layout, no ANSI). CI dispatch is asynchronous —
+`tools\qiven.cmd ci start full` validates the local Git context,
+requires the named `origin` branch at the exact local HEAD, dispatches
+through `gh`, returns immediately.
 
 Usage law — command surface, routing, custody, exit codes, `ci watch`
 observation — has a single home:
@@ -75,9 +68,7 @@ Bootstrap-only files are starting points expected to diverge: `.gitignore`, `REA
 
 ## Generate a C++ library repository
 
-*(Entrypoints renamed 2026-09-19, commit `440f8bc`: the former
-`new-cpp-library.cmd`/`adopt-cpp-library.cmd`/`sync-repo.cmd`/`test.cmd`
-wrappers are gone; the Python tools below are the live surface.)*
+*(The former `new-cpp-library.cmd`/`adopt-cpp-library.cmd`/`sync-repo.cmd`/`test.cmd` wrappers are retired; the Python tools below are the live surface.)*
 
 On Windows:
 
@@ -122,9 +113,9 @@ python tools\adopt_cpp_library.py apply ^
 
 The target must be the clean root of an existing Git repository with a HEAD commit and no `.qiven` ownership state. `check`
 is read-only with respect to the target. Both modes classify every managed path as `EXACT`, `MISSING`, or `CONFLICT`; any
-conflict prevents application and leaves the repository untouched. A successful apply preserves exact files, creates only
-missing managed files, and then writes `.qiven/repo.json` and `.qiven/generated-state.cmake`. Adoption never overwrites a
-divergent managed file and never changes bootstrap-only or unrelated domain files. Once adopted, use `sync-repo` for updates.
+conflict prevents application. A successful apply preserves exact files, creates only
+missing managed files, writes `.qiven/repo.json` and `.qiven/generated-state.cmake`, and never overwrites a
+divergent managed file or any bootstrap-only/domain file (mechanism: `cmake/QivenRepoAdopt.cmake`). Once adopted, use `sync_repo.py` for updates.
 
 ## Synchronize managed files
 
@@ -144,4 +135,8 @@ updates leave normal reviewable Git diffs. Schema changes require an explicit mi
 python tools\operator-test.py
 ```
 
-Tests use disposable fixture directories only. The suite includes Operator generation, JSON/human output separation, heartbeat/no-color behavior, task environment and working-directory isolation, fail-fast sequencing, parallel execution, exact-HEAD validation, real clean-tree gates, and asynchronous CI exact-remote-head dispatch preconditions.
+Tests use disposable fixture directories only (scope: the suite header
+in `tools/operator-test.py` lists groups G1-G3 and the custody case
+map; `docs/design/exec-custody.md` §5 is the index). The Devkit's own
+publication gate is `tools\qiven.cmd gate --expect-head <full sha>` —
+same operator, this repository's `.qiven/operator.json`.

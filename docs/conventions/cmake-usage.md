@@ -61,6 +61,6 @@ violation, not merely unpolished (owner directive 2026-09-21).
 
 - A repository's Operator gate (`.qiven/operator.json`) is the only blessed
   validation sequence; ad-hoc CMake invocations do not replace it.
-- Batch-final validation is FULL (configure + build Debug + Release + tests +
-  format + diff-check + clean-tree) unless the task specification explicitly
-  defines a focused scope.
+- Batch-final validation is FULL unless the task specification
+  explicitly defines a focused scope (composition + FOCUSED/FULL
+  definitions: testing-standard §6).

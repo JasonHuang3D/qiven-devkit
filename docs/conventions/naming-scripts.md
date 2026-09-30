@@ -11,8 +11,8 @@ Applies to tool scripts in every `qiven-*` repository (`tools/`, `scripts/`).
   the contract).
 - Flags: `--check` / `--fix` pairs for verify-vs-mutate tools; no positional
   flag soup; `argparse` for anything with more than one flag.
-- Output: staged, machine-greppable markers when the tool is a gate
-  (`[ RUN]` / `[ OK ]` / `[FAIL]`), observable state only.
+- Output: staged, machine-greppable state markers when the tool is a
+  gate (marker vocabulary: python-standard §6), observable state only.
 - Bytecode is never committed (`__pycache__/`, `*.pyc` are gitignored).
 
 ## Batch (`.cmd` / `.bat`)
@@ -47,8 +47,6 @@ environment failures terminate fast with the reason on stderr).
 ## Where scripts live
 
 - Repository tools live in that repository's `tools/`.
-- Scripts shared across repositories belong to the Devkit operator layer;
-  since WR-6 (2026-09-28) repositories reach that layer through the
-  workspace bootstrap identity-check importing the LOCKED devkit node —
-  never copied ad hoc (the former managed-snapshot rollout survives only
-  in the grandfathered instances recorded in the wr6-report residual).
+- Scripts shared across repositories belong to the Devkit operator
+  layer, reached through the workspace bootstrap launcher (distribution
+  states: `docs/operator-contract.md`).

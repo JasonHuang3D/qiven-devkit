@@ -3,7 +3,7 @@
 The Qiven Operator is the repository-local engineering CLI every managed
 repository carries. This document is its single usage reference; sessions
 and repositories point here instead of restating it. The pointer chain:
-each repository's `AGENTS.md` → `docs/conventions/README.md` (this index)
+each repository's `AGENTS.md` → `docs/conventions/README.md` (index)
 → here, and `collaboration/operating-contract.md` rule 5 names this file
 for the hang-contract execution path.
 
@@ -53,9 +53,10 @@ probe for a fresh session.
 `qiven gate [NAME]`, default gate from `.qiven/operator.json`. A gate is a
 fail-fast task sequence (strings serial, lists parallel); it stops at the
 first failing stage and preserves the failing exit code. `--expect-head
-SHA` pins validation to an exact commit. A PASS writes a merge-proof
-receipt for that exact head (required before any merge-class publication,
-pit P-53).
+SHA` pins validation to an exact commit (FULL 40-char sha — string
+compare, not name resolution). A PASS writes a merge-proof receipt for
+that exact head to `.generated-temp/operator/receipts/<gate>-<head>.json`
+(required before any merge-class publication, pit P-53).
 
 ## run — declared tasks
 
@@ -90,17 +91,14 @@ Exit codes: 0 run concluded success; 1 failure/cancelled/poll-timeout;
 the budget). `--receipt` prints one JSON receipt line (run id, url,
 conclusion, head, durations); `--json` mode prints only the receipt.
 
-Routing (no special case needed): `qiven ci ...` — including `watch` —
-is gate-class at the hook router: raw foreground calls are denied with
-the standard background re-call + `MSBUILDDISABLENODEREUSE` guard
-teaching (the guard is class-mandated but inert for watch, which never
-builds), and the guarded background re-call passes. Backgrounding IS
-the designed shape: the watch polls internally, produces no output
-until terminal, and is inherently terminating by its own budget. It
-does NOT route through `qiven exec` — exec is for local custody classes
-(ADR-0051); a watch observes a REMOTE run, and losing a watcher at
-session end is harmless (the run lives on GitHub; re-watch or `gh run
-view` recovers).
+Routing: `qiven ci ...` — including `watch` — is gate-class at the
+hook router: raw foreground calls are denied with the standard
+background re-call + `MSBUILDDISABLENODEREUSE` guard (class-mandated
+but inert for watch, which never builds); the guarded background
+re-call passes — backgrounding IS the designed shape. It does NOT
+route through `qiven exec` (ADR-0051: exec is local custody classes; a
+watch observes a REMOTE run — losing a watcher at session end is
+harmless, the run lives on GitHub).
 
 ## exec — supervised detached execution under bounded custody (the custody path)
 
@@ -126,26 +124,19 @@ qiven exec sweep                                terminate expired runs, finalize
 
 Semantics that matter to a caller:
 
-- **Bounded process custody (v2, ADR-0048; invariants live in ONE place:
-  `docs/design/exec-custody.md` §2/§4 — watchdog custodian +
+- **Bounded process custody (v2, ADR-0048; invariants live in ONE
+  place: `docs/design/exec-custody.md` §2/§4 — watchdog custodian +
   `KILL_ON_JOB_CLOSE` Job-Object tree lifetime, lease clamped
-  [10, 86400], completion reap with output grace, `CREATE_NO_WINDOW`
-  children, batch `cmd.exe /d /c call` boundary; the 2026-09-23
-  orphaned-process incident is the governing precedent; regression
-  cases C1-C3, C5-C10 ride the operator-tests gate task — see
-  exec-custody §5 for the id map).**
+  [10, 86400], completion reap, `CREATE_NO_WINDOW` children — never
+  `DETACHED_PROCESS` — and the batch `cmd.exe /d /c call` boundary;
+  governing precedent: the 2026-09-23 orphaned-process incident).**
+  Regression case map: C1-C3, C5-C10 literal ids in the operator-tests
+  suite; C4/C11-C16 fold into the G2 semantics checks (exec-custody
+  §5).
 - The child runs detached with stdout/stderr to a durable log under
   `.generated-temp/operator/exec/<id>.log`; the run record (`<id>.json`)
   carries the custody identity: `pid`, `watchdog_pid`, `job_name`,
   `deadline_utc`, live `heartbeat_utc`, `max_lifetime_seconds`.
-- **Window discipline (2026-09-23 fix, unchanged)**: children are spawned
-  with `CREATE_NO_WINDOW` — a HIDDEN console — never `DETACHED_PROCESS`
-  (popup windows / empty logs / `0xC0000142`). `.cmd`/`.bat` targets run
-  through an explicit `cmd.exe /d /c call <abs path>`, and a path-like
-  argv[0] is resolved against the repository ROOT before spawning. The
-  operator-tests gate task carries the regression suite (capture, batch
-  chains, grandchild consoles, custody cases C1-C3, C5-C10; C4/C11-C16
-  fold into the G2 semantics checks — exec-custody §5).
 - While supervising, exec heartbeats every ~5s (`running for Ns, log X
   bytes`). Heartbeat is the liveness discriminator — with beats, extending
   the budget deliberately is correct; silence means investigate the log,
@@ -236,8 +227,6 @@ do not restate members here):
   reasoning). Oversized foreground output is bounded natively by the
   harness (>~25-30KB auto-persists with a ~2KB preview + path).
 
-Router/revision history (v3 2026-09-23 measured-git + provenance laws;
-v4 2026-09-24 ADR-0051 background routing + cost law; v4.3 2026-09-26
-sweep subclass split; user-level hook layer removal): the canonical
-record is the registry + ADR-0051 and git history; per-task duration
-evidence accrues to `.generated-temp/operator/task-durations.jsonl`.
+Router/revision history: the canonical record is the registry +
+ADR-0051 and git history; per-task duration evidence accrues to
+`.generated-temp/operator/task-durations.jsonl`.

@@ -4,9 +4,8 @@ Status: DRAFT landed at CA-0 (ADR-0050 roadmap delivery map 6.2: "task/risk
 taxonomy and acceptance workflow drafts"). CA-1 delivered 2026-09-28 (the
 deterministic activation core; schemas live at
 `docs/schemas/cognition-*.schema.json`). Enforcement arrives with CA-2
-(`qiven cognition prepare/show/explain/verify-receipt`; frozen pending
-CA-2); until then this is
-the vocabulary and workflow authors design against.
+(see "Devkit-side artifacts" below; frozen pending CA-2); until then
+this is the vocabulary and workflow authors design against.
 
 ## Task taxonomy (frozen vocabulary; schema: docs/schemas/engineering-task-v1.schema.json)
 

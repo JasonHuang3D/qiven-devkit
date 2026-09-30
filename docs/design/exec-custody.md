@@ -211,8 +211,10 @@ G2 exit-code/semantics prose checks, so grep miss ≠ untested):
 
 ## 6. Dependencies and rollout
 
-Standard library only (ctypes on Windows). The operator runtime stays a
-single-file managed snapshot; ~~`templates/.../qiven_operator.py.in` stays
+Standard library only (ctypes on Windows). The operator runtime stays
+a single file (python-standard §3.5; distribution is workspace-resolved
+per WR-6 — see `docs/operator-contract.md`); ~~`templates/.../
+qiven_operator.py.in` stays
 byte-identical to `tools/qiven_operator.py`~~ [template clause superseded
 2026-09-28, WR-6/v44: the operator template is RETIRED from the managed
 set (template 0.1.10) — generated repositories import the LOCKED devkit
@@ -236,23 +238,16 @@ touching batch (recorded obligation — executed through WR-6).
   revisit if a runaway-CPU class appears that the ACTIVE_PROCESS cap
   does not cover.
 
-## 8. Review record
+## 8. Review record (self-review, pre-implementation 2026-09-23, distilled)
 
-Self-review (pre-implementation, 2026-09-23):
-
-1. Watchdog-in-job vs watchdog-outside: in-job chosen — it converts
-   "watchdog dies" from a leak into an immediate kernel tree-kill, at
-   the cost that an outer-job kill takes the run with it. That cost is
-   exactly the post-session behavior the incident demands (bounded to
-   zero when the IDE reclaims its tree).
-2. TerminateJobObject self-kill of the watchdog requires the final
-   record to be durable BEFORE termination — the design writes the
-   terminal record first everywhere (deadline path, completion path).
-3. The 1.5 s grace before reaping trades a bounded late-flush window
-   against killing a writer mid-line; stderr/stdout share one handle so
-   no offset interleaving hazard exists.
-4. `--max-lifetime` defaults to 1 h, not infinity: the incident's
-   "still burning after the session" becomes impossible by construction;
-   callers wanting longer pass an explicit value and own it.
+1. Watchdog IN the job: converts "watchdog dies" into an immediate
+   kernel tree-kill; an outer-job kill takes the run with it — exactly
+   the bounded post-session behavior the incident demands.
+2. The terminal record is durable BEFORE TerminateJobObject everywhere
+   (deadline path, completion path).
+3. 1.5 s reap grace: bounded late-flush window vs killing a writer
+   mid-line; one shared stderr/stdout handle, no offset interleaving.
+4. `--max-lifetime` defaults to 1 h, never infinity: "still burning
+   after the session" is impossible by construction.
 5. Exit-code mirroring via TerminateJobObject keeps `exec start`
-   observability identical to v1 for the common in-budget case.
+   observability identical to v1 for the in-budget case.

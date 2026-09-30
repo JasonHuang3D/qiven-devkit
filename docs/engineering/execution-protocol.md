@@ -50,9 +50,8 @@ document repeats none of them and overrides none of them.
   in some authoring paths (form-feed defect, caught 2026-09-22), and
   byte-level fixes construct the escape bytes programmatically rather
   than as raw sequences inside shell-authored source.
-- `git add -N` is prohibited: an intent-to-add entry holds an empty
-  blob, and a later `git checkout -- .` restores that empty blob over
-  real content — silent data loss.
+- `git add -N` is prohibited (empty-blob scar, law + mechanism:
+  testing-standard §8).
 - An absolute-path file write must be re-verified in the TARGET
   repository before claiming a landing (the 2026-09-21 stray-tree
   defect: a write resolved into a different repository's tree).
