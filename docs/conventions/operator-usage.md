@@ -9,8 +9,8 @@ for the hang-contract execution path.
 
 ## Entry and discovery
 
-One entry per platform: `tools\qiven.cmd` (Windows), `tools/qiven.py`
-(everywhere), `tools/qiven.sh` (POSIX shells). ALWAYS start a session's
+Two entries: `tools\qiven.cmd` (Windows) and `tools/qiven.py` (everywhere,
+including POSIX shells). ALWAYS start a session's
 first use with `--help`, then the subcommand's own `--help` — the
 installed snapshot is the truth, this document is the map.
 
@@ -144,7 +144,10 @@ Semantics that matter to a caller:
   operator ceiling; 2 operator error; 1 when the run's lease expired
   (`expired` — the business exit code is unknown and never guessed). An
   exit no living supervisor observed is reported `indeterminate` — the
-  code is genuinely unknown.
+  code is genuinely unknown, and `indeterminate` ALSO returns 124 (it
+  shares the still-running code): on a 124, key on the payload's
+  `status` field (`still-running` vs `indeterminate`), never the exit
+  code alone.
 - **Sweep insurance**: every operator invocation piggybacks a sweep that
   terminates runs past their lease and finalizes stale records; `qiven
   exec sweep` runs it explicitly. Dead runs can be listed for postmortem
@@ -211,21 +214,27 @@ logic — additions need a case in the test table):
   interactive/patch modes, `cmake --open`.
 
 `git fetch`/`git pull`/`git push` are NOT blanket classes — see the v3
-section below (measured per invocation).
+section below (measured per invocation; SUSPENDED since 2026-09-24, owner
+direction — raw git-network commands currently pass this hook unprobed
+until the owner reinstates the measured judgment).
 
 ## v3 (2026-09-23, owner review): measured git, gate routing, provenance
 
 - **Registry of record**: the canonical class list lives in
   `qiven-context collaboration/long-command-registry.md` (owner-governed
   thresholds and evidence); this router implements it.
-- **git push/fetch/pull are MEASURED**: the hook probes first (push:
+- **git push/fetch/pull are MEASURED** (SUSPENDED since 2026-09-24, owner
+  direction: raw `git push/fetch/pull` currently pass unprobed; the probe
+  machinery below is the historical mechanism, reinstatement is
+  owner-only): the hook probes first (push:
   upstream ahead-count over 25 → deny; then a `push --dry-run` within a
   5 s budget. fetch/pull: a `fetch --dry-run`; fast AND changeless →
   allow). `git clone` stays unconditional (nothing local to probe).
   Every denial carries the measurement.
-- **`qiven gate/run/ci` invoked raw are denied** with exec guidance
-  (minutes-class; they block the session shell); `qiven exec/info/
-  status` stay raw. Classification is PER SEGMENT: an exec wrapper in
+- **`qiven gate/run/ci` invoked raw are denied** (superseded by v4 below:
+  since ADR-0051 the denial instructs the `run_in_background` re-call, not
+  exec guidance; minutes-class; they block the session shell); `qiven
+  exec/info/status` stay raw. Classification is PER SEGMENT: an exec wrapper in
   one segment never launders a raw long command in another. Segments
   following `&&`/`;`/`|` arrive with leading whitespace and are
   lstripped before classification — chained exec invocations classify
@@ -261,10 +270,14 @@ section below (measured per invocation).
   `/nr:false` / `/nodeReuse:false`) on the re-call — the router denies
   again until the guard is present (ADR-0048 §3 defense in depth
   extended to the background path).
-- **Sweeps stay exec**: a background task's session-end lifetime is
+- **Sweeps stay exec** (rescoped by v4.3, 2026-09-26: repo-scoped bounded
+  sweeps with explicit in-scope paths deny→background; only the
+  heavy/no-path/escaping subclass keeps the lease — see "What NOT to do"
+  above): a background task's session-end lifetime is
   uncharacterized (ADR-0051 residual R1); the ghost-process class gets
   the lease. `git clone` remains network-class; measured
-  push/fetch/pull denials now also instruct the background re-call.
+  push/fetch/pull denials would instruct the background re-call (moot
+  while git-network routing is SUSPENDED, v3 note above).
 - **Oversized foreground output needs no insurance**: the harness
   natively persists >~25-30KB tool output to a file and returns a
   ~2KB preview + path (probed 2026-09-24). PostToolUse hooks cannot

@@ -59,10 +59,10 @@ Verdicts:
   repo-tool     repository gate/tool entrypoints - background re-call
   network       network acquisition - background re-call
   interactive   suspends the shell awaiting a human
-  git-network   git push/fetch/pull - probed below; allow only when the
-                measured transfer is small (owner direction 2026-09-23:
-                pre-judge the network payload; deny oversized to a
-                backgrounded re-call)
+  git-network   git push/fetch/pull - measured transfer gate (see below) -
+                CURRENTLY SUSPENDED (owner direction 2026-09-24): raw
+                git push/fetch/pull pass this hook unprobed;
+                reinstatement is owner-only, never a session decision
 
 The hook is a backstop, never the contract: fail-open on unparseable
 input. Text matching cannot catch indirection; the contract carries the
@@ -85,9 +85,12 @@ PUSH_COMMIT_THRESHOLD = 25
 # Owner direction 2026-09-24: git-network routing is TEMPORARILY SUSPENDED.
 # Raw `git push/fetch/pull` pass this hook unprobed while the exec child's
 # credential path fails headless (GCM dialog auto-cancel + the obsolete
-# 'manager-core' helper name in global gitconfig). The probe logic and its
-# tests are unchanged underneath; flip this flag back to True to reinstate
-# the measured judgment.
+# 'manager-core' helper name in global gitconfig). The credential config was
+# same-day repaired (github.com scoped to the gh credential helper), but the
+# suspension STAYS until the owner explicitly reinstates the measured
+# judgment (long-command-registry SUSPENDED note): flipping this flag back
+# to True is an owner decision, never a session's. The probe logic and its
+# tests are unchanged underneath.
 GIT_NETWORK_ROUTING_ENABLED = False
 
 # ADR-0051 clause 3: build/gate classes re-called with run_in_background
@@ -270,8 +273,9 @@ _DENY_SWEEP_TEMPLATE = (
 _DENY_INTERACTIVE = (
     f"{_HOOK_TAG} interactive command invoked raw: it suspends the shell awaiting a human\n"
     "and hangs the tool call (2026-09-19 modal incident class). Use the non-interactive\n"
-    "form (e.g. apply_patch.py / git add <paths>), or route a bounded non-interactive\n"
-    "equivalent through qiven exec."
+    "form instead (git add <paths> / git commit -m <msg>; native Write/Edit tools for file\n"
+    "authoring). This class has NO exec form (long-command-registry: interactivity is the\n"
+    "denial itself, not a duration class) - do not wrap it or an 'equivalent' in qiven exec."
 )
 _DENY_HEREDOC = (
     f"{_HOOK_TAG} heredoc authoring DENIED (contract: collaboration/operating-contract.md\n"

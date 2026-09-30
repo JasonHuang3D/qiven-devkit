@@ -84,8 +84,10 @@ Steps (the script enforces the order and fails closed at each):
    compute SHA-256 for every file; write `manifest.json`; bundle the
    docs (`README.md` is mandatory — a bundle without usage
    documentation fails the deploy, not a warning); collect licenses
-   from the singleton packages (resolved via `QIVEN_THIRD_PARTY_ROOT` /
-   sibling layout, standard v2) + the repo license.
+   from the singleton packages (resolved from the workspace-LOCKED
+   singleton node with identity check; the `QIVEN_THIRD_PARTY_ROOT` env
+   override and sibling layout remain explicit fallbacks, standard v2)
+   + the repo license.
 4. **Validate in place**: from inside the bundle directory, run the
    product's declared smoke command(s) (per-repo policy metadata:
    executables with their expected exit contracts). The smoke run's

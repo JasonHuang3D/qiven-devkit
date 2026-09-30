@@ -99,10 +99,13 @@ mandatory for any code that spawns processes on Windows:
 4. Shared mutable module state is a defect unless the module documents
    the ownership (the kernel32 prototype cache is the pattern: lazily
    initialized, append-only, no re-entrancy).
-5. The Operator runtime stays a SINGLE FILE (a managed snapshot rolled
-   into every repository). Multi-file refactors of it are forbidden
-   without an owner decision: the distribution constraint is
-   load-bearing. Internal structure compensates: section banners,
+5. The Operator runtime stays a SINGLE FILE. Multi-file refactors of it
+   are forbidden without an owner decision: the distribution constraint
+   is load-bearing. (WR-6, 2026-09-28: the workspace-locked devkit node
+   is the canonical source every launcher imports after the bootstrap
+   identity-check; managed-snapshot copies survive only in the
+   grandfathered repositories recorded in the wr6-report residual.)
+   Internal structure compensates: section banners,
    one-concern-per-block, no dead code, no leftover scaffolding.
 6. Dead code, unused constants, commented-out experiments, and
    "temporarily" disabled checks are removed before commit — the diff

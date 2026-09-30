@@ -4,7 +4,7 @@ Single canonical rule set for producing owner-H1 acceptance artifacts
 anywhere in the Qiven workspace (Devkit-canonical per ADR-0046; born
 2026-09-23 from the MVP-4 deny-118 incident — owner direction: an H1
 kit as a prose document the owner must interpret was declared a defect
-class). Companion ADR: qiven-context ADR-0049 (proposed).
+class). Companion ADR: qiven-context ADR-0049 (accepted).
 
 ## 1. What an H1 kit IS
 
