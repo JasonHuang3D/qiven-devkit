@@ -66,6 +66,12 @@
         "tools/hook_exec_router_test.py"
       ]
     },
+    "common-record-tests": {
+      "argv": [
+        "{python}",
+        "tools/common_record_test.py"
+      ]
+    },
     "workspace-schemas-tests": {
       "argv": [
         "{python}",
@@ -116,6 +122,7 @@
       "adoption-missing-sync",
       "operator-tests",
       "router-tests",
+      "common-record-tests",
       "workspace-schemas-tests",
       "workspace-resolver-tests",
       "workspace-bootstrap-tests",

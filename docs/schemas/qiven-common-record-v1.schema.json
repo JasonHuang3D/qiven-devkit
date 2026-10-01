@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "qiven-common-record-v1.schema.json",
+  "title": "qiven-common-record-v1",
+  "description": "Common Record v1: the minimal versioned producer envelope frozen by the P0 implementation staging batch C (ADR-0060 D3; 2026-10-02). A model view projects this record over the ten D3 dimensions (identity, observation, admission, completion, domain outcome, coverage, findings, next action, evidence, retry state). The envelope is ADDITIVE: 'payload' references the producer's EXISTING native receipt/result whose own schema stays authoritative - this record is never a second resolver or gate engine. No producer emits it at the freeze revision (producers begin at the B+D semantics + projection batch). Enum tokens are the exact ASCII-safe control vocabulary below; localized content is allowed inside free string values. EXPLICITLY UNAVAILABLE: where a dimension requires a field but the value is absent, the exact string 'unavailable' is a valid value (structured fields accept it as the alternative arm of their oneOf). EVOLUTION POLICY (ADR-0060 D7): v1 evolves additively only - a new OPTIONAL field or a new enum value requires a dated note in this description; removing, renaming or re-typing a field, or narrowing an enum, is a breaking change requiring envelope version 2 plus an explicit versioned adapter. Readers tolerate unknown fields (they record them under an unknown_fields note and never silently drop them) and reject a wrong schema_version with a typed error naming the observed and supported versions. D7 compatibility law, quoted and normative: 'Bootstrap/launcher receipts and public Operator/Workspace schemas retain their parseable contracts or migrate through an explicit versioned adapter; P0 does not silently replace JSON receipts with prose' and 'ADR-0051 router denial/law carriers stay byte-stable until an explicit public-carrier amendment'. Change log (dated notes for additive evolution): 2026-10-02 - v1 frozen (batch C); no additions yet.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "record_kind",
+    "producer",
+    "operation",
+    "observation",
+    "admission",
+    "completion",
+    "domain_outcome",
+    "coverage",
+    "findings",
+    "next_action",
+    "evidence",
+    "retry_state",
+    "payload"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "description": "The envelope version; v1 is the literal integer 1.",
+      "const": 1
+    },
+    "record_kind": {
+      "description": "Producer-declared kind of this record, e.g. gate-run, validation, task, bootstrap-preflight.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "producer": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": {
+          "description": "Stable producer identifier (the p0-producer-inventory id family).",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "version": {
+          "description": "The producer's own contract/version string.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "operation": {
+      "description": "Identity dimensions. Each field is optional-but-typed; 'unavailable' is valid where the contract requires the dimension but the value is absent ('when available' fields may simply be omitted).",
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "description": "Operation/run ID (collision-resistant per D6).",
+          "type": "string",
+          "minLength": 1
+        },
+        "repository": { "type": "string", "minLength": 1 },
+        "cwd": { "type": "string", "minLength": 1 },
+        "invocation": { "type": "string", "minLength": 1 },
+        "task": { "type": "string", "minLength": 1 },
+        "gate": { "type": "string", "minLength": 1 },
+        "selected_revision": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            { "const": "unavailable" }
+          ]
+        },
+        "executing_revision": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            { "const": "unavailable" }
+          ]
+        },
+        "workspace_generation": {
+          "oneOf": [
+            { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            { "const": "unavailable" }
+          ]
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "required": ["coherence"],
+      "properties": {
+        "coherence": {
+          "description": "Was the underlying observation coherent, uncertain or unavailable.",
+          "enum": ["coherent", "uncertain", "unavailable"]
+        },
+        "transport_classification": {
+          "description": "The original harness/MCP transport classification, preserved verbatim.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "admission": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": {
+          "description": "Known policy/invocation rejection is distinct from uncertainty.",
+          "enum": ["accepted", "rejected", "not_evaluated"]
+        },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": {
+          "enum": ["not_started", "running", "completed", "cancelled", "deadline_reached", "unknown"]
+        }
+      }
+    },
+    "domain_outcome": {
+      "type": "object",
+      "required": ["outcome", "exit_code"],
+      "properties": {
+        "outcome": {
+          "enum": ["passed", "findings", "failed", "not_applicable", "unknown"]
+        },
+        "exit_code": {
+          "description": "The process exit code, or the exact string 'unavailable' when explicitly absent.",
+          "oneOf": [
+            { "type": "integer" },
+            { "const": "unavailable" }
+          ]
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["collection"],
+      "properties": {
+        "executed": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "blocked": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "reason"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "not_executed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "reason"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "collection": {
+          "description": "complete/partial/unknown - never an invented complete count.",
+          "enum": ["complete", "partial", "unknown"]
+        }
+      }
+    },
+    "findings": {
+      "description": "Deterministic order by (rule_id, location). Each finding carries the five required elements: stable rule ID; exact path + JSON/YAML pointer or available line; actual condition/value; expected constraint; public contract revision.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule_id", "location", "actual", "expected", "contract_revision"],
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:-]*$"
+          },
+          "location": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "json_pointer": {
+                "description": "JSON pointer (/-syntax) or YAML source pointer when the parser supplies one.",
+                "type": "string",
+                "pattern": "^(/([^/~]|~[01])*)*$"
+              },
+              "line": { "type": "integer", "minimum": 1 }
+            }
+          },
+          "actual": { "type": "string", "minLength": 1 },
+          "expected": { "type": "string", "minLength": 1 },
+          "contract_revision": {
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              { "const": "unavailable" }
+            ]
+          }
+        }
+      }
+    },
+    "next_action": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "description": "Class-aware per D3: FIX/NEXT only where the mechanism mechanically knows the correction; DIAGNOSE for unexpected compiler/linker/test/crash failures; RECONCILE for unknown side effects.",
+          "enum": ["NONE", "FIX", "NEXT", "DIAGNOSE", "RECONCILE"]
+        },
+        "supported_by": {
+          "description": "Required when action is FIX or NEXT: the mechanically-known correction (which field/command/rule).",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "action": { "enum": ["FIX", "NEXT"] } }, "required": ["action"] },
+          "then": { "required": ["supported_by"] }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["locator", "completeness"],
+        "properties": {
+          "locator": { "type": "string", "minLength": 1 },
+          "excerpt": {
+            "description": "Bounded inline evidence excerpt (the D3 Evidence dimension's first element). Optional: producers who only reference the artifact omit it; when present it must obey the declared model-view budgets (declared constants in tools/common_record.py; enforcement is the B+D projection batch).",
+            "type": "string"
+          },
+          "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "byte_count": { "type": "integer", "minimum": 0 },
+          "layout": {
+            "description": "Captured-stream layout, e.g. stdout, stderr, stdout+stderr-merged, json.",
+            "type": "string",
+            "minLength": 1
+          },
+          "completeness": { "enum": ["complete", "partial", "unknown"] },
+          "omitted_bytes": { "type": "integer", "minimum": 0 },
+          "omitted_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "retry_state": {
+      "type": "object",
+      "required": ["side_effects"],
+      "properties": {
+        "side_effects": {
+          "enum": ["not_started", "completed", "in_progress", "unknown"]
+        },
+        "reconciliation": {
+          "description": "Safe reconciliation route when known; never automatic mutation replay.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "payload": {
+      "description": "Reference to the producer's EXISTING native receipt/result. The native schema stays authoritative; this envelope is additive and never a second gate engine.",
+      "type": "object",
+      "required": ["kind", "locator"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "locator": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
