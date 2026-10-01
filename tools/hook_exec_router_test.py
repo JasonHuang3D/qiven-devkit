@@ -79,6 +79,23 @@ CASES: list[tuple[str, str]] = [
     # .generated-temp exemption is statement-scoped, not payload-wide):
     ('python -c "import json; open(\'.generated-temp/b.json\',\'w\'); open(\'c.yaml\',\'w\')"',
      "inline-authoring"),
+    # long/alias payload-flag spellings (node --eval/-p execute code
+    # exactly like -e; found by review probes: these escaped the
+    # detector when only the short spelling was recognized):
+    ('node --eval "fs.writeFileSync(\'f.txt\',\'x\')"', "inline-authoring"),
+    ('node -p "fs.writeFileSync(\'f.txt\',\'x\')"', "inline-authoring"),
+    ('node --eval=\'fs.appendFileSync("log.txt","x")\'', "inline-authoring"),
+    # options that CONSUME A VALUE before the payload flag must not end
+    # the probe (powershell -ExecutionPolicy Bypass -Command and
+    # python -W/-X ... -c also escaped the detector):
+    ('powershell -NoProfile -ExecutionPolicy Bypass -Command "Out-File x.txt"',
+     "inline-authoring"),
+    ('python -W ignore -c "open(\'f\',\'w\')"', "inline-authoring"),
+    ('python -X utf8 -c "open(\'f\',\'w\')"', "inline-authoring"),
+    # the async fs write forms are the same authoring family as the
+    # Sync spellings (callback and promises shapes):
+    ('node -e "require(\'fs\').writeFile(\'f.txt\',\'x\',()=>0)"', "inline-authoring"),
+    ('node -e "fs.promises.appendFile(\'log.txt\',\'x\')"', "inline-authoring"),
     # exec never launders an inline authoring payload:
     ('tools/qiven.cmd exec start --timeout 60 -- python -c "open(\'f\',\'w\')"', "inline-authoring"),
     # --- allow: inline COMPUTE (the false-positive calibration) --------
@@ -94,6 +111,14 @@ CASES: list[tuple[str, str]] = [
     ('python -c "import sys; sys.stdout.write(\'compute only\\n\')"', "allow"),
     ('node -e "console.log(1+1)"', "allow"),
     ('powershell -Command "Get-Process | Sort-Object CPU"', "allow"),
+    # the extended spellings stay compute-only in their benign form:
+    ('node --eval "console.log(1+1)"', "allow"),
+    ('node -p "process.version"', "allow"),
+    ('powershell -ExecutionPolicy Bypass -Command "Get-Process"', "allow"),
+    ('python -W ignore -c "print(1)"', "allow"),
+    # async fs writes targeting .generated-temp/ pass (statement-scoped
+    # exemption covers the writeFile family too):
+    ('node -e "fs.writeFile(\'.generated-temp/o.json\',d,cb)"', "allow"),
     # PS stream merge and null-discard redirects are not file writes:
     ('powershell -Command "cmd /c dir 2>&1"', "allow"),
     ('powershell -Command "Get-Process > $null"', "allow"),

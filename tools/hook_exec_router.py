@@ -44,8 +44,8 @@ Verdicts:
                 now enforces it mechanically). Checked FIRST and inside
                 exec payloads too: wrapping a heredoc in `qiven exec`
                 does not launder it.
-  inline-       python -c / node -e / powershell -Command payloads
-  authoring     whose quoted body performs file-write operations - the
+  inline-       python -c / node -e|--eval|-p / powershell -Command
+  authoring     payloads whose quoted body performs file-write operations - the
                 SAME absolute authoring law as heredoc (the -c/-e/
                 -Command string body is an authoring channel; wrapping
                 it in `qiven exec` does not launder it either). Compute
@@ -204,11 +204,30 @@ _HEREDOC = re.compile(
 # interpreter and its -c/-e/-Command flag must be UNQUOTED command
 # tokens (quoted PROSE mentioning `python -c 'open(x,"w")'` in a commit
 # message never matches), and the following quoted token is the payload.
+# Per interpreter: payload flag spellings, then the option tokens that
+# CONSUME A VALUE before the payload flag (`powershell -ExecutionPolicy
+# Bypass -Command`, `python -W ignore -c`, `py -3.11 -X utf8 -c`) - the
+# value token is not a payload flag and must not end the probe (found by
+# review probes: those spellings escaped the detector). Long/alias
+# spellings ride the same sets: node --eval/-p/--print execute code just
+# like -e; powershell -c is the documented -Command alias.
+_PY_PAYLOAD_FLAGS = ("-c",)
+_PY_VALUE_OPTIONS = ("-m", "-w", "-x")
+_NODE_PAYLOAD_FLAGS = ("-e", "--eval", "-p", "--print")
+_NODE_VALUE_OPTIONS = ("-r", "--require", "--loader", "--input-type")
+_PS_PAYLOAD_FLAGS = ("-command", "-c")
+_PS_VALUE_OPTIONS = ("-executionpolicy", "-workingdirectory")
 _INLINE_INTERPRETERS = {
-    "python": "-c", "python3": "-c", "python.exe": "-c", "py": "-c",
-    "node": "-e", "node.exe": "-e",
-    "powershell": "-command", "powershell.exe": "-command",
-    "pwsh": "-command", "pwsh.exe": "-command",
+    "python": (_PY_PAYLOAD_FLAGS, _PY_VALUE_OPTIONS, False),
+    "python3": (_PY_PAYLOAD_FLAGS, _PY_VALUE_OPTIONS, False),
+    "python.exe": (_PY_PAYLOAD_FLAGS, _PY_VALUE_OPTIONS, False),
+    "py": (_PY_PAYLOAD_FLAGS, _PY_VALUE_OPTIONS, False),
+    "node": (_NODE_PAYLOAD_FLAGS, _NODE_VALUE_OPTIONS, False),
+    "node.exe": (_NODE_PAYLOAD_FLAGS, _NODE_VALUE_OPTIONS, False),
+    "powershell": (_PS_PAYLOAD_FLAGS, _PS_VALUE_OPTIONS, True),
+    "powershell.exe": (_PS_PAYLOAD_FLAGS, _PS_VALUE_OPTIONS, True),
+    "pwsh": (_PS_PAYLOAD_FLAGS, _PS_VALUE_OPTIONS, True),
+    "pwsh.exe": (_PS_PAYLOAD_FLAGS, _PS_VALUE_OPTIONS, True),
 }
 # Stream writes are compute output, not file authoring: scrubbed before
 # the write-op scan (sys.stdout.write(...) is the normal python -c way
@@ -223,7 +242,9 @@ _PY_STREAM_WRITE = re.compile(
 _PY_INLINE_WRITE = re.compile(
     r"open\s*\([^()]*,\s*['\"](?:[wax][+b]?|r\+)['\"]\s*\)"
     r"|\.write(?:lines|_text|_bytes)?\s*\("
+    r"|\bwriteFile\s*\("
     r"|\bwriteFileSync\s*\("
+    r"|\bappendFile\s*\("
     r"|\bappendFileSync\s*\("
     r"|\bcreateWriteStream\s*\("
 )
@@ -297,33 +318,52 @@ def _payload_writes_files(body: str, powershell: bool) -> bool:
 def _inline_authoring_payload(segment: str) -> bool:
     """True when an inline-interpreter shape carries a quoted payload
     whose body writes files. The interpreter and payload flag must be
-    unquoted command tokens (so quoted prose never matches); short
-    options between them are skipped (`python -u -c`,
-    `powershell -NoProfile -Command`); the payload must be a single
-    quoted token. Indirection (payloads built from variables) stays out
-    of reach - the contract remains the backstop, same as heredoc."""
+    unquoted command tokens (so quoted prose never matches); options
+    between them are skipped (`python -u -c`, `py -3.11 -c`,
+    `powershell -NoProfile -Command`), including options that consume a
+    VALUE token (`powershell -ExecutionPolicy Bypass -Command`,
+    `python -W ignore -c`) and the flag's own long spellings
+    (`node --eval`, `node -p`); an `=`-attached payload
+    (`--eval='code'`) rides the flag token itself. The payload must be a
+    single quoted token. Residuals, honestly: payloads built from
+    variables or shell-concatenated parts, unlisted value-taking
+    options, powershell's colon-attached `-Command:"..."` form and
+    nested-interpreter laundering (`$(python -c ...)`, `bash -c`) stay
+    out of reach - the contract remains the backstop, same as heredoc."""
     tokens = _segment_tokens(segment)
     for index in range(len(tokens)):
         name, name_quoted = tokens[index]
         if name_quoted:
             continue
-        flag = _INLINE_INTERPRETERS.get(name.lower())
-        if flag is None:
+        entry = _INLINE_INTERPRETERS.get(name.lower())
+        if entry is None:
             continue
+        payload_flags, value_options, powershell = entry
         probe = index + 1
         while probe < len(tokens):
             option, option_quoted = tokens[probe]
-            if option_quoted or not option.startswith("-"):
+            if not option.startswith("-"):
                 break
-            if option.lower() == flag or (flag == "-command" and option.lower() == "-c"):
+            lowered = option.lower()
+            attached = next((f for f in payload_flags if lowered.startswith(f + "=")), None)
+            if attached is not None:
+                payload = option[len(attached) + 1:]
+                body = payload[1:-1] if len(payload) >= 2 and payload[0] == payload[-1] \
+                    and payload[0] in ("'", '"') else payload
+                if _payload_writes_files(body, powershell=powershell):
+                    return True
+                break
+            if option_quoted:
+                break
+            if lowered in payload_flags:
                 if probe + 1 < len(tokens) and tokens[probe + 1][1]:
                     payload = tokens[probe + 1][0]
                     body = payload[1:-1] if len(payload) >= 2 and payload[0] == payload[-1] \
                         and payload[0] in ("'", '"') else payload
-                    if _payload_writes_files(body, powershell=(flag == "-command")):
+                    if _payload_writes_files(body, powershell=powershell):
                         return True
                 break
-            probe += 1
+            probe += 2 if lowered in value_options else 1
     return False
 
 # Segment-level patterns (each applied to ONE command segment, anchored
