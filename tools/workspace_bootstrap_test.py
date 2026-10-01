@@ -321,12 +321,10 @@ def main() -> int:
         # B11 (R6a adapter-site completeness): the gate-configure ADAPTER
         # nonzero-exit site carries the same both-streams law as the
         # preflight site - typed banner, labeled streams, bounded excerpt.
-        # NOTE: the locators are repeated AFTER the subcommand - the
-        # bootstrap's subparsers inherit parents=[common] with plain
-        # defaults, so a pre-subcommand --control/--devkit is silently
-        # overwritten (adjacent pre-existing defect, reported as finding
-        # F-bootstrap-argparse; the subparser values win, which is the
-        # working spelling).
+        # The locators are repeated AFTER the subcommand (the spelling
+        # this leg was written against); since the SUPPRESS-defaults fix
+        # the pre-subcommand spelling works identically - B14 leg 3 pins
+        # that form against the same adapter site.
         resolver.write_text(
             "import sys\n"
             "sys.stdout.write('b11-adapter-out-marker\\n' + 'a' * 5000 + '\\n')\n"
