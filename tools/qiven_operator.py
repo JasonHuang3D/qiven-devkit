@@ -2549,8 +2549,10 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 console.emit("fail" if failed else "ok", f"gate:{gate_name}: {payload['status'].upper()}")
                 if failed and gate_next:
+                    # ASCII-safe control syntax (D3): the separator is a
+                    # plain hyphen, never a localized punctuation mark
                     console.block(
-                        f"NEXT action: {gate_next['action']} — {gate_next.get('supported_by', '')}"
+                        f"NEXT action: {gate_next['action']} - {gate_next.get('supported_by', '')}"
                     )
             return 1 if failed else 0
 

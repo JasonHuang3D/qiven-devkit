@@ -204,6 +204,22 @@ def _render_findings(
 
 # --- evidence excerpt block ---------------------------------------------------
 
+def _excerpt_view(excerpt: str, cap: int) -> tuple[str, int]:
+    """(display text, original excerpt bytes covered). When clipped, the
+    ASCII '...' marker (and any partial trailing character dropped at the
+    byte cut) rides OUTSIDE the covered count, so a continue cursor built
+    from the covered count points at the first original byte never shown
+    - evidence continuation is lossless, never a silent skip."""
+    encoded = excerpt.encode("utf-8")
+    if len(encoded) <= cap:
+        return excerpt, len(encoded)
+    prefix = encoded[: max(0, cap - 3)].decode("utf-8", errors="ignore")
+    covered = len(prefix.encode("utf-8"))
+    if covered == 0:
+        return "", 0
+    return prefix + "...", covered
+
+
 def _render_excerpt(
     doc: dict[str, Any], budget: int
 ) -> tuple[str, dict[str, Any]]:
@@ -229,15 +245,14 @@ def _render_excerpt(
     excerpt: str = entry["excerpt"]
     excerpt_bytes = _bytes(excerpt)
     cap = min(budget, cr.BOUNDED_READ_MAX_BYTES)
-    shown = _clip(excerpt, cap)
+    shown, covered = _excerpt_view(excerpt, cap)
     # the header/footer markers ride INSIDE the budget: shrink the body
-    # until the assembled block fits exactly (markers carry the shown
+    # until the assembled block fits exactly (markers carry the covered
     # count, so a small fixed-point loop converges in a few steps).
     while True:
-        shown_bytes = _bytes(shown)
-        eof = shown_bytes >= excerpt_bytes
+        eof = covered >= excerpt_bytes
         header = (
-            f"--- evidence excerpt bytes=0..{shown_bytes}/{excerpt_bytes}"
+            f"--- evidence excerpt bytes=0..{covered}/{excerpt_bytes}"
             f" locator={_clip(locator, 200)} ---"
         )
         if eof:
@@ -245,15 +260,16 @@ def _render_excerpt(
             continue_offset = None
             read_command = None
         else:
-            continue_offset = shown_bytes
+            continue_offset = covered
             read_command = f"qiven evidence-read {locator} --offset {continue_offset}"
             footer = f"--- more evidence bytes remain; continue: {read_command} ---"
-        if _bytes(header) + _bytes(shown) + _bytes(footer) + 2 <= budget or not shown:
+        if _bytes(header) + _bytes(shown) + _bytes(footer) + 2 <= budget or covered == 0:
             break
-        shown = _clip(shown, max(0, _bytes(shown) - (_bytes(header) + _bytes(footer) + 2)))
+        excess = (_bytes(header) + _bytes(shown) + _bytes(footer) + 2) - budget
+        shown, covered = _excerpt_view(excerpt, max(0, covered - excess))
     block = f"{header}\n{shown}\n{footer}" if shown else ""
     return block, {
-        "shown_bytes": shown_bytes,
+        "shown_bytes": covered,
         "excerpt_bytes": excerpt_bytes,
         "eof": eof,
         "continue_offset": continue_offset,

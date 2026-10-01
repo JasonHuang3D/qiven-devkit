@@ -94,6 +94,29 @@ def main() -> int:
         "PJ3: continue cursor missing"
     )
 
+    # PJ3b: the continue cursor is LOSSLESS - it counts only original
+    # excerpt bytes actually displayed. The ASCII '...' clip marker and
+    # any partial multi-byte character dropped at the byte cut ride
+    # OUTSIDE the count (a cursor that skipped them would silently lose
+    # evidence bytes at every continuation).
+    record.evidence = [cr.Evidence(
+        locator=".generated-temp/operator/exec/run-1.log",
+        completeness="partial",
+        excerpt="漢字テスト" * 3000,  # 3 bytes per character
+    )]
+    info = rp.project_json(record)
+    body = info["view"].split("--- evidence excerpt", 1)[1].split("\n", 1)[1]
+    body = body.split("\n---", 1)[0]
+    covered = (
+        len(body[:-3].encode("utf-8")) if body.endswith("...")
+        else len(body.encode("utf-8"))
+    )
+    assert covered == info["evidence"]["continue_offset"], (
+        f"PJ3b: cursor skips evidence bytes: covered={covered} "
+        f"cursor={info['evidence']['continue_offset']}"
+    )
+    assert info["evidence"]["eof"] is False, "PJ3b: EOF must not be claimed early"
+
     # PJ4: small excerpt -> EOF marker with the complete range.
     record.evidence = [cr.Evidence(
         locator="temp/q.log", completeness="complete", excerpt="LNK2019: unresolved external symbol",
