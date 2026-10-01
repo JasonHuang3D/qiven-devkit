@@ -291,7 +291,31 @@ def main() -> int:
         assert "bytes omitted" in result.stdout, "B9: unbounded or unmarked stream excerpt"
         _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
 
-    print("[ OK ] workspace-bootstrap contract test (B1-B9)")
+        # B10 (R6a whole-file completeness): a ZERO-exit child that emits
+        # no parseable receipt is still a failed child interaction; its
+        # captured payload is the only evidence of what it emitted and
+        # must surface (labeled, bounded) - the decode-failure path may
+        # not discard the streams the way the nonzero-exit path once did.
+        resolver.write_text(
+            "import sys\n"
+            "sys.stdout.write('b10-garbage-payload-not-json\\n')\n"
+            "sys.stderr.write('b10-child-stderr-note\\n')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8", newline="\n")
+        result = _run_bootstrap(control, devkit)
+        assert result.returncode == 1, f"B10: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert "emitted no receipt" in result.stderr, "B10: untyped decode failure"
+        assert "[resolver-preflight stdout]" in result.stdout \
+            and "b10-garbage-payload-not-json" in result.stdout, (
+            f"B10: child stdout payload discarded: {result.stdout[:300]}"
+        )
+        assert "[resolver-preflight stderr]" in result.stdout \
+            and "b10-child-stderr-note" in result.stdout, (
+            f"B10: child stderr payload discarded: {result.stdout[:300]}"
+        )
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+    print("[ OK ] workspace-bootstrap contract test (B1-B10)")
     return 0
 
 

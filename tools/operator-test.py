@@ -336,6 +336,20 @@ def main() -> int:
         check(not [item for item in isolation_payload["results"] if item["status"] == "not_run"],
               "R3.no-not-run-on-pass",
               str([item for item in isolation_payload["results"] if item["status"] == "not_run"]))
+        # R3 run-subcommand path: the same coverage reporting rides `run`
+        # (not_run after a failed task, never executed - and a PASS
+        # payload can never carry one because the failed task precedes it)
+        run_failed = run(
+            [sys.executable, OPERATOR, "--json", "run", "fixture-fail", "fixture-must-not-run"],
+            cwd=repo,
+            expect=1,
+        )
+        run_rows = [(item["name"], item["status"], item["returncode"])
+                    for item in json.loads(run_failed.stdout)["results"]]
+        check(run_rows == [("fixture-fail", "fail", 7),
+                           ("fixture-must-not-run", "not_run", None)],
+              "R3.run-not-run-coverage", str(run_rows))
+        check(not marker_c.exists(), "R3.run-stopped", "run executed a task after a failure")
 
         parallel = run(
             [
@@ -424,6 +438,29 @@ def main() -> int:
         check("log_file" in wide, "R1.byte-budget-not-char-count")
         check(wide["results"][0]["output_bytes_total"] == 9000, "R1.wide-total-bytes")
         check("中" in wide["results"][0]["output"], "R1.wide-codepoints-intact")
+        # mid-band near-miss: an output wider than the 1024-byte excerpt
+        # budget but fully covered by head+tail keeps its FULL text inline
+        # (an attractive wrong fix truncates at the head budget; the
+        # pre-repair placeholder dropped everything)
+        mid_payload = {"gate": "r1-mid", "results": [
+            {"name": "r1-mid-task", "status": "pass", "returncode": 0, "output": "m" * 1800},
+            {"name": "r1-mid-big", "status": "pass", "returncode": 0, "output": "x" * 5000}]}
+        mid_row = operator._spill_large_logs(mid_payload)["results"][0]
+        check(mid_row["output"] == "m" * 1800 and mid_row["output_bytes_omitted"] == 0,
+              "R1.mid-band-keeps-full-text", str(mid_row.get("output_bytes_omitted")))
+        check(mid_row["output_bytes_total"] == 1800, "R1.mid-band-total")
+        # CJK excerpt boundaries: a 1024-byte slice can cut a 3-byte
+        # codepoint (dropped on decode), so the excerpt bytes are 1023 -
+        # the head+tail+omitted identity must still hold exactly
+        cjk_row = wide["results"][0]
+        cjk_head, cjk_rest = cjk_row["output"].split("\n[... ", 1)
+        cjk_count, cjk_tail = cjk_rest.split(" bytes omitted; full output in log_file ...]\n", 1)
+        check(len(cjk_head.encode("utf-8")) + len(cjk_tail.encode("utf-8"))
+              + cjk_row["output_bytes_omitted"] == cjk_row["output_bytes_total"] == 9000,
+              "R1.cjk-accounting-exact",
+              f"head={len(cjk_head.encode('utf-8'))} tail={len(cjk_tail.encode('utf-8'))} "
+              f"omitted={cjk_row['output_bytes_omitted']}")
+        check(int(cjk_count) == cjk_row["output_bytes_omitted"], "R1.cjk-marker-truthful", cjk_count)
 
         # R2: a failing task's raw captured bytes are retained (digest +
         # byte count carried on the Result) before the temp log is
@@ -446,6 +483,12 @@ def main() -> int:
         check(r2_fail.evidence_bytes == len(retained), "R2.byte-count")
         check(Path(r2_fail.evidence_path).name.startswith("qiven-task-r2-fail-task-"),
               "R2.evidence-name", Path(r2_fail.evidence_path).name)
+        # the evidence fields ride the Result into the machine JSON (the
+        # gate/run payload path serializes through dataclasses.asdict)
+        serialized_fail = json.loads(json.dumps(operator.asdict(r2_fail)))
+        check(all(serialized_fail.get(key) for key in
+                  ("evidence_path", "evidence_sha256", "evidence_bytes")),
+              "R2.evidence-fields-serialize", str(serialized_fail))
 
         r2_buffer = io.StringIO()
         r2_human = operator.Console(json_mode=False, verbose=False, no_color=True)
