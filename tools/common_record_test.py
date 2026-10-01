@@ -280,6 +280,13 @@ def main() -> int:
     assert cr.validate(json.loads(text)) == [], "CR7: round-trip record invalid"
     assert cr.serialize(json.loads(text)) == text, "CR7: dict/dataclass paths disagree"
     assert cr.read(text).unknown_fields == [], "CR7: round-trip introduced unknowns"
+    # CR7: no Unicode normalization - NFC and NFD of the same glyph stay
+    # distinct bytes (the determinism contract is per byte-identical input).
+    nfc_doc = json.loads(text)
+    nfc_doc["producer"] = dict(nfc_doc["producer"], version="caf\u00e9")
+    nfd_doc = json.loads(text)
+    nfd_doc["producer"] = dict(nfd_doc["producer"], version="cafe\u0301")
+    assert cr.serialize(nfc_doc) != cr.serialize(nfd_doc), "CR7: normalization applied"
 
     # CR8: budget constants exported with the documented D3 values (declared
     # only - enforcement is the B+D projection batch's job).
@@ -323,6 +330,42 @@ def main() -> int:
     doc = _minimal_dict()
     doc["coverage"]["executed"] = [""]
     _expect_one_finding("CR10", doc, "common-record/type", "/coverage/executed/0")
+    # evidence typed shapes (schema/module parity: excerpt is a plain string
+    # with no minLength; layout is a non-empty string).
+    doc = _minimal_dict()
+    doc["evidence"] = [{"locator": "temp/q.log", "completeness": "complete", "excerpt": 42}]
+    _expect_one_finding("CR10", doc, "common-record/type", "/evidence/0/excerpt")
+    doc = _minimal_dict()
+    doc["evidence"] = [{"locator": "temp/q.log", "completeness": "complete", "excerpt": ""}]
+    assert cr.validate(doc) == [], "CR10: empty excerpt is schema-valid (no minLength)"
+    doc = _minimal_dict()
+    doc["evidence"] = [{"locator": "temp/q.log", "completeness": "complete", "layout": ""}]
+    _expect_one_finding("CR10", doc, "common-record/type", "/evidence/0/layout")
+    # contract_revision is typed (non-empty string; 'unavailable' is one).
+    doc = _minimal_dict()
+    doc["findings"] = [
+        {
+            "rule_id": "ctx/rule-1",
+            "location": {"path": "records/a.yaml"},
+            "actual": "x",
+            "expected": "y",
+            "contract_revision": 42,
+        }
+    ]
+    _expect_one_finding(
+        "CR10", doc, "common-record/type", "/findings/0/contract_revision"
+    )
+    doc = _minimal_dict()
+    doc["findings"] = [
+        {
+            "rule_id": "ctx/rule-1",
+            "location": {"path": "records/a.yaml"},
+            "actual": "x",
+            "expected": "y",
+            "contract_revision": "unavailable",
+        }
+    ]
+    assert cr.validate(doc) == [], "CR10: 'unavailable' contract_revision accepted"
 
     print("[ OK ] common-record self-test (CR1-CR10)")
     return 0

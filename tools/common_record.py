@@ -531,11 +531,13 @@ def validate(record: CommonRecord | dict[str, Any]) -> list[dict[str, Any]]:
                 )
             _check_string(item, "actual", f"{pointer}/actual", out)
             _check_string(item, "expected", f"{pointer}/expected", out)
-            for key in ("location", "contract_revision"):
-                if key not in item:
-                    out.append(
-                        _finding("common-record/required", f"{pointer}/{key}", "<missing>", f"'{key}'")
-                    )
+            if "location" not in item:
+                out.append(
+                    _finding("common-record/required", f"{pointer}/location", "<missing>", "'location'")
+                )
+            # Schema: oneOf non-empty string | const 'unavailable' - the
+            # const arm is a non-empty string, so non-empty string is exact.
+            _check_string(item, "contract_revision", f"{pointer}/contract_revision", out)
             location = item.get("location")
             if not isinstance(location, dict):
                 out.append(_finding("common-record/type", f"{pointer}/location", location, "object"))
@@ -601,6 +603,13 @@ def validate(record: CommonRecord | dict[str, Any]) -> list[dict[str, Any]]:
                 out.append(_finding("common-record/type", pointer, item, "object"))
                 continue
             _check_string(item, "locator", f"{pointer}/locator", out)
+            # Schema: excerpt is a plain string (no minLength - the empty
+            # excerpt is schema-valid); layout is a non-empty string.
+            if "excerpt" in item and not isinstance(item["excerpt"], str):
+                out.append(
+                    _finding("common-record/type", f"{pointer}/excerpt", item["excerpt"], "string")
+                )
+            _check_string(item, "layout", f"{pointer}/layout", out, required=False)
             _check_enum(
                 item,
                 "completeness",
@@ -643,6 +652,9 @@ def serialize(record: CommonRecord | dict[str, Any]) -> str:
     Key order is sorted; findings are normalized to the canonical
     (rule_id, location) order; non-ASCII string values stay literal
     (localized content allowed; control syntax is ASCII by construction).
+    Unicode normalization is NOT applied: NFC and NFD forms of the same
+    glyph serialize to distinct bytes (JSON defines no normalization);
+    determinism is per byte-identical input, not per rendered glyph.
     """
     doc = _as_record_dict(record)
     if isinstance(doc.get("findings"), list):
