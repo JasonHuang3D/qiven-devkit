@@ -204,6 +204,7 @@ class NextAction:
 class Evidence:
     locator: str
     completeness: str
+    excerpt: str | None = None
     digest: str | None = None
     byte_count: int | None = None
     layout: str | None = None
@@ -487,6 +488,16 @@ def validate(record: CommonRecord | dict[str, Any]) -> list[dict[str, Any]]:
         _check_enum(coverage, "collection", "/coverage/collection", COVERAGE_COLLECTION, out)
         if "executed" in coverage and not isinstance(coverage["executed"], list):
             out.append(_finding("common-record/type", "/coverage/executed", coverage["executed"], "array"))
+        for index, item in enumerate(coverage.get("executed") or []):
+            if not isinstance(item, str) or not item:
+                out.append(
+                    _finding(
+                        "common-record/type",
+                        f"/coverage/executed/{index}",
+                        item,
+                        "non-empty string",
+                    )
+                )
         for list_key in ("blocked", "not_executed"):
             if list_key in coverage and not isinstance(coverage[list_key], list):
                 out.append(_finding("common-record/type", f"/coverage/{list_key}", coverage[list_key], "array"))
@@ -684,6 +695,7 @@ _KNOWN: dict[str, Any] = {
     "next_action": {"action", "supported_by"},
     "evidence": {
         "locator",
+        "excerpt",
         "digest",
         "byte_count",
         "layout",

@@ -64,19 +64,19 @@
         "gate": { "type": "string", "minLength": 1 },
         "selected_revision": {
           "oneOf": [
-            { "type": "string", "pattern": "^[0-9a-f]{40}\\Z" },
+            { "type": "string", "pattern": "^[0-9a-f]{40}$" },
             { "const": "unavailable" }
           ]
         },
         "executing_revision": {
           "oneOf": [
-            { "type": "string", "pattern": "^[0-9a-f]{40}\\Z" },
+            { "type": "string", "pattern": "^[0-9a-f]{40}$" },
             { "const": "unavailable" }
           ]
         },
         "workspace_generation": {
           "oneOf": [
-            { "type": "string", "pattern": "^sha256:[0-9a-f]{64}\\Z" },
+            { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
             { "const": "unavailable" }
           ]
         }
@@ -178,7 +178,7 @@
         "properties": {
           "rule_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:-]*\\Z"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:-]*$"
           },
           "location": {
             "type": "object",
@@ -188,13 +188,13 @@
               "json_pointer": {
                 "description": "JSON pointer (/-syntax) or YAML source pointer when the parser supplies one.",
                 "type": "string",
-                "pattern": "^(/([^/~]|~[01])*)*\\Z"
+                "pattern": "^(/([^/~]|~[01])*)*$"
               },
               "line": { "type": "integer", "minimum": 1 }
             }
           },
-          "actual": { "type": "string" },
-          "expected": { "type": "string" },
+          "actual": { "type": "string", "minLength": 1 },
+          "expected": { "type": "string", "minLength": 1 },
           "contract_revision": {
             "oneOf": [
               { "type": "string", "minLength": 1 },
@@ -232,7 +232,11 @@
         "required": ["locator", "completeness"],
         "properties": {
           "locator": { "type": "string", "minLength": 1 },
-          "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}\\Z" },
+          "excerpt": {
+            "description": "Bounded inline evidence excerpt (the D3 Evidence dimension's first element). Optional: producers who only reference the artifact omit it; when present it must obey the declared model-view budgets (declared constants in tools/common_record.py; enforcement is the B+D projection batch).",
+            "type": "string"
+          },
+          "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
           "byte_count": { "type": "integer", "minimum": 0 },
           "layout": {
             "description": "Captured-stream layout, e.g. stdout, stderr, stdout+stderr-merged, json.",

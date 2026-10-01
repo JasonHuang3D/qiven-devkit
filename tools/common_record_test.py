@@ -61,6 +61,21 @@ def _expect_one_finding(case: str, record: dict, rule_id: str, pointer: str) -> 
         assert element in matched[0], f"{case}: finding missing element {element}"
 
 
+def _iter_patterns(node: object) -> list[str]:
+    """Every 'pattern' regex declared anywhere in the schema document."""
+    found: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "pattern" and isinstance(value, str):
+                found.append(value)
+            else:
+                found.extend(_iter_patterns(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(_iter_patterns(item))
+    return found
+
+
 def main() -> int:
     # CR1: schema self-validation - the shipped schema document parses under
     # the strict law, carries the v1 identity, and its enums are exactly the
@@ -99,6 +114,18 @@ def main() -> int:
     # CR1b: the schema gates supported_by on FIX/NEXT (conditional requirement).
     next_action_schema = schema["properties"]["next_action"]
     assert next_action_schema.get("allOf"), "CR1b: supported_by conditional missing"
+    # CR1c: declared draft + ECMA-262 pattern dialect - the schema declares
+    # draft 2020-12, whose 'pattern' keyword is ECMA-262; the Python-only \Z
+    # anchor is invalid there (strict ECMA rejects it; Annex B reads it as a
+    # literal 'Z', inverting the semantics). Draft-declaring sibling schemas
+    # use the $ anchor; the $ end-anchor equals the module's Python \Z.
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema", (
+        "CR1c: draft declaration missing"
+    )
+    patterns = _iter_patterns(schema)
+    assert patterns, "CR1c: schema declares no patterns"
+    for pattern in patterns:
+        assert "\\Z" not in pattern, f"CR1c: Python-only \\Z anchor: {pattern}"
 
     # CR2: minimal-valid-record acceptance - only the required fields, valid.
     assert cr.validate(_minimal_record()) == [], "CR2: minimal dataclass record"
@@ -106,19 +133,27 @@ def main() -> int:
     read_result = cr.read(cr.serialize(_minimal_record()))
     assert read_result.unknown_fields == [], "CR2: minimal record has no unknowns"
 
-    # CR3: every enum enforced (one bad token each, ASCII-safe control syntax).
+    # CR3: every enum enforced (one bad token each, ASCII-safe control syntax;
+    # all eight vocabularies get a rejection case).
     base = _minimal_dict()
     bad_tokens = (
         ("/observation/coherence", ("observation", "coherence"), "maybe"),
         ("/admission/state", ("admission", "state"), "denied"),
         ("/completion/state", ("completion", "state"), "done"),
         ("/domain_outcome/outcome", ("domain_outcome", "outcome"), "success"),
+        ("/coverage/collection", ("coverage", "collection"), "mostly"),
         ("/next_action/action", ("next_action", "action"), "RETRY"),
+        ("/retry_state/side_effects", ("retry_state", "side_effects"), "partial"),
     )
     for pointer, (section, key), bad in bad_tokens:
         record = json.loads(json.dumps(base))
         record[section][key] = bad
         _expect_one_finding(f"CR3:{pointer}", record, "common-record/enum", pointer)
+    record = json.loads(json.dumps(base))
+    record["evidence"] = [{"locator": "temp/q.log", "completeness": "mostly"}]
+    _expect_one_finding(
+        "CR3:/evidence/0/completeness", record, "common-record/enum", "/evidence/0/completeness"
+    )
 
     # CR4: findings deterministic order - unsorted is a finding; serialize
     # normalizes to the canonical (rule_id, location) order.
@@ -227,6 +262,7 @@ def main() -> int:
     record.evidence = [
         cr.Evidence(
             locator="%TEMP%/qiven-operator/local-<stamp>.json",
+            excerpt="LNK2019: unresolved external symbol (first diagnostic)",
             digest=f"sha256:{D64}",
             byte_count=16384,
             layout="stdout+stderr",
@@ -280,6 +316,13 @@ def main() -> int:
     doc = _minimal_dict()
     del doc["operation"]["id"]
     _expect_one_finding("CR10", doc, "common-record/required", "/operation/id")
+    # executed items must be non-empty strings (schema/module parity).
+    doc = _minimal_dict()
+    doc["coverage"]["executed"] = [42]
+    _expect_one_finding("CR10", doc, "common-record/type", "/coverage/executed/0")
+    doc = _minimal_dict()
+    doc["coverage"]["executed"] = [""]
+    _expect_one_finding("CR10", doc, "common-record/type", "/coverage/executed/0")
 
     print("[ OK ] common-record self-test (CR1-CR10)")
     return 0
