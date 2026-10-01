@@ -408,7 +408,7 @@ def validate(record: CommonRecord | dict[str, Any]) -> list[dict[str, Any]]:
         kind = doc["record_kind"]
         if not isinstance(kind, str) or _RECORD_KIND_RE.match(kind) is None:
             out.append(
-                _finding("common-record/type", "/record_kind", kind, "lowercase kephen string")
+                _finding("common-record/type", "/record_kind", kind, "lowercase kebab-case string")
             )
 
     producer = _check_object(doc, "producer", out)
@@ -420,7 +420,7 @@ def validate(record: CommonRecord | dict[str, Any]) -> list[dict[str, Any]]:
                     "common-record/type",
                     "/producer/id",
                     producer["id"],
-                    "lowercase kephen identifier",
+                    "lowercase kebab-case identifier",
                 )
             )
         _check_string(producer, "version", "/producer/version", out)
