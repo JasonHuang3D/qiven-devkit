@@ -60,6 +60,53 @@ CASES: list[tuple[str, str]] = [
     # numeric bit-shift operands do not match (letter operands may —
     # documented accepted false positive; rewrite such expressions):
     ("echo $((1 << 4))", "allow"),
+    # --- deny: inline-interpreter authoring (same law as heredoc) ------
+    # python -c payloads whose body writes files:
+    ('python -c "open(\'config.yaml\',\'w\').write(\'x\')"', "inline-authoring"),
+    ("python -c 'open(\"out.txt\",\"w\")'", "inline-authoring"),
+    ('python -u -c "f=open(\'x\',\'w\')"', "inline-authoring"),
+    ('python -c "from pathlib import Path; Path(\'x\').write_text(\'hi\')"', "inline-authoring"),
+    # node -e payloads:
+    ('node -e "fs.writeFileSync(\'f.txt\',\'x\')"', "inline-authoring"),
+    ('node -e "require(\'fs\').createWriteStream(\'out.log\')"', "inline-authoring"),
+    # powershell -Command payloads (named cmdlets and file redirects):
+    ('powershell -Command "Set-Content -Path out.txt -Value hi"', "inline-authoring"),
+    ('powershell -NoProfile -Command "Out-File -FilePath x.txt"', "inline-authoring"),
+    ('powershell -Command "Get-Content a.log > out.txt"', "inline-authoring"),
+    ('powershell -Command "Get-Content a.log 2> err.txt"', "inline-authoring"),
+    ('powershell -Command "Add-Content log.txt value"', "inline-authoring"),
+    # a payload mixing sanctioned and unsanctioned writes denies (the
+    # .generated-temp exemption is statement-scoped, not payload-wide):
+    ('python -c "import json; open(\'.generated-temp/b.json\',\'w\'); open(\'c.yaml\',\'w\')"',
+     "inline-authoring"),
+    # exec never launders an inline authoring payload:
+    ('tools/qiven.cmd exec start --timeout 60 -- python -c "open(\'f\',\'w\')"', "inline-authoring"),
+    # --- allow: inline COMPUTE (the false-positive calibration) --------
+    # the launcher version probes (qiven.cmd/resolve-python.cmd shapes):
+    ('python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)"', "allow"),
+    ('py -3 -c "import sys; print(sys.executable)"', "allow"),
+    ('python -c "import sys; print(\'.\'.join(map(str,sys.version_info[:3])))"', "allow"),
+    # a legitimate compute script writing DERIVED artifacts under
+    # .generated-temp/ passes (the sanctioned generated directory):
+    ('python -c "import json; d=json.load(open(\'in.json\')); open(\'.generated-temp/out.json\',\'w\').write(json.dumps(d))"',
+     "allow"),
+    # stdout/stderr stream writes are compute output, not file authoring:
+    ('python -c "import sys; sys.stdout.write(\'compute only\\n\')"', "allow"),
+    ('node -e "console.log(1+1)"', "allow"),
+    ('powershell -Command "Get-Process | Sort-Object CPU"', "allow"),
+    # PS stream merge and null-discard redirects are not file writes:
+    ('powershell -Command "cmd /c dir 2>&1"', "allow"),
+    ('powershell -Command "Get-Process > $null"', "allow"),
+    # read-mode opens never match: the mode must be a comma-prefixed
+    # trailing argument (the anchor that keeps `open('a')` - a one-letter
+    # READ filename - from being read as mode 'a'):
+    ('python -c "print(open(\'a\').read())"', "allow"),
+    ('python -c "open(\'weights.json\')"', "allow"),
+    # write-capable read modes (r+) deny too:
+    ('python -c "open(\'f\',\'r+\')"', "inline-authoring"),
+    # quoted PROSE mentioning an inline-write shape is not authoring
+    # (the interpreter tokens must be unquoted command tokens):
+    ('git commit -m "use python -c \'open(x,\'w\')\' never"', "allow"),
     # --- allow: operator exec/info (fast control plane) -------------------
     ("tools\\qiven.cmd exec start --timeout 600 -- cmake --build build", "allow"),
     ("python tools/qiven.py info", "allow"),
@@ -491,6 +538,22 @@ def main() -> int:
     if "Read/Write/Edit" not in heredoc_message or "heredoc" not in heredoc_message:
         failures += 1
         print("[FAIL] heredoc denial must name the native read/write/edit law")
+
+    # inline-authoring is the same absolute class as heredoc: background
+    # must not launder it, and the denial names the SAME law citations
+    # and the native-tool teaching as the heredoc carrier (byte-compatible
+    # class of message, ADR-0060 D7 discipline).
+    code, _ = router.verdict('python -c "open(\'f\',\'w\')"', background=True)
+    if code != 2:
+        failures += 1
+        print("[FAIL] inline-authoring must deny even when backgrounded (absolute class)")
+    _, inline_message = router.verdict('python -c "open(\'f\',\'w\')"')
+    for needle in ("MEM-20260921T203500Z-D2A7F4", "MEM-20260923T183000Z-A1B2C3",
+                   "Read/Write/Edit", "collaboration/operating-contract.md",
+                   ".generated-temp"):
+        if needle not in inline_message:
+            failures += 1
+            print(f"[FAIL] inline-authoring denial must name {needle} (law parity with heredoc)")
 
     # gate-inside-exec stays allowed end-to-end
     code, _ = router.verdict("tools/qiven.cmd exec start --timeout 900 -- cmd /c call tools/qiven.cmd gate")
