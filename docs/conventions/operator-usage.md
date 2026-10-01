@@ -63,6 +63,36 @@ that exact head to `.generated-temp/operator/receipts/<gate>-<head>.json`
 `qiven run TASK...` (`--parallel` to run them concurrently). Unknown names
 return the available alternatives.
 
+## evidence-read — bounded read of retained evidence (ADR-0060 D6)
+
+```text
+qiven evidence-read PATH [--offset N] [--count N]     BYTE range; default 0..16384
+```
+
+A consumer utility for retained evidence/log artifacts (gate task
+evidence, exec run logs, spilled machine payloads, common records). It is
+registered in NO gate — it reads what producers already retained.
+
+- **Addressing is BYTES** (`--offset`/`--count` are byte offsets, the only
+  addressing an arbitrary captured artifact supports); output is byte-
+  capped at 16384 (`BOUNDED_READ_MAX_BYTES`) per call, larger `--count`
+  values are clamped, never enlarged. Each result carries an explicit EOF
+  marker or a `continue:` cursor naming the exact next call, so a large
+  artifact is walked incrementally and never loaded whole (D6).
+- **Path boundary**: a RELATIVE path addresses the repository's
+  `.generated-temp/` evidence roots (the leading `.generated-temp/` is
+  optional); an ABSOLUTE path is accepted only when it resolves under the
+  repository root — anything else, `..` traversal included, is a typed
+  error (exit 2), never a silent redirect.
+- Missing (including expired/never-retained pointers), unreadable and
+  directory paths are typed errors naming the resolved path — an expired
+  pointer stays visible as a typed miss, it never justifies dropping the
+  diagnostic (D6).
+- `--json` returns the same facts machine-parsed (`bytes_returned`,
+  `total_bytes`, `eof`, `next_offset`, `content`). Decoding is a view
+  (UTF-8 with replacement): invalid captured bytes stay recoverable in
+  the artifact itself.
+
 ## ci — explicit dispatch + observation-only watch
 
 `qiven ci start PROFILE` verifies the remote branch matches local HEAD,

@@ -72,6 +72,18 @@
         "tools/common_record_test.py"
       ]
     },
+    "record-projection-tests": {
+      "argv": [
+        "{python}",
+        "tools/record_projection_test.py"
+      ]
+    },
+    "router-record-adapter-tests": {
+      "argv": [
+        "{python}",
+        "tools/router_record_adapter_test.py"
+      ]
+    },
     "workspace-schemas-tests": {
       "argv": [
         "{python}",
@@ -123,6 +135,8 @@
       "operator-tests",
       "router-tests",
       "common-record-tests",
+      "record-projection-tests",
+      "router-record-adapter-tests",
       "workspace-schemas-tests",
       "workspace-resolver-tests",
       "workspace-bootstrap-tests",
