@@ -821,20 +821,25 @@ def main() -> int:
         check(exact_head_record["domain_outcome"]["outcome"] == "failed",
               "GR3.outcome")
 
-        # GR4: the additive human FAIL summary line - exactly ONE
-        # "NEXT action:" line, printed after the final gate FAIL summary;
-        # machine mode carries no such line (json purity).
+        # GR4: the additive human FAIL summary line - ONE line carrying
+        # class + action + reference together (the E-closeout selector
+        # law: grep FAIL/OK, head and tail fragments of the summary keep
+        # all three); machine mode carries no such line (json purity).
         check("NEXT action:" not in failed.stdout, "GR4.json-purity")
         human_lines = human.stdout.splitlines()
-        next_lines = [l for l in human_lines if l.startswith("NEXT action:")]
+        next_lines = [l for l in human_lines if "NEXT action:" in l]
         check(len(next_lines) == 1, "GR4.one-line",
               str(next_lines))
-        check(next_lines[0].startswith("NEXT action: DIAGNOSE"), "GR4.diagnose-line",
+        check(next_lines[0].startswith("[FAIL] gate:") and "FAIL" in next_lines[0],
+              "GR4.summary-carries-class", next_lines[0])
+        check("NEXT action: DIAGNOSE" in next_lines[0], "GR4.diagnose-line",
               next_lines[0])
-        check(human_lines.index(next_lines[0]) > next(
-            i for i, l in enumerate(human_lines)
-            if l.startswith("[FAIL] gate:")), "GR4.after-final-summary")
-        check(any(l.startswith("NEXT action: FIX") for l in bad_head.stdout.splitlines()),
+        check(" - evidence: " in next_lines[0], "GR4.summary-carries-reference",
+              next_lines[0])
+        check(next_lines[0] == human_lines[-1], "GR4.summary-is-tail-line",
+              next_lines[0])
+        check(any(l.startswith("[FAIL] gate:") and "NEXT action: FIX" in l
+                  for l in bad_head.stdout.splitlines()),
               "GR4.exact-head-fix-line")
 
         # -------- EVR: bounded evidence read route (ADR-0060 D6) ----------

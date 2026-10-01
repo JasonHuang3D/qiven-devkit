@@ -108,9 +108,25 @@ def _render_control(doc: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
     value_budget = 240
     while True:
+        # line 1 is the selector summary (ADR-0060 D3/E closeout): the
+        # known grep/head/tail fragments of this view must still expose
+        # class + next action + primary evidence locator. The verdict
+        # token is the uppercase outcome enum (FAILED/PASSED/FINDINGS/
+        # UNKNOWN/NOT_APPLICABLE); a case-sensitive `grep -E "FAIL|OK"`
+        # catches FAILED-class views here, and the operator's `[ OK ]`
+        # summary line carries the passing class in the same transaction
+        # (PASSED-class projections deliberately carry no FAIL/OK token).
+        first_line = (
+            f"QIVEN-RECORD v1 verdict={_clip(_flatten(outcome.get('outcome') or 'unknown'), 20).upper()}"
+            f" next={_clip(_flatten(next_action.get('action') or '-'), 12)}"
+        )
+        if evidence.get("locator"):
+            first_line += f" evidence={_clip(_flatten(evidence.get('locator')), 120)}"
         lines = [
-            f"QIVEN-RECORD v1 kind={_clip(_flatten(doc.get('record_kind')), 60)}"
-            f" op={_clip(_flatten(op.get('id')), 80)}",
+            first_line + (
+                f" kind={_clip(_flatten(doc.get('record_kind')), 60)}"
+                f" op={_clip(_flatten(op.get('id')), 80)}"
+            ),
             f"producer: {_clip(_flatten(producer.get('id')), 60)}"
             f"@{_clip(_flatten(producer.get('version')), 60)}",
             f"repo: {_clip(_flatten(op.get('repository')), 80)}"
@@ -280,7 +296,8 @@ def _render_excerpt(
 # --- footer ------------------------------------------------------------------
 
 def _render_footer(
-    locator: str, findings_counts: dict[str, int], evidence_counts: dict[str, Any]
+    locator: str, findings_counts: dict[str, int], evidence_counts: dict[str, Any],
+    verdict: str = "UNKNOWN",
 ) -> str:
     repeat = f" locator={_clip(locator, 160)}" if locator else ""
     evidence_note = (
@@ -288,8 +305,11 @@ def _render_footer(
         if evidence_counts.get("excerpt_bytes")
         else ""
     )
+    # the footer repeats the verdict class so tail-only fragments of the
+    # view still know pass/fail (E closeout selector law)
     return (
         "== qiven-record end:"
+        f" verdict={_clip(_flatten(verdict), 20).upper()}"
         f" findings={findings_counts['returned']}/{findings_counts['total']}"
         f" (omitted {findings_counts['omitted']}){evidence_note}{repeat} =="
     )
@@ -325,7 +345,10 @@ def project_json(record: cr.CommonRecord | dict[str, Any]) -> dict[str, Any]:
         - _FOOTER_RESERVE_BYTES
     )
     findings_block, findings_counts = _render_findings(doc, findings_budget)
-    footer = _render_footer(primary_locator, findings_counts, {"excerpt_bytes": 0, "shown_bytes": 0})
+    verdict = str((doc.get("domain_outcome") or {}).get("outcome") or "unknown")
+    footer = _render_footer(
+        primary_locator, findings_counts, {"excerpt_bytes": 0, "shown_bytes": 0}, verdict
+    )
     excerpt_budget = (
         cr.MODEL_VIEW_MAX_BYTES
         - _bytes(control)
@@ -339,7 +362,7 @@ def project_json(record: cr.CommonRecord | dict[str, Any]) -> dict[str, Any]:
     view = ""
     for _ in range(4):
         excerpt_block, evidence_counts = _render_excerpt(doc, excerpt_budget)
-        footer = _render_footer(primary_locator, findings_counts, evidence_counts)
+        footer = _render_footer(primary_locator, findings_counts, evidence_counts, verdict)
         parts = [part for part in (control, findings_block, excerpt_block, footer) if part]
         view = "\n\n".join(parts) + "\n"
         excess = _bytes(view) - cr.MODEL_VIEW_MAX_BYTES

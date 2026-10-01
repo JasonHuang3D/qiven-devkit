@@ -58,6 +58,17 @@ compare, not name resolution). A PASS writes a merge-proof receipt for
 that exact head to `.generated-temp/operator/receipts/<gate>-<head>.json`
 (required before any merge-class publication, pit P-53).
 
+The final human summary line is ONE line carrying class + action +
+reference (the selector law, ADR-0060 D3: `grep -E "FAIL|OK"`, `head`/`tail`
+fragments of the summary keep all three):
+
+```text
+[FAIL] gate:local: FAIL - NEXT action: DIAGNOSE - <bounded correction> - evidence: <locator>
+[ OK ] gate:local: PASS - receipt: .generated-temp/operator/receipts/<gate>-<head>.json
+```
+
+Machine `--json` mode carries no such line (JSON purity).
+
 ## run — declared tasks
 
 `qiven run TASK...` (`--parallel` to run them concurrently). Unknown names
@@ -83,13 +94,19 @@ registered in NO gate — it reads what producers already retained.
   artifact is walked incrementally and never loaded whole (D6).
 - **Path boundary**: a RELATIVE path addresses the repository's
   `.generated-temp/` evidence roots (the leading `.generated-temp/` is
-  optional); an ABSOLUTE path is accepted only when it resolves under the
-  repository root — anything else, `..` traversal included, is a typed
-  error (exit 2), never a silent redirect.
-- Missing (including expired/never-retained pointers), unreadable and
-  directory paths are typed errors naming the resolved path — an expired
-  pointer stays visible as a typed miss, it never justifies dropping the
-  diagnostic (D6).
+  optional); an ABSOLUTE path is accepted when it resolves under the
+  repository root OR under the operator's retained-evidence area outside
+  it (`<OS temp>/qiven-operator/`, where failed/oversized task evidence
+  is retained — retained task evidence stays recoverable through this
+  route) — anything else, `..` traversal included, is a typed error
+  (exit 2), never a silent redirect.
+- Missing (never-retained pointers), unreadable and directory paths are
+  typed errors naming the resolved path. An EXPIRED artifact (gone, with
+  a `<artifact>.expired` sibling marker left by the retention contract)
+  answers with the typed `evidence expired` error naming the ORIGINAL
+  locator plus the marker's bounded note — an expired pointer stays
+  visible, it never justifies dropping the diagnostic; when artifact and
+  marker both exist the bytes win (D6).
 - `--json` returns the same facts machine-parsed (`bytes_returned`,
   `total_bytes`, `eof`, `next_offset`, `content`). Decoding is a view
   (UTF-8 with replacement): invalid captured bytes stay recoverable in
