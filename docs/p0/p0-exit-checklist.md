@@ -22,7 +22,7 @@ existing tests that already cover the class (no new fixture needed).
 | 7 | Unknown running operations | qiven-devkit `tools/p0_closeout_test.py` EC10 | E: unknown exec id -> typed CLI answer (exit 2) + one record with completion=unknown, observation=unavailable, FIX naming `qiven exec list` |
 | 8 | Malformed bootstrap receipts | qiven-context `tools/test.py::LauncherReceiptTests::test_unreadable_receipt_refuses_operator_import`, `test_nondict_receipt_refuses_operator_import` | Earlier (P0-A R6b); workspace B-suite validates embedded records |
 | 9 | Useful success/status data | qiven-devkit `tools/operator-test.py` G1.info-status/info-head/json-purity, G2l.list-visible, C9/C10 (custody identity + heartbeat freshness) | Earlier: status retains requested data, never content-free PASS |
-| 10 | Known grep/head/tail projections retaining class/action/reference | E: qiven-devkit `tools/p0_closeout_test.py` EC3 (gate human summary), EC4 (record projection view); qiven-context `tools/test_p0_closeout.py` CX3 (validator report; genuine losses documented) | E producer fix: the gate FAIL/PASS human summary is ONE line carrying class + action + reference; projection line 1 + footer carry verdict/next/locator |
+| 10 | Known grep/head/tail projections retaining class/action/reference | E: qiven-devkit `tools/p0_closeout_test.py` EC3 (gate human summary), EC4 (record projection view); qiven-context `tools/test_p0_closeout.py` CX3 (validator report summary line; selector retention asserted) | E producer fix: the gate FAIL/PASS human summary is ONE line carrying class + action + reference; projection line 1 + footer carry verdict/next/locator; post-E follow-up producer fix: the context validator's stdout summary line carries class + action + reference as BOTH first and last line (CX3/CX4) |
 | 11 | Router carrier, raw Bash, custody, proof, public JSON under named profiles | qiven-devkit `tools/hook_exec_router_test.py` (classification + carriers), `tools/router_record_adapter_test.py` RA/RB (denial carrier byte-stability, profile router-denial-legacy-v1); `tools/operator-test.py` G2/G3 (custody laws C1-C10); E: `tools/p0_closeout_test.py` EC5 (raw-Bash passthrough: exit code + verdict line), EC6 (gate_proof: exact head + gate name + digest, fails closed tampered/missing), EC7 (merge_proof receipt row shape: byte-exact publication sample + live receipt); G1 json purity rows (public JSON) | D7: carrier bytes unchanged; adapter is a pure additive view |
 
 ## 2. Exit-checklist rows (E-batch scope)
@@ -30,7 +30,7 @@ existing tests that already cover the class (no new fixture needed).
 | Row | Requirement | Landed where |
 | --- | --- | --- |
 | 5 | Invalid-UTF-8 end-to-end through the capture->render seam | EC1 (operator `_run_process` capture: b'\xff\xfe bad' retained raw, bounded replacement render, honest record, evidence-read recovery), EC2 (projection excerpt seam), CX1 (validator file-capture path: typed finding, no traceback) |
-| 8 | Known grep/head/tail projections retain class/action/reference | EC3, EC4, CX3 (+ the summary-line producer fix in `qiven_operator.py` / projection enrichment in `record_projection.py`) |
+| 8 | Known grep/head/tail projections retain class/action/reference | EC3, EC4, CX3, CX4 (+ the summary-line producer fix in `qiven_operator.py` / projection enrichment in `record_projection.py` / validator summary line + guarded non-record reads in qiven-context `tools/validate_context.py`) |
 | 10 | Raw-Bash passthrough + gate_proof/merge_proof named profiles | EC5, EC6, EC7 (+ RA/RB carrier suite) |
 
 ## 3. Coverage / evidence / budget statement
@@ -73,15 +73,17 @@ existing tests that already cover the class (no new fixture needed).
 3. CV in-repo mirror law: the context suite's structural mirror
    (`tools/test_common_records.py`) is context-local law, not the frozen
    devkit validator; narrowed by XC1/XC2, not replaced.
-4. Validator summary line carries class only (`Context validation
-   FAILED`): next action / record reference do not survive
-   `grep -E "FAIL|OK"` on that surface (CX3 documents; enrichment is a
-   context producer edit outside the E batch's editable scope —
-   reported as a finding for a later batch).
-5. Validator unguarded reads: invalid UTF-8 in `README.md`,
-   `BOOTSTRAP.md` or a session checkpoint would escape
-   `validate_repository` as a traceback (record-file paths are guarded —
-   CX1); producer fix outside E editable scope — reported.
+4. ~~Validator summary line carries class only~~ CLOSED post-E by the
+   producer fix in qiven-context `tools/validate_context.py`: the stdout
+   summary line now carries class + action + reference as BOTH the first
+   and last line (fixtures CX3/CX4; the inventory `public_contract` for
+   ctx-validator is updated to the enriched shape).
+5. ~~Validator unguarded reads~~ CLOSED post-E by the same producer fix:
+   the non-record content reads (README, BOOTSTRAP, session checkpoint,
+   collaboration contracts, ledger events/README, repositories.yaml) go
+   through a decode-guarded reader — invalid UTF-8 is a typed finding
+   naming the file, dependent content checks are skipped for that file
+   (D4), never a traceback (fixture CX4).
 6. `check_references` (the exit-zero report surface) does not yet emit
    Common Records (`planned` in the inventory).
 7. `qiven run` emits no Common Record (gate/exec/status emit; observed
@@ -107,7 +109,7 @@ existing tests that already cover the class (no new fixture needed).
 | qiven-devkit | `python tools/p0_closeout_test.py` | EC1-EC11 OK (73 named checks) |
 | qiven-devkit | `python tools/context_records_crosscheck_test.py` | XC1 + live XC2 OK |
 | qiven-devkit | `python tools/operator-test.py` | G1-G4/G2/G3 + R1-R3 + EVR + ER1-ER4 OK (140 named checks) |
-| qiven-context | `./.venv/Scripts/python.exe tools/test_all.py` | all groups OK (incl. new p0-closeout CX1-CX3) |
+| qiven-context | `./.venv/Scripts/python.exe tools/test_all.py` | all groups OK (incl. the p0-closeout suite CX1-CX4) |
 
 Gate registration: devkit gate `local` runs `p0-closeout-tests` and
 `context-records-crosscheck-tests` (`.qiven/operator.json`); context

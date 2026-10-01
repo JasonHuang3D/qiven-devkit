@@ -295,8 +295,9 @@ def main() -> int:
         check(first in grep_lines(view_lines), "EC4.grep-keeps-line1")
         footer = view_lines[-1]
         check(footer.startswith("== qiven-record end:")
-              and "verdict=FAILED" in footer and "locator=" in footer,
-              "EC4.tail-keeps-class-and-locator", footer)
+              and "verdict=FAILED" in footer and "next=DIAGNOSE" in footer
+              and "locator=" in footer,
+              "EC4.tail-keeps-class-action-and-locator", footer)
         pass_doc = latest_record(f"ec-sel-pass-gate-{head}")
         pass_view_lines = rp.project(pass_doc).splitlines()
         check("verdict=PASSED" in pass_view_lines[0], "EC4.pass-verdict-token",

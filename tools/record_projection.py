@@ -297,7 +297,7 @@ def _render_excerpt(
 
 def _render_footer(
     locator: str, findings_counts: dict[str, int], evidence_counts: dict[str, Any],
-    verdict: str = "UNKNOWN",
+    verdict: str = "UNKNOWN", next_action: str = "-",
 ) -> str:
     repeat = f" locator={_clip(locator, 160)}" if locator else ""
     evidence_note = (
@@ -305,11 +305,14 @@ def _render_footer(
         if evidence_counts.get("excerpt_bytes")
         else ""
     )
-    # the footer repeats the verdict class so tail-only fragments of the
-    # view still know pass/fail (E closeout selector law)
+    # the footer repeats the verdict class AND the next action so
+    # tail-only fragments of the view still know pass/fail and what to do
+    # next (E closeout selector law; D3 authorizes bounded header/footer
+    # repeats of the same record's locator)
     return (
         "== qiven-record end:"
         f" verdict={_clip(_flatten(verdict), 20).upper()}"
+        f" next={_clip(_flatten(next_action), 12)}"
         f" findings={findings_counts['returned']}/{findings_counts['total']}"
         f" (omitted {findings_counts['omitted']}){evidence_note}{repeat} =="
     )
@@ -346,8 +349,10 @@ def project_json(record: cr.CommonRecord | dict[str, Any]) -> dict[str, Any]:
     )
     findings_block, findings_counts = _render_findings(doc, findings_budget)
     verdict = str((doc.get("domain_outcome") or {}).get("outcome") or "unknown")
+    next_word = str((doc.get("next_action") or {}).get("action") or "-")
     footer = _render_footer(
-        primary_locator, findings_counts, {"excerpt_bytes": 0, "shown_bytes": 0}, verdict
+        primary_locator, findings_counts, {"excerpt_bytes": 0, "shown_bytes": 0},
+        verdict, next_word,
     )
     excerpt_budget = (
         cr.MODEL_VIEW_MAX_BYTES
@@ -362,7 +367,9 @@ def project_json(record: cr.CommonRecord | dict[str, Any]) -> dict[str, Any]:
     view = ""
     for _ in range(4):
         excerpt_block, evidence_counts = _render_excerpt(doc, excerpt_budget)
-        footer = _render_footer(primary_locator, findings_counts, evidence_counts, verdict)
+        footer = _render_footer(
+            primary_locator, findings_counts, evidence_counts, verdict, next_word
+        )
         parts = [part for part in (control, findings_block, excerpt_block, footer) if part]
         view = "\n\n".join(parts) + "\n"
         excess = _bytes(view) - cr.MODEL_VIEW_MAX_BYTES
