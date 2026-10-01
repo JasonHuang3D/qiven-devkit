@@ -23,6 +23,7 @@ message on failure.
 """
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -277,6 +278,20 @@ def main() -> int:
         check(not marker_c.exists(), "G1.failfast-stopped", "fail-fast gate executed a later stage")
         check("[ RUN]" not in failed.stdout and "[FAIL]" not in failed.stdout, "G1.failfast-json-purity")
 
+        # R3 (P0 repair): fail-fast execution is unchanged, but the stages
+        # that never ran are REPORTED (status "not_run", returncode None -
+        # an unobserved exit, never guessed) so a consumer can distinguish
+        # "gate finished" from "gate stopped at stage 2 of 3".
+        r3_rows = [(item["name"], item["status"], item["returncode"])
+                   for item in failed_payload["results"]]
+        check(r3_rows == [("fixture-pass", "pass", 0),
+                          ("fixture-fail", "fail", 7),
+                          ("fixture-must-not-run", "not_run", None)],
+              "R3.not-run-coverage", str(r3_rows))
+        check(failed_payload["results"][2]["detail"]
+              == "not started: gate stopped after failed stage fixture-fail",
+              "R3.not-run-detail", str(failed_payload["results"][2].get("detail")))
+
         # G1b: failure-guidance law (owner direction 2026-10-01): in human
         # mode the [qiven] guidance banner precedes the first [FAIL] line,
         # the failure detail stays verbatim, and the banner fires once per
@@ -317,6 +332,10 @@ def main() -> int:
         isolation_payload = json.loads(isolation.stdout)
         check(isolation_payload["status"] == "pass", "G1.isolation-pass", isolation.stdout)
         check(os.environ.get(child_only) is None, "G1.no-env-leak")
+        # R3 negative case: an all-pass gate carries NO not_run entries
+        check(not [item for item in isolation_payload["results"] if item["status"] == "not_run"],
+              "R3.no-not-run-on-pass",
+              str([item for item in isolation_payload["results"] if item["status"] == "not_run"]))
 
         parallel = run(
             [
@@ -352,6 +371,123 @@ def main() -> int:
         check("[ OK ] fixture-slow" in rendered, "G1.human-ok-tag")
         check("[ OK ] run: PASS" in rendered, "G1.human-summary")
         check("\x1b[" not in rendered, "G1.no-ansi")
+
+        # -------- R1/R2: bounded excerpts + raw evidence retention ------
+        # R1: above the spill threshold the compact payload keeps bounded
+        # head/tail excerpts (never a placeholder) with machine-checkable
+        # byte accounting, while the full payload stays byte-exact in the
+        # durable log file.
+        big_text = "".join(f"r1-line-{i:05d}-" + "y" * 40 + "\n" for i in range(200))
+        spill_payload = {
+            "gate": "r1-fixture",
+            "status": "pass",
+            "results": [
+                {"name": "r1-big", "status": "pass", "returncode": 0,
+                 "duration_seconds": 0.1, "detail": "", "output": big_text},
+                {"name": "r1-small", "status": "pass", "returncode": 0,
+                 "duration_seconds": 0.1, "detail": "", "output": "r1-small-ok"},
+            ],
+        }
+        spilled = operator._spill_large_logs(spill_payload)
+        check("log_file" in spilled and Path(spilled["log_file"]).is_file(), "R1.spill-file")
+        full_text = Path(spilled["log_file"]).read_text(encoding="utf-8")
+        check(json.loads(full_text) == spill_payload, "R1.full-payload-byte-exact")
+        big_row = spilled["results"][0]
+        check(big_row["output_bytes_total"] == len(big_text.encode("utf-8")), "R1.total-bytes")
+        check(big_row["output_bytes_omitted"] > 0, "R1.omitted-positive")
+        check(big_text.splitlines()[0] in big_row["output"], "R1.head-kept-inline")
+        check(big_text.splitlines()[-1] in big_row["output"], "R1.tail-kept-inline")
+        marker_line = next(line for line in big_row["output"].splitlines()
+                           if line.startswith("[... "))
+        check(marker_line == f"[... {big_row['output_bytes_omitted']} bytes omitted; "
+                             "full output in log_file ...]", "R1.marker-text", marker_line)
+        head_part, tail_part = big_row["output"].split("\n" + marker_line + "\n", 1)
+        check(len(head_part.encode("utf-8")) + len(tail_part.encode("utf-8"))
+              + big_row["output_bytes_omitted"] == big_row["output_bytes_total"],
+              "R1.completeness-accounting")
+        small_row = spilled["results"][1]
+        check(small_row["output"] == "r1-small-ok" and small_row["output_bytes_omitted"] == 0,
+              "R1.small-verbatim")
+        check(small_row["output_bytes_total"] == len(b"r1-small-ok"), "R1.small-total")
+        check(small_row.get("detail") == "", "R1.non-output-keys-untouched")
+        # under the threshold the payload is returned unchanged (existing
+        # key names, no counters)
+        tiny_payload = {"gate": "r1-tiny", "results": [
+            {"name": "r1-tiny-task", "status": "pass", "returncode": 0, "output": "x" * 100}]}
+        check(operator._spill_large_logs(tiny_payload) is tiny_payload, "R1.under-threshold-unchanged")
+        # the budget is UTF-8 BYTES, not characters: 3000 CJK chars are
+        # 9000 bytes and must spill even though the char count is under
+        # the threshold
+        wide_payload = {"gate": "r1-wide", "results": [
+            {"name": "r1-wide-task", "status": "pass", "returncode": 0, "output": "中" * 3000}]}
+        wide = operator._spill_large_logs(wide_payload)
+        check("log_file" in wide, "R1.byte-budget-not-char-count")
+        check(wide["results"][0]["output_bytes_total"] == 9000, "R1.wide-total-bytes")
+        check("中" in wide["results"][0]["output"], "R1.wide-codepoints-intact")
+
+        # R2: a failing task's raw captured bytes are retained (digest +
+        # byte count carried on the Result) before the temp log is
+        # unlinked; agent rendering is bounded.
+        r2_console = operator.Console(json_mode=True, no_color=True)
+        r2_fail = operator._run_process(
+            "r2-fail-task",
+            {"argv": [sys.executable, "-c",
+                      "print('r2-head-marker'); print('r2-mid-omitted ' + 'm' * 6000); "
+                      "print('r2-tail-marker'); raise SystemExit(9)"]},
+            r2_console,
+        )
+        check(r2_fail.status == "fail" and r2_fail.returncode == 9, "R2.fail-shape", r2_fail.detail)
+        check(bool(r2_fail.evidence_path) and Path(r2_fail.evidence_path).is_file(),
+              "R2.failure-raw-retained", str(r2_fail.evidence_path))
+        retained = Path(r2_fail.evidence_path).read_bytes()
+        check(b"r2-head-marker" in retained and b"r2-tail-marker" in retained
+              and b"r2-mid-omitted" in retained, "R2.retained-raw-bytes")
+        check(r2_fail.evidence_sha256 == hashlib.sha256(retained).hexdigest(), "R2.digest")
+        check(r2_fail.evidence_bytes == len(retained), "R2.byte-count")
+        check(Path(r2_fail.evidence_path).name.startswith("qiven-task-r2-fail-task-"),
+              "R2.evidence-name", Path(r2_fail.evidence_path).name)
+
+        r2_buffer = io.StringIO()
+        r2_human = operator.Console(json_mode=False, verbose=False, no_color=True)
+        with contextlib.redirect_stdout(r2_buffer):
+            operator._run_process(
+                "r2-render-task",
+                {"argv": [sys.executable, "-c",
+                          "print('r2-render-head'); print('R2-MIDDLE-OMITTED ' + 'z' * 6000); "
+                          "print('r2-render-tail'); raise SystemExit(5)"]},
+                r2_human,
+            )
+        rendered_fail = r2_buffer.getvalue()
+        check("r2-render-head" in rendered_fail and "r2-render-tail" in rendered_fail,
+              "R2.bounded-head-tail-rendered", rendered_fail[:400])
+        # the omitted middle is the 6000-byte z-run: the head excerpt may
+        # legitimately carry the line's first ~1000 z's, but a 1200-byte
+        # consecutive run cannot exist in a 1024+1024-byte excerpt (the
+        # pre-fix unbounded render carried all 6000)
+        check("z" * 1200 not in rendered_fail, "R2.middle-omitted-from-render")
+        check("bytes omitted" in rendered_fail, "R2.omitted-marker-rendered")
+        check("full output retained at:" in rendered_fail, "R2.evidence-path-named")
+
+        # R2 threshold law: small successful outputs are NOT retained
+        # (declared threshold, not happenstance); over-threshold success
+        # IS retained.
+        r2_ok = operator._run_process(
+            "r2-ok-task", {"argv": [sys.executable, "-c", "print('r2-ok')"]}, r2_console)
+        check(r2_ok.status == "pass" and r2_ok.returncode == 0, "R2.ok-shape")
+        check(r2_ok.evidence_path is None and r2_ok.evidence_sha256 is None
+              and r2_ok.evidence_bytes is None, "R2.small-success-not-retained")
+        r2_big = operator._run_process(
+            "r2-big-task",
+            {"argv": [sys.executable, "-c",
+                      "print('r2-big ' + 'b' * 70000)"]},
+            r2_console,
+        )
+        check(r2_big.status == "pass", "R2.big-ok-shape")
+        check(r2_big.evidence_bytes is not None
+              and r2_big.evidence_bytes > operator.RAW_LOG_RETAIN_THRESHOLD_BYTES,
+              "R2.over-threshold-retained", str(r2_big.evidence_bytes))
+        check(Path(r2_big.evidence_path).read_bytes().startswith(b"r2-big"), "R2.big-raw-content")
+        assert_no_repo_bytecode(repo)
 
         # -------- G2/G3 fixtures + helpers ---------------------------------
         scratch = repo / ".generated-temp" / "exec-tests"

@@ -180,6 +180,16 @@ def main() -> int:
     assert "timeout=CONFIGURE_TIMEOUT" in text, "B7b: configure subprocess is unbounded"
     assert "ConfigureTimeout" in text, "B7b: no typed configure-timeout branch"
 
+    # B7c (P0 repair R6a): no failure relay may discard one captured
+    # stream because the other is non-empty (`stdout or stderr`); both
+    # sites must route through the labeled both-streams renderer.
+    assert "result.stdout.strip() or result.stderr.strip()" not in text, (
+        "B7c: a failure relay discards one captured stream"
+    )
+    assert text.count("_print_captured_failure(") >= 3, (
+        "B7c: preflight and adapter failure paths must relay both streams"
+    )
+
     with tempfile.TemporaryDirectory() as tmp_name:
         root = Path(tmp_name)
         control, devkit, lock = _fixture(root)
@@ -238,9 +248,16 @@ def main() -> int:
         _git(["reset", "-q", "--hard", "HEAD~1"], control)
 
         # B5: authoritative bootstrap without an admitting policy is refused.
+        # The refusal comes from the RESOLVER child; since R6a the bootstrap
+        # relays the failed child's typed JSON inside the labeled
+        # `[resolver-preflight stdout]` block (both streams retained), so
+        # the class is extracted from that block.
         result = _run_bootstrap(control, devkit, "--mode", "authoritative")
-        assert result.returncode == 1 and _error_type(result) == "UntrustedControlRevision", (
-            f"B5: {_error_type(result)}"
+        assert result.returncode == 1, f"B5: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        stdout_block = result.stdout.split("[resolver-preflight stdout]\n", 1)[1] \
+                               .split("[resolver-preflight stderr]", 1)[0]
+        assert json.loads(stdout_block)["error"]["type"] == "UntrustedControlRevision", (
+            f"B5: {stdout_block[:200]}"
         )
 
         # B6: the checkout-mapping file substitutes for --devkit.
@@ -250,7 +267,31 @@ def main() -> int:
         result = _run_bootstrap(control, None)
         assert result.returncode == 0 and json.loads(result.stdout)["released"] is True, "B6: mapping leg"
 
-    print("[ OK ] workspace-bootstrap contract test (B1-B8)")
+        # B9 (P0 repair R6a): a failing resolver preflight must surface
+        # BOTH captured streams, labeled - never discard stderr because
+        # stdout is non-empty; a long stream renders bounded with a
+        # truthful omitted-byte marker. The stub replaces the fixture
+        # resolver (identity still checks: only the worktree is dirty,
+        # which shadow mode labels as a note).
+        resolver = devkit / "tools" / "workspace_resolver.py"
+        resolver.write_text(
+            "import sys\n"
+            "sys.stdout.write('b9-out-marker\\n' + 'o' * 5000 + '\\n')\n"
+            "sys.stderr.write('b9-err-marker\\n')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8", newline="\n")
+        result = _run_bootstrap(control, devkit)
+        assert result.returncode == 1, f"B9: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert "[resolver-preflight stdout]" in result.stdout and "b9-out-marker" in result.stdout, (
+            f"B9: stdout stream not surfaced: {result.stdout[:300]}"
+        )
+        assert "[resolver-preflight stderr]" in result.stdout and "b9-err-marker" in result.stdout, (
+            f"B9: stderr stream discarded: {result.stdout[:300]}"
+        )
+        assert "bytes omitted" in result.stdout, "B9: unbounded or unmarked stream excerpt"
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+    print("[ OK ] workspace-bootstrap contract test (B1-B9)")
     return 0
 
 
