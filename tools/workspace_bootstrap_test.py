@@ -20,6 +20,9 @@ without coupling devkit self-containment to an untracked sibling.
 
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import shutil
@@ -318,12 +321,10 @@ def main() -> int:
         # B11 (R6a adapter-site completeness): the gate-configure ADAPTER
         # nonzero-exit site carries the same both-streams law as the
         # preflight site - typed banner, labeled streams, bounded excerpt.
-        # NOTE: the locators are repeated AFTER the subcommand - the
-        # bootstrap's subparsers inherit parents=[common] with plain
-        # defaults, so a pre-subcommand --control/--devkit is silently
-        # overwritten (adjacent pre-existing defect, reported as finding
-        # F-bootstrap-argparse; the subparser values win, which is the
-        # working spelling).
+        # The locators are repeated AFTER the subcommand (the spelling
+        # this leg was written against); since the SUPPRESS-defaults fix
+        # the pre-subcommand spelling works identically - B14 leg 3 pins
+        # that form against the same adapter site.
         resolver.write_text(
             "import sys\n"
             "sys.stdout.write('b11-adapter-out-marker\\n' + 'a' * 5000 + '\\n')\n"
@@ -407,7 +408,113 @@ def main() -> int:
         assert "(nothing captured)" in result.stdout, "B13: empty stream not explicitly marked"
         _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
 
-    print("[ OK ] workspace-bootstrap contract test (B1-B13)")
+        # B14 (P0 A2 defect a, F-bootstrap-argparse): shared flags given
+        # BEFORE the subcommand must survive the subparser re-parse. The
+        # subparsers inherit parents=[common]; with plain defaults the
+        # re-parse OVERWROTE the namespace (--control fell back to the
+        # ambient workspace root, --mode silently reset to shadow), so
+        # the pre-subcommand spelling targeted the wrong workspace.
+        # Leg 1: pre-subcommand locators + explicit `preflight`
+        # subcommand release the fixture exactly like the default path.
+        result = _run_bootstrap(control, devkit, "preflight")
+        assert result.returncode == 0, f"B14: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert json.loads(result.stdout)["released"] is True, (
+            "B14: pre-subcommand flags did not reach the resolver"
+        )
+
+        # Leg 2: --mode authoritative BEFORE the subcommand must arrive.
+        # Before the fix the subparser default reset it to shadow and
+        # this spelling SUCCEEDED against the fixture (the discriminator:
+        # a dropped mode flag silently downgraded an authoritative gate).
+        result = _run_bootstrap(control, devkit, "--mode", "authoritative", "preflight")
+        assert result.returncode == 1, f"B14: authoritative mode was dropped: {result.stdout[:300]}"
+        stdout_block = result.stdout.split("[resolver-preflight stdout]\n", 1)[1] \
+                               .split("[resolver-preflight stderr]", 1)[0]
+        assert json.loads(stdout_block)["error"]["type"] == "UntrustedControlRevision", (
+            f"B14: {stdout_block[:200]}"
+        )
+
+        # Leg 3: the gate-configure subparser shares the same parents
+        # mechanism - pre-subcommand locators must reach the ADAPTER site
+        # (B11's stub shape, locators now only before the subcommand).
+        resolver.write_text(
+            "import sys\n"
+            "sys.stdout.write('b14-adapter-out-marker\\n')\n"
+            "sys.stderr.write('b14-adapter-err-marker\\n')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8", newline="\n")
+        result = _run_bootstrap(control, devkit, "gate-configure",
+                                "--repo", "qiven-devkit", "--repo-root", str(devkit),
+                                "--preset", "default", "--cmake", "cmake")
+        assert result.returncode == 1, f"B14: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert "[resolver-adapter stdout]" in result.stdout and "b14-adapter-out-marker" in result.stdout, (
+            f"B14: adapter not reached with pre-subcommand flags: {result.stdout[:300]}"
+        )
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+        # B15 (P0 A2 defect b): a hung resolver preflight terminates
+        # TYPED (PreflightTimeout envelope, rc 1) with the partial
+        # captured streams relayed labeled - never a raw traceback.
+        # Behavioral leg without burning the real 120 s budget: the
+        # module constant is patched in-process (main() reads it at call
+        # time); the stub flushes its markers BEFORE sleeping so the
+        # timeout's partial capture carries them.
+        resolver.write_text(
+            "import sys, time\n"
+            "sys.stdout.write('b15-out-marker\\n'); sys.stdout.flush()\n"
+            "sys.stderr.write('b15-err-marker\\n'); sys.stderr.flush()\n"
+            "time.sleep(30)\n",
+            encoding="utf-8", newline="\n")
+        spec = importlib.util.spec_from_file_location("qiven_bootstrap_under_test", BOOTSTRAP)
+        bootstrap_mod = importlib.util.module_from_spec(spec)
+        saved_bytecode_flag = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True  # the real workspace stays clean
+        try:
+            spec.loader.exec_module(bootstrap_mod)
+        finally:
+            sys.dont_write_bytecode = saved_bytecode_flag
+        saved_budget = bootstrap_mod.PREFLIGHT_TIMEOUT
+        bootstrap_mod.PREFLIGHT_TIMEOUT = 3
+        captured_out, captured_err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(captured_out), contextlib.redirect_stderr(captured_err):
+                rc = bootstrap_mod.main(["--control", str(control), "--devkit", str(devkit),
+                                         "preflight"])
+        finally:
+            bootstrap_mod.PREFLIGHT_TIMEOUT = saved_budget
+        out_text, err_text = captured_out.getvalue(), captured_err.getvalue()
+        assert rc == 1, f"B15: rc={rc} (typed timeout must exit 1)"
+        envelope_at = out_text.find('{\n  "schema"')
+        assert envelope_at >= 0, f"B15: no typed error envelope: {out_text[:300]}"
+        envelope = json.loads(out_text[envelope_at:])
+        assert envelope["error"]["type"] == "PreflightTimeout", f"B15: {envelope}"
+        assert "timed out" in err_text, f"B15: no typed timeout banner: {err_text[:300]}"
+        assert "[resolver-preflight stdout]" in out_text and "b15-out-marker" in out_text, (
+            f"B15: partial stdout not relayed: {out_text[:300]}"
+        )
+        assert "[resolver-preflight stderr]" in out_text and "b15-err-marker" in out_text, (
+            f"B15: partial stderr not relayed: {out_text[:300]}"
+        )
+        assert "Traceback" not in err_text, "B15: raw traceback escaped the typed contract"
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+        # B16 (P0 A2 defect c): a failing `git` child's typed message
+        # retains BOTH captured streams. The classic unborn-HEAD
+        # `git rev-parse HEAD` prints "HEAD" to stdout AND the fatal to
+        # stderr; the former stderr-only rendering dropped the stdout
+        # half of that evidence.
+        unborn = root / "unborn"
+        unborn.mkdir()
+        _git(["init", "-q", "-b", "main"], unborn)
+        try:
+            bootstrap_mod._git(["rev-parse", "HEAD"], unborn)
+            raise AssertionError("B16: unborn rev-parse did not fail typed")
+        except bootstrap_mod.Typed as error:
+            message = str(error)
+            assert "[stdout]" in message and "HEAD" in message, f"B16: stdout dropped: {message}"
+            assert "[stderr]" in message and "fatal" in message, f"B16: stderr missing: {message}"
+
+    print("[ OK ] workspace-bootstrap contract test (B1-B16)")
     return 0
 
 

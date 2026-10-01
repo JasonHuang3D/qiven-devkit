@@ -44,6 +44,15 @@ Verdicts:
                 now enforces it mechanically). Checked FIRST and inside
                 exec payloads too: wrapping a heredoc in `qiven exec`
                 does not launder it.
+  inline-       python -c / node -e|--eval|-p / powershell -Command
+  authoring     payloads whose quoted body performs file-write operations - the
+                SAME absolute authoring law as heredoc (the -c/-e/
+                -Command string body is an authoring channel; wrapping
+                it in `qiven exec` does not launder it either). Compute
+                stays inline: stdout/stderr stream writes and write
+                statements targeting .generated-temp/ derived artifacts
+                pass raw (the sweep-class boundedness split, applied to
+                payloads).
   gate-class    qiven gate/run/ci invoked raw (minutes-class, may build)
   build         builds/toolchains - background re-call AND the MSBuild
                 node-reuse guard (ADR-0048 s3 defense in depth extended
@@ -187,6 +196,176 @@ _HEREDOC = re.compile(
     r"(?:^|[\s;|&(<])<<-?\s*(?:[\"']\s*[\"']|[A-Za-z_][A-Za-z0-9_]*)"
 )
 
+# Inline-interpreter authoring (same law as heredoc, extended class): a
+# `python -c` / `node -e` / `powershell -Command` invocation whose
+# QUOTED payload body performs file-write operations. Unlike the routing
+# classes this detector reads INSIDE the quoted payload (that is where
+# the authoring happens), so it uses a quote-aware token scan: the
+# interpreter and its -c/-e/-Command flag must be UNQUOTED command
+# tokens (quoted PROSE mentioning `python -c 'open(x,"w")'` in a commit
+# message never matches), and the following quoted token is the payload.
+# Per interpreter: payload flag spellings, then the option tokens that
+# CONSUME A VALUE before the payload flag (`powershell -ExecutionPolicy
+# Bypass -Command`, `python -W ignore -c`, `py -3.11 -X utf8 -c`) - the
+# value token is not a payload flag and must not end the probe (found by
+# review probes: those spellings escaped the detector). Long/alias
+# spellings ride the same sets: node --eval/-p/--print execute code just
+# like -e; powershell -c is the documented -Command alias.
+_PY_PAYLOAD_FLAGS = ("-c",)
+_PY_VALUE_OPTIONS = ("-m", "-w", "-x")
+_NODE_PAYLOAD_FLAGS = ("-e", "--eval", "-p", "--print")
+_NODE_VALUE_OPTIONS = ("-r", "--require", "--loader", "--input-type")
+_PS_PAYLOAD_FLAGS = ("-command", "-c")
+_PS_VALUE_OPTIONS = ("-executionpolicy", "-workingdirectory")
+_INLINE_INTERPRETERS = {
+    "python": (_PY_PAYLOAD_FLAGS, _PY_VALUE_OPTIONS, False),
+    "python3": (_PY_PAYLOAD_FLAGS, _PY_VALUE_OPTIONS, False),
+    "python.exe": (_PY_PAYLOAD_FLAGS, _PY_VALUE_OPTIONS, False),
+    "py": (_PY_PAYLOAD_FLAGS, _PY_VALUE_OPTIONS, False),
+    "node": (_NODE_PAYLOAD_FLAGS, _NODE_VALUE_OPTIONS, False),
+    "node.exe": (_NODE_PAYLOAD_FLAGS, _NODE_VALUE_OPTIONS, False),
+    "powershell": (_PS_PAYLOAD_FLAGS, _PS_VALUE_OPTIONS, True),
+    "powershell.exe": (_PS_PAYLOAD_FLAGS, _PS_VALUE_OPTIONS, True),
+    "pwsh": (_PS_PAYLOAD_FLAGS, _PS_VALUE_OPTIONS, True),
+    "pwsh.exe": (_PS_PAYLOAD_FLAGS, _PS_VALUE_OPTIONS, True),
+}
+# Stream writes are compute output, not file authoring: scrubbed before
+# the write-op scan (sys.stdout.write(...) is the normal python -c way
+# to print).
+_PY_STREAM_WRITE = re.compile(
+    r"\b(?:sys\.)?std(?:out|err)(?:\.buffer)?\.write(?:lines)?\s*\("
+)
+# python/node file-write shapes inside an inline payload. The open()
+# mode must be a SEPARATE trailing argument (comma-prefixed): without
+# that anchor the quote backtracking read `open('a')` - a one-letter
+# READ filename - as mode 'a'.
+_PY_INLINE_WRITE = re.compile(
+    r"open\s*\([^()]*,\s*['\"](?:[wax][+b]?|r\+)['\"]\s*\)"
+    r"|\.write(?:lines|_text|_bytes)?\s*\("
+    r"|\bwriteFile\s*\("
+    r"|\bwriteFileSync\s*\("
+    r"|\bappendFile\s*\("
+    r"|\bappendFileSync\s*\("
+    r"|\bcreateWriteStream\s*\("
+)
+# powershell file-write shapes: the named cmdlets plus redirect
+# operators writing a FILE (`> file`, `>> file`, `2> err` - not the
+# `2>&1` stream merge, not `> $null`/`> NUL` discard). In powershell
+# text a bare `>` is a redirect, never a comparison (comparisons are
+# -gt/-lt).
+_PS_INLINE_WRITE = re.compile(
+    r"\bset-content\b"
+    r"|\bout-file\b"
+    r"|\badd-content\b"
+    r"|(?:^|[\s|&;,(])\d*>{1,2}(?!\s*(?:&|\$null\b|nul\b))\s*[^\s&;)]",
+    re.IGNORECASE,
+)
+
+
+def _segment_tokens(text: str) -> list[tuple[str, bool]]:
+    """Quote-aware tokenization of one command segment: returns
+    (token, was_quoted) pairs. A quoted span (single or double quotes,
+    no escape handling) stays ONE token with was_quoted=True - the same
+    walk discipline as _split_segments, minus separator splitting."""
+    tokens: list[tuple[str, bool]] = []
+    current: list[str] = []
+    quote: str | None = None
+    quoted = False
+    for char in text:
+        if quote is not None:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in ("'", '"'):
+            quote = char
+            quoted = True
+            current.append(char)
+            continue
+        if char.isspace():
+            if current:
+                tokens.append(("".join(current), quoted))
+                current = []
+                quoted = False
+            continue
+        current.append(char)
+    if current:
+        tokens.append(("".join(current), quoted))
+    return tokens
+
+
+def _payload_writes_files(body: str, powershell: bool) -> bool:
+    """One inline payload body authors files outside .generated-temp/?
+    Statement-scoped exemption (mirrors the sweep-class boundedness
+    split): derived-artifact writes under .generated-temp/ are the
+    sanctioned compute shape (ADR-0042: only .generated-temp is an
+    allowed generated directory) and pass; any OTHER write statement
+    denies. Statements are approximated by splitting on `;` and
+    newlines - an approximation that fails toward deny (strictness
+    beats leaking authoring through a hook, same accepted-false-positive
+    law as the heredoc bit-shift)."""
+    if not powershell:
+        body = _PY_STREAM_WRITE.sub(" __stream_write(", body)
+    pattern = _PS_INLINE_WRITE if powershell else _PY_INLINE_WRITE
+    for statement in re.split(r"[;\n]", body):
+        if ".generated-temp" in statement:
+            continue
+        if pattern.search(statement):
+            return True
+    return False
+
+
+def _inline_authoring_payload(segment: str) -> bool:
+    """True when an inline-interpreter shape carries a quoted payload
+    whose body writes files. The interpreter and payload flag must be
+    unquoted command tokens (so quoted prose never matches); options
+    between them are skipped (`python -u -c`, `py -3.11 -c`,
+    `powershell -NoProfile -Command`), including options that consume a
+    VALUE token (`powershell -ExecutionPolicy Bypass -Command`,
+    `python -W ignore -c`) and the flag's own long spellings
+    (`node --eval`, `node -p`); an `=`-attached payload
+    (`--eval='code'`) rides the flag token itself. The payload must be a
+    single quoted token. Residuals, honestly: payloads built from
+    variables or shell-concatenated parts, unlisted value-taking
+    options, powershell's colon-attached `-Command:"..."` form and
+    nested-interpreter laundering (`$(python -c ...)`, `bash -c`) stay
+    out of reach - the contract remains the backstop, same as heredoc."""
+    tokens = _segment_tokens(segment)
+    for index in range(len(tokens)):
+        name, name_quoted = tokens[index]
+        if name_quoted:
+            continue
+        entry = _INLINE_INTERPRETERS.get(name.lower())
+        if entry is None:
+            continue
+        payload_flags, value_options, powershell = entry
+        probe = index + 1
+        while probe < len(tokens):
+            option, option_quoted = tokens[probe]
+            if not option.startswith("-"):
+                break
+            lowered = option.lower()
+            attached = next((f for f in payload_flags if lowered.startswith(f + "=")), None)
+            if attached is not None:
+                payload = option[len(attached) + 1:]
+                body = payload[1:-1] if len(payload) >= 2 and payload[0] == payload[-1] \
+                    and payload[0] in ("'", '"') else payload
+                if _payload_writes_files(body, powershell=powershell):
+                    return True
+                break
+            if option_quoted:
+                break
+            if lowered in payload_flags:
+                if probe + 1 < len(tokens) and tokens[probe + 1][1]:
+                    payload = tokens[probe + 1][0]
+                    body = payload[1:-1] if len(payload) >= 2 and payload[0] == payload[-1] \
+                        and payload[0] in ("'", '"') else payload
+                    if _payload_writes_files(body, powershell=powershell):
+                        return True
+                break
+            probe += 2 if lowered in value_options else 1
+    return False
+
 # Segment-level patterns (each applied to ONE command segment, anchored
 # at its start; see classify() for the splitting law). The launcher/env
 # prefix tolerates BOTH orders - `python FOO=1 qiven ...` and
@@ -285,6 +464,18 @@ _DENY_HEREDOC = (
     "严厉禁止使用 heredoc：文件创作必须使用原生 Read/Write/Edit 工具；请勿尝试绕路。\n"
     "(A genuine bit-shift expression can match this pattern — rewrite it, e.g. compute via python.)"
 )
+# Same law, same one-step teaching shape, extended authoring channel:
+# the inline -c/-e/-Command string body. Compute stays inline - only
+# file-write statements deny; the allowance note teaches the sanctioned
+# derived-artifact shape instead of a bare refusal.
+_DENY_INLINE_AUTHORING = (
+    f"{_HOOK_TAG} inline-script authoring DENIED (contract: collaboration/operating-contract.md\n"
+    "File-authoring tool discipline; MEM-20260921T203500Z-D2A7F4; MEM-20260923T183000Z-A1B2C3).\n"
+    "严厉禁止使用内联脚本（python -c / node -e / powershell -Command）写文件：文件创作必须使用原生\n"
+    "Read/Write/Edit 工具；请勿尝试绕路。\n"
+    "(Compute may stay inline: write statements targeting .generated-temp/ derived artifacts pass\n"
+    "raw, and stdout/stderr stream writes are not file authoring.)"
+)
 
 
 def _command_from(payload: object) -> str:
@@ -349,6 +540,7 @@ def _split_segments(command: str) -> list[str]:
 
 _VERDICT_PRIORITY = (
     "heredoc",
+    "inline-authoring",
     "gate-class",
     "git-network",
     "build",
@@ -467,6 +659,8 @@ def _classify_segment(segment: str, scope_root: Path) -> str:
     surface = _strip_quoted(segment.lstrip())
     if _HEREDOC.search(surface):
         return "heredoc"
+    if _inline_authoring_payload(segment.strip()):
+        return "inline-authoring"
     if _OPERATOR_EXEC.match(surface):
         return "allow"
     if _GIT_BOUNDED_SEARCH.match(surface):
@@ -614,6 +808,10 @@ def verdict(command: str, probe_runner=_run_git, background: bool = False,
         return 0, ""
     if kind == "heredoc":
         return 2, _DENY_HEREDOC
+    if kind == "inline-authoring":
+        # absolute, same law as heredoc: backgrounding does not make an
+        # inline file-write a different act
+        return 2, _DENY_INLINE_AUTHORING
     if kind == "interactive":
         return 2, _DENY_INTERACTIVE
     if kind == "sweep-scoped":
