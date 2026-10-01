@@ -4,6 +4,7 @@ import argparse
 import concurrent.futures
 import ctypes
 from dataclasses import dataclass, asdict
+import hashlib
 import json
 import math
 import os
@@ -15,6 +16,7 @@ import tempfile
 import threading
 import time
 from typing import Any
+import uuid
 
 
 # WR-6 consumption model (2026-09-28; supersedes the ADR-0046 Decision-3
@@ -60,10 +62,21 @@ def _color_enabled() -> bool:
 class Result:
     name: str
     status: str
-    returncode: int
+    # None is the not_run sentinel (P0 repair R3): an unexecuted stage's
+    # exit was never observed, and standard §4.3 forbids guessing it to 0.
+    # All failure accounting keys on truthiness (`if result.returncode`),
+    # so None correctly counts as neither pass nor fail.
+    returncode: int | None
     duration_seconds: float = 0.0
     detail: str = ""
     output: str = ""
+    # P0 repair R2 evidence retention: set only when the task's raw
+    # captured-output bytes were retained as a durable artifact (task
+    # failure OR over RAW_LOG_RETAIN_THRESHOLD_BYTES). None means "no
+    # artifact retained" - absent, never guessed.
+    evidence_path: str | None = None
+    evidence_sha256: str | None = None
+    evidence_bytes: int | None = None
 
 
 class Console:
@@ -1205,6 +1218,76 @@ def _argv_for_task(spec: dict[str, Any]) -> list[str]:
     return argv
 
 
+# ===========================================================================
+# Bounded inline excerpts + raw evidence retention (P0 producer repairs
+# R1/R2, 2026-10-01). Budgets are serialized UTF-8 BYTES, never character
+# counts; head/tail slices land on character boundaries (byte-slice then
+# lossy-decode drops at most the one partial codepoint at the boundary,
+# so localized diagnostics stay byte-faithful); control lines (markers)
+# are ASCII-safe. Shared by _spill_large_logs (R1) and _run_process (R2).
+# ===========================================================================
+
+RESULT_EXCERPT_HEAD_BYTES = 1024
+RESULT_EXCERPT_TAIL_BYTES = 1024
+# a task's raw captured output is retained as durable evidence when the
+# task FAILED or the captured bytes exceed this threshold (declared
+# decision, not happenstance)
+RAW_LOG_RETAIN_THRESHOLD_BYTES = 65536
+
+
+def _utf8_prefix(text: str, budget: int) -> str:
+    """Longest character-boundary prefix of `text` whose UTF-8 encoding
+    fits in `budget` bytes."""
+    if budget <= 0 or not text:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= budget:
+        return text
+    return encoded[:budget].decode("utf-8", errors="ignore")
+
+
+def _utf8_suffix(text: str, budget: int) -> str:
+    """Character-boundary suffix of `text` of at most `budget` UTF-8 bytes."""
+    if budget <= 0 or not text:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= budget:
+        return text
+    return encoded[-budget:].decode("utf-8", errors="ignore")
+
+
+def _excerpt_with_marker(text: str, full_where: str) -> tuple[str, int]:
+    """(bounded excerpt, omitted byte count) for one captured text; when
+    bytes are omitted, an ASCII marker names where the full output lives.
+    head + tail + omitted == total UTF-8 bytes always holds."""
+    total = len(text.encode("utf-8"))
+    head = _utf8_prefix(text, RESULT_EXCERPT_HEAD_BYTES)
+    tail = _utf8_suffix(text, RESULT_EXCERPT_TAIL_BYTES)
+    omitted = total - len(head.encode("utf-8")) - len(tail.encode("utf-8"))
+    if omitted <= 0:
+        return text, 0
+    marker = f"[... {omitted} bytes omitted; {full_where} ...]"
+    return f"{head}\n{marker}\n{tail}", omitted
+
+
+def _retain_raw_log(name: str, raw: bytes) -> tuple[str, str, int] | None:
+    """Copy a task's raw captured bytes to the operator evidence area
+    (the same tempfile/qiven-operator directory _spill_large_logs uses)
+    under a collision-resistant name. Returns (path, sha256, byte count)
+    or None when the copy fails - retention is evidence, never a gate: a
+    failed copy must not change the task verdict."""
+    try:
+        directory = Path(tempfile.gettempdir()) / "qiven-operator"
+        directory.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        safe_name = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in name)
+        evidence = directory / f"qiven-task-{safe_name}-{stamp}-{os.getpid()}-{uuid.uuid4().hex[:8]}.log"
+        evidence.write_bytes(raw)
+        return str(evidence), hashlib.sha256(raw).hexdigest(), len(raw)
+    except OSError:
+        return None
+
+
 def _run_process(name: str, spec: dict[str, Any], console: Console) -> Result:
     """Run ONE declared task child under per-task process custody: a Job
     Object (KILL_ON_JOB_CLOSE + process cap) held by this operator. The
@@ -1272,7 +1355,12 @@ def _run_process(name: str, spec: dict[str, Any], console: Console) -> Result:
         duration = time.monotonic() - started
         # completion reaps the task tree (bounded grace for late flush)
         time.sleep(CUSTODY_REAP_GRACE_SECONDS)
-        output = log_path.read_text(encoding="utf-8", errors="replace")
+        # raw bytes FIRST (P0 repair R2): the decode-with-replacement view
+        # below is for rendering only and must never overwrite or stand in
+        # for the captured bytes; the retained artifact (if any) carries
+        # the original bytes exactly.
+        raw_output = log_path.read_bytes()
+        output = raw_output.decode("utf-8", errors="replace")
         if os.name == "nt":
             _job_terminate(job, int(returncode))
         else:
@@ -1283,15 +1371,42 @@ def _run_process(name: str, spec: dict[str, Any], console: Console) -> Result:
             except OSError:
                 pass
         assert returncode is not None
+        # retention is a declared-threshold decision: task failure OR
+        # captured bytes over RAW_LOG_RETAIN_THRESHOLD_BYTES (never
+        # happenstance, and never a gate - a failed copy degrades to no
+        # artifact, reported truthfully below)
+        evidence: tuple[str, str, int] | None = None
+        if returncode != 0 or len(raw_output) > RAW_LOG_RETAIN_THRESHOLD_BYTES:
+            evidence = _retain_raw_log(name, raw_output)
         if returncode == 0:
             console.emit("ok", f"{name} ({duration:.2f}s)")
             if console.verbose:
                 console.block(output)
-            return Result(name, "pass", 0, duration, output=output)
+            return Result(name, "pass", 0, duration, output=output,
+                          evidence_path=evidence[0] if evidence else None,
+                          evidence_sha256=evidence[1] if evidence else None,
+                          evidence_bytes=evidence[2] if evidence else None)
         _emit_failure_guidance(console, "task")
         console.emit("fail", f"{name}: exit {returncode} ({duration:.2f}s)")
-        console.block(output)
-        return Result(name, "fail", int(returncode), duration, output=output)
+        # bounded failure rendering (P0 repair R2): head/tail excerpt plus
+        # one line naming the retained evidence (or the honest byte count
+        # when retention failed) - the unbounded body never hits the agent
+        # console even though it survives in the artifact/Result
+        excerpt, _ = _excerpt_with_marker(
+            output,
+            "full output in retained evidence" if evidence else "full output captured but not retained",
+        )
+        if evidence:
+            evidence_note = (f"full output retained at: {evidence[0]} "
+                             f"({evidence[2]} bytes, sha256 {evidence[1]})")
+        else:
+            evidence_note = (f"captured output: {len(raw_output)} bytes "
+                             "(not retained: evidence copy failed)")
+        console.block(f"{excerpt}\n{evidence_note}")
+        return Result(name, "fail", int(returncode), duration, output=output,
+                      evidence_path=evidence[0] if evidence else None,
+                      evidence_sha256=evidence[1] if evidence else None,
+                      evidence_bytes=evidence[2] if evidence else None)
     except OSError as exc:
         detail = f"could not start process: {exc}"
         console.emit("fail", f"{name}: {detail}")
@@ -1457,13 +1572,34 @@ def _write_gate_receipt(payload: dict[str, Any]) -> None:
         pass
 
 
+def _not_run_results(stages: list[Any], failed_stage: str) -> list[Result]:
+    """Coverage reporting for stages after a fail-fast stop (P0 repair
+    R3). These stages did NOT execute: status "not_run", returncode None
+    (an unobserved exit is never guessed to 0 - standard §4.3). They are
+    additive reporting only: the gate already fails via the failed stage,
+    and `if result.returncode` counts None as neither pass nor fail, so
+    the PASS/FAIL decision logic is unchanged."""
+    detail = f"not started: gate stopped after failed stage {failed_stage}"
+    results: list[Result] = []
+    for stage in stages:
+        if isinstance(stage, str):
+            results.append(Result(stage, "not_run", None, detail=detail))
+        elif isinstance(stage, list):
+            results.extend(Result(str(item), "not_run", None, detail=detail) for item in stage)
+    return results
+
+
 def _run_sequence(sequence: list[Any], tasks: dict[str, Any], console: Console, expect_head: str | None) -> list[Result]:
     results: list[Result] = []
-    for stage in sequence:
+    for index, stage in enumerate(sequence):
         if isinstance(stage, str):
             result = _run_task(stage, tasks, console, expect_head)
             results.append(result)
             if result.returncode:
+                # fail-fast execution is unchanged (later stages never
+                # run); they are REPORTED as not_run so a consumer can
+                # distinguish "gate finished" from "gate stopped here"
+                results.extend(_not_run_results(sequence[index + 1:], stage))
                 break
             continue
         if isinstance(stage, list) and stage and all(isinstance(item, str) for item in stage):
@@ -1471,7 +1607,9 @@ def _run_sequence(sequence: list[Any], tasks: dict[str, Any], console: Console, 
                 futures = {name: pool.submit(_run_task, name, tasks, console, expect_head) for name in stage}
                 stage_results = [futures[name].result() for name in stage]
             results.extend(stage_results)
-            if any(result.returncode for result in stage_results):
+            failed_names = ",".join(result.name for result in stage_results if result.returncode)
+            if failed_names:
+                results.extend(_not_run_results(sequence[index + 1:], failed_names))
                 break
             continue
         raise OperatorError(f"invalid gate stage: {stage!r}")
@@ -1815,32 +1953,47 @@ def _print_json(payload: dict[str, Any]) -> None:
 LOG_SPILL_THRESHOLD = 4096
 
 
+def _spilled_result(result: dict[str, Any]) -> dict[str, Any]:
+    """One spilled result (P0 repair R1): instead of a useless
+    `<N chars>` placeholder, keep a bounded head/tail inline excerpt with
+    a marker naming the omitted byte count, plus machine-checkable
+    completeness counters (head + tail + omitted == output_bytes_total,
+    all measured on the UTF-8 serialization). Non-output keys are never
+    summarized."""
+    spilled = dict(result)
+    text = str(spilled.get("output") or "")
+    excerpt, omitted = _excerpt_with_marker(text, "full output in log_file")
+    spilled["output"] = excerpt
+    spilled["output_bytes_total"] = len(text.encode("utf-8"))
+    spilled["output_bytes_omitted"] = omitted
+    return spilled
+
+
 def _spill_large_logs(payload: dict[str, Any]) -> dict[str, Any]:
     # machine JSON used to be one unbounded line: buffered suite logs were
     # unrecoverable the moment it passed through a terminal filter. Beyond the
     # threshold, the full payload goes to a durable file and stdout stays a
-    # compact summary carrying the log path.
-    total = sum(len(str(result.get("output") or "")) for result in payload.get("results", []))
+    # compact summary carrying the log path. The total is budgeted on
+    # serialized UTF-8 bytes (not character counts), and each spilled result
+    # keeps a bounded head/tail excerpt (not a placeholder) plus truthful
+    # omitted-byte counters - the consumer keeps usable inline diagnostics
+    # AND the full captured evidence stays recoverable in the log file.
+    total = sum(len(str(result.get("output") or "").encode("utf-8")) for result in payload.get("results", []))
     if total <= LOG_SPILL_THRESHOLD:
         return payload
     directory = Path(tempfile.gettempdir()) / "qiven-operator"
     directory.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     name = str(payload.get("gate") or "run")
-    log_file = directory / f"qiven-{name}-{stamp}-{os.getpid()}.json"
+    safe_gate = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in name)
+    log_file = directory / f"qiven-{safe_gate}-{stamp}-{os.getpid()}.json"
     log_file.write_text(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
         encoding="utf-8",
     )
     compact = dict(payload)
     compact["log_file"] = str(log_file)
-    compact["results"] = [
-        {
-            key: (f"<{len(str(value))} chars; full payload in log_file>" if key == "output" and value else value)
-            for key, value in result.items()
-        }
-        for result in payload["results"]
-    ]
+    compact["results"] = [_spilled_result(result) for result in payload["results"]]
     return compact
 
 

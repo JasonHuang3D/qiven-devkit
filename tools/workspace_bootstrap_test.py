@@ -180,6 +180,16 @@ def main() -> int:
     assert "timeout=CONFIGURE_TIMEOUT" in text, "B7b: configure subprocess is unbounded"
     assert "ConfigureTimeout" in text, "B7b: no typed configure-timeout branch"
 
+    # B7c (P0 repair R6a): no failure relay may discard one captured
+    # stream because the other is non-empty (`stdout or stderr`); both
+    # sites must route through the labeled both-streams renderer.
+    assert "result.stdout.strip() or result.stderr.strip()" not in text, (
+        "B7c: a failure relay discards one captured stream"
+    )
+    assert text.count("_print_captured_failure(") >= 3, (
+        "B7c: preflight and adapter failure paths must relay both streams"
+    )
+
     with tempfile.TemporaryDirectory() as tmp_name:
         root = Path(tmp_name)
         control, devkit, lock = _fixture(root)
@@ -238,9 +248,16 @@ def main() -> int:
         _git(["reset", "-q", "--hard", "HEAD~1"], control)
 
         # B5: authoritative bootstrap without an admitting policy is refused.
+        # The refusal comes from the RESOLVER child; since R6a the bootstrap
+        # relays the failed child's typed JSON inside the labeled
+        # `[resolver-preflight stdout]` block (both streams retained), so
+        # the class is extracted from that block.
         result = _run_bootstrap(control, devkit, "--mode", "authoritative")
-        assert result.returncode == 1 and _error_type(result) == "UntrustedControlRevision", (
-            f"B5: {_error_type(result)}"
+        assert result.returncode == 1, f"B5: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        stdout_block = result.stdout.split("[resolver-preflight stdout]\n", 1)[1] \
+                               .split("[resolver-preflight stderr]", 1)[0]
+        assert json.loads(stdout_block)["error"]["type"] == "UntrustedControlRevision", (
+            f"B5: {stdout_block[:200]}"
         )
 
         # B6: the checkout-mapping file substitutes for --devkit.
@@ -250,7 +267,147 @@ def main() -> int:
         result = _run_bootstrap(control, None)
         assert result.returncode == 0 and json.loads(result.stdout)["released"] is True, "B6: mapping leg"
 
-    print("[ OK ] workspace-bootstrap contract test (B1-B8)")
+        # B9 (P0 repair R6a): a failing resolver preflight must surface
+        # BOTH captured streams, labeled - never discard stderr because
+        # stdout is non-empty; a long stream renders bounded with a
+        # truthful omitted-byte marker. The stub replaces the fixture
+        # resolver (identity still checks: only the worktree is dirty,
+        # which shadow mode labels as a note).
+        resolver = devkit / "tools" / "workspace_resolver.py"
+        resolver.write_text(
+            "import sys\n"
+            "sys.stdout.write('b9-out-marker\\n' + 'o' * 5000 + '\\n')\n"
+            "sys.stderr.write('b9-err-marker\\n')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8", newline="\n")
+        result = _run_bootstrap(control, devkit)
+        assert result.returncode == 1, f"B9: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert "[resolver-preflight stdout]" in result.stdout and "b9-out-marker" in result.stdout, (
+            f"B9: stdout stream not surfaced: {result.stdout[:300]}"
+        )
+        assert "[resolver-preflight stderr]" in result.stdout and "b9-err-marker" in result.stdout, (
+            f"B9: stderr stream discarded: {result.stdout[:300]}"
+        )
+        assert "bytes omitted" in result.stdout, "B9: unbounded or unmarked stream excerpt"
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+        # B10 (R6a whole-file completeness): a ZERO-exit child that emits
+        # no parseable receipt is still a failed child interaction; its
+        # captured payload is the only evidence of what it emitted and
+        # must surface (labeled, bounded) - the decode-failure path may
+        # not discard the streams the way the nonzero-exit path once did.
+        resolver.write_text(
+            "import sys\n"
+            "sys.stdout.write('b10-garbage-payload-not-json\\n')\n"
+            "sys.stderr.write('b10-child-stderr-note\\n')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8", newline="\n")
+        result = _run_bootstrap(control, devkit)
+        assert result.returncode == 1, f"B10: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert "emitted no receipt" in result.stderr, "B10: untyped decode failure"
+        assert "[resolver-preflight stdout]" in result.stdout \
+            and "b10-garbage-payload-not-json" in result.stdout, (
+            f"B10: child stdout payload discarded: {result.stdout[:300]}"
+        )
+        assert "[resolver-preflight stderr]" in result.stdout \
+            and "b10-child-stderr-note" in result.stdout, (
+            f"B10: child stderr payload discarded: {result.stdout[:300]}"
+        )
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+        # B11 (R6a adapter-site completeness): the gate-configure ADAPTER
+        # nonzero-exit site carries the same both-streams law as the
+        # preflight site - typed banner, labeled streams, bounded excerpt.
+        # NOTE: the locators are repeated AFTER the subcommand - the
+        # bootstrap's subparsers inherit parents=[common] with plain
+        # defaults, so a pre-subcommand --control/--devkit is silently
+        # overwritten (adjacent pre-existing defect, reported as finding
+        # F-bootstrap-argparse; the subparser values win, which is the
+        # working spelling).
+        resolver.write_text(
+            "import sys\n"
+            "sys.stdout.write('b11-adapter-out-marker\\n' + 'a' * 5000 + '\\n')\n"
+            "sys.stderr.write('b11-adapter-err-marker\\n')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8", newline="\n")
+        result = _run_bootstrap(control, devkit, "gate-configure",
+                                "--control", str(control), "--devkit", str(devkit),
+                                "--repo", "qiven-devkit", "--repo-root", str(devkit),
+                                "--preset", "default", "--cmake", "cmake")
+        assert result.returncode == 1, f"B11: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert "[FAIL] resolver-adapter failed; both captured streams follow" in result.stdout, (
+            f"B11: untyped adapter failure: {result.stdout[:300]}"
+        )
+        assert "[resolver-adapter stdout]" in result.stdout and "b11-adapter-out-marker" in result.stdout, (
+            f"B11: adapter stdout not surfaced: {result.stdout[:300]}"
+        )
+        assert "[resolver-adapter stderr]" in result.stdout and "b11-adapter-err-marker" in result.stdout, (
+            f"B11: adapter stderr discarded: {result.stdout[:300]}"
+        )
+        assert "bytes omitted" in result.stdout, "B11: unbounded or unmarked adapter stream excerpt"
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+        # B12 (R6a adapter-site completeness): the gate-configure ADAPTER
+        # no-receipt decode-failure site relays the unparseable payload
+        # (labeled, bounded) instead of discarding it.
+        resolver.write_text(
+            "import sys\n"
+            "sys.stdout.write('b12-garbage-adapter-not-json\\n')\n"
+            "sys.stderr.write('b12-adapter-stderr-note\\n')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8", newline="\n")
+        result = _run_bootstrap(control, devkit, "gate-configure",
+                                "--control", str(control), "--devkit", str(devkit),
+                                "--repo", "qiven-devkit", "--repo-root", str(devkit),
+                                "--preset", "default", "--cmake", "cmake")
+        assert result.returncode == 1, f"B12: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert "emitted no receipt" in result.stderr, "B12: untyped adapter decode failure"
+        assert "[resolver-adapter stdout]" in result.stdout \
+            and "b12-garbage-adapter-not-json" in result.stdout, (
+            f"B12: adapter stdout payload discarded: {result.stdout[:300]}"
+        )
+        assert "[resolver-adapter stderr]" in result.stdout \
+            and "b12-adapter-stderr-note" in result.stdout, (
+            f"B12: adapter stderr payload discarded: {result.stdout[:300]}"
+        )
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+        # B13 (R6a receipt-content completeness): a receipt that DECODES
+        # and matches the generation but names no adapter file is a
+        # receipt-CONTENT failure site - its banner must name the actual
+        # received vs expected values (same law as the generation-mismatch
+        # sites). The stub also emits NOTHING on stderr: an empty captured
+        # stream must still render its labeled header with an explicit
+        # empty marker - an absent header would be indistinguishable from
+        # the discarded-stream defect the repair exists to remove.
+        stub_receipt = json.dumps({"workspace_generation": lock["generation"],
+                                   "adapter_path": ""})
+        resolver.write_text(
+            "import sys\n"
+            f"sys.stdout.write({stub_receipt!r})\n"
+            "sys.exit(0)\n",
+            encoding="utf-8", newline="\n")
+        result = _run_bootstrap(control, devkit, "gate-configure",
+                                "--control", str(control), "--devkit", str(devkit),
+                                "--repo", "qiven-devkit", "--repo-root", str(devkit),
+                                "--preset", "default", "--cmake", "cmake")
+        assert result.returncode == 1, f"B13: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert "[FAIL] adapter receipt names no adapter file" in result.stderr, (
+            f"B13: untyped receipt-content failure: {result.stderr[:300]}"
+        )
+        assert "received adapter_path=''" in result.stderr, (
+            f"B13: receipt-content banner does not name the received value: {result.stderr[:300]}"
+        )
+        assert "[resolver-adapter stdout]" in result.stdout and "adapter_path" in result.stdout, (
+            f"B13: relayed receipt payload not surfaced: {result.stdout[:300]}"
+        )
+        assert "[resolver-adapter stderr]" in result.stdout, (
+            f"B13: empty stream header missing: {result.stdout[:300]}"
+        )
+        assert "(nothing captured)" in result.stdout, "B13: empty stream not explicitly marked"
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+    print("[ OK ] workspace-bootstrap contract test (B1-B13)")
     return 0
 
 
