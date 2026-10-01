@@ -44,6 +44,10 @@ if not CMAKE:
     from toolchain import resolve
     CMAKE = resolve()["cmake"]
 
+# frozen Common Record envelope sibling (G4/EVR/ER record checks; the
+# script directory is on sys.path in every invocation path)
+import common_record as cr  # noqa: E402
+
 # WR-6 (2026-09-28, template 0.1.10): generated repositories carry the
 # bootstrap LAUNCHER (tools/qiven.py), which requires a live workspace
 # control checkout; the operator MECHANICS are exercised here through the
@@ -745,6 +749,149 @@ def main() -> int:
             text = pidfile.read_text(encoding="utf-8").strip()
             return int(text) if text.isdigit() else None
 
+        # -------- G4: Common Record v1 emission (ADR-0060 B+D batch) ------
+        # The gate invocations above (forced FAIL, PASS, exact-head FAIL,
+        # human FAIL) each wrote one additive Common Record; the existing
+        # output contracts were already asserted above unchanged.
+        records_dir = repo / ".generated-temp" / "operator" / "records"
+        check(records_dir.is_dir(), "GR0.records-dir")
+
+        # GR1: forced-FAIL record - frozen-envelope valid, identity exact,
+        # coverage honest (not_run stages with reasons), next DIAGNOSE (a
+        # failing task is an unexpected-failure class - the mechanism does
+        # NOT mechanically know the correction).
+        fail_records = sorted(records_dir.glob(f"fixture-fail-fast-{head}-*.json"))
+        check(bool(fail_records), "GR1.fail-record-written")
+        fail_record = json.loads(fail_records[-1].read_text(encoding="utf-8"))
+        check(cr.validate(fail_record) == [], "GR1.fail-record-valid",
+              str(cr.validate(fail_record)))
+        check(fail_record["record_kind"] == "gate-run"
+              and fail_record["operation"]["gate"] == "fixture-fail-fast"
+              and fail_record["operation"]["executing_revision"] == head,
+              "GR1.identity-gate-head")
+        check(fail_record["completion"]["state"] == "completed", "GR1.completion")
+        check(fail_record["domain_outcome"]["outcome"] == "failed"
+              and fail_record["domain_outcome"]["exit_code"] == 1, "GR1.outcome")
+        check(fail_record["coverage"]["collection"] == "partial"
+              and [item["name"] for item in fail_record["coverage"]["not_executed"]]
+              == ["fixture-must-not-run"]
+              and fail_record["coverage"]["not_executed"][0]["reason"].startswith(
+                  "not started: gate stopped after failed stage fixture-fail"),
+              "GR1.coverage-not-executed", str(fail_record["coverage"]["not_executed"]))
+        check(fail_record["next_action"]["action"] == "DIAGNOSE", "GR1.next-diagnose")
+        rule_paths = [(f["rule_id"], f["location"]["path"])
+                      for f in fail_record["findings"]]
+        check(("operator/stage-failed", "fixture-fail") in rule_paths, "GR1.finding",
+              str(rule_paths))
+        fail_evidence = [e for e in fail_record["evidence"] if "byte_count" in e]
+        check(fail_evidence and Path(fail_evidence[0]["locator"]).is_file()
+              and fail_evidence[0]["digest"].startswith("sha256:")
+              and fail_evidence[0]["byte_count"]
+              == Path(fail_evidence[0]["locator"]).stat().st_size,
+              "GR1.evidence-artifact", str(fail_evidence))
+
+        # GR2: PASS record - outcome passed, next NONE, complete coverage,
+        # payload references the exact-head gate receipt on disk.
+        isolation_records = sorted(records_dir.glob(f"fixture-isolation-{head}-*.json"))
+        check(len(isolation_records) >= 2, "GR2.records-written",
+              str([p.name for p in isolation_records]))
+        pass_record = None
+        exact_head_record = None
+        for path in isolation_records:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            check(cr.validate(doc) == [], "GR2.record-valid", str(path.name))
+            if doc["domain_outcome"]["outcome"] == "passed":
+                pass_record = doc
+            if any(f["rule_id"] == "operator/exact-head-mismatch"
+                   for f in doc.get("findings", [])):
+                exact_head_record = doc
+        check(pass_record is not None, "GR2.pass-record-found")
+        check(pass_record["next_action"]["action"] == "NONE", "GR2.pass-next-none")
+        check(pass_record["coverage"]["collection"] == "complete", "GR2.pass-coverage")
+        check(pass_record["payload"]["kind"] == "gate-receipt"
+              and Path(pass_record["payload"]["locator"]).is_file(),
+              "GR2.pass-receipt-payload", str(pass_record["payload"]))
+
+        # GR3: exact-head FAIL record - the mechanically-known correction
+        # class: next FIX naming the full-40-char-sha correction.
+        check(exact_head_record is not None, "GR3.exact-head-record-found")
+        check(exact_head_record["next_action"]["action"] == "FIX"
+              and "40-char" in exact_head_record["next_action"]["supported_by"],
+              "GR3.next-fix-names-correction")
+        check(exact_head_record["domain_outcome"]["outcome"] == "failed",
+              "GR3.outcome")
+
+        # GR4: the additive human FAIL summary line - exactly ONE
+        # "NEXT action:" line, printed after the final gate FAIL summary;
+        # machine mode carries no such line (json purity).
+        check("NEXT action:" not in failed.stdout, "GR4.json-purity")
+        human_lines = human.stdout.splitlines()
+        next_lines = [l for l in human_lines if l.startswith("NEXT action:")]
+        check(len(next_lines) == 1, "GR4.one-line",
+              str(next_lines))
+        check(next_lines[0].startswith("NEXT action: DIAGNOSE"), "GR4.diagnose-line",
+              next_lines[0])
+        check(human_lines.index(next_lines[0]) > next(
+            i for i, l in enumerate(human_lines)
+            if l.startswith("[FAIL] gate:")), "GR4.after-final-summary")
+        check(any(l.startswith("NEXT action: FIX") for l in bad_head.stdout.splitlines()),
+              "GR4.exact-head-fix-line")
+
+        # -------- EVR: bounded evidence read route (ADR-0060 D6) ----------
+        ev_dir = repo / ".generated-temp" / "evr"
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        big_path = ev_dir / "big.log"
+        big_bytes = bytes(range(256)) * 400  # 102400 bytes, incl. invalid UTF-8
+        big_path.write_bytes(big_bytes)
+
+        evr = json.loads(qiven_cli("evidence-read", "evr/big.log",
+                                   "--offset", "10", "--count", "50").stdout)
+        check(evr["bytes_returned"] == 50
+              and evr["content"] == big_bytes[10:60].decode("utf-8", errors="replace"),
+              "EVR.byte-range", str(evr)[:200])
+        check(evr["eof"] is False and evr["next_offset"] == 60, "EVR.cursor")
+        check(evr["total_bytes"] == 102400, "EVR.total")
+
+        eofr = json.loads(qiven_cli("evidence-read", "evr/big.log",
+                                    "--offset", str(102400 - 8)).stdout)
+        check(eofr["eof"] is True and eofr["next_offset"] is None
+              and eofr["bytes_returned"] == 8, "EVR.eof-marker")
+
+        prefixed = json.loads(qiven_cli("evidence-read",
+                                        ".generated-temp/evr/big.log",
+                                        "--count", "16").stdout)
+        check(prefixed["bytes_returned"] == 16, "EVR.prefix-spelling")
+
+        capped = json.loads(qiven_cli("evidence-read", "evr/big.log",
+                                      "--count", "999999").stdout)
+        check(capped["bytes_returned"] == 16384, "EVR.cap-16384",
+              str(capped["bytes_returned"]))
+
+        # a count below 1 is a typed usage error, never silently enlarged
+        # to 1 byte (the doc law: clamped DOWN only, never enlarged)
+        zero_count = run([sys.executable, OPERATOR, "--json", "evidence-read",
+                          "evr/big.log", "--count", "0"], cwd=repo, expect=2)
+        check("--count must be >= 1" in zero_count.stdout,
+              "EVR.count-zero-typed", zero_count.stdout[:200])
+
+        absolute = json.loads(qiven_cli("evidence-read", str(big_path),
+                                        "--count", "16").stdout)
+        check(absolute["status"] == "ok" and absolute["bytes_returned"] == 16,
+              "EVR.absolute-under-repo")
+
+        outside = run([sys.executable, OPERATOR, "--json", "evidence-read",
+                       "C:/Windows/win.ini"], cwd=repo, expect=2)
+        check("must stay under the repository root" in outside.stdout,
+              "EVR.absolute-outside-typed", outside.stdout[:200])
+        traversal = run([sys.executable, OPERATOR, "--json", "evidence-read",
+                         "../outside.log"], cwd=repo, expect=2)
+        check("traversal" in traversal.stdout, "EVR.traversal-typed",
+              traversal.stdout[:200])
+        missing = run([sys.executable, OPERATOR, "--json", "evidence-read",
+                       "evr/missing.log"], cwd=repo, expect=2)
+        check("evidence not found" in missing.stdout, "EVR.missing-typed",
+              missing.stdout[:200])
+
         # -------- G2: exec semantics under custody ------------------------
 
         # (a) creation-flags law: watchdog detached flags + custodied child
@@ -900,6 +1047,23 @@ def main() -> int:
         check(snap.get("deadline_utc") == rec.get("deadline_utc"), "C9.status-deadline")
         check(bool(snap.get("watchdog_pid")), "C9.status-watchdog")
 
+        # ER1: exec start still-running observation -> Common Record with
+        # completion RUNNING and next NEXT naming the status handle + lease
+        # (a started/background operation is not completed - D3).
+        er1 = sorted(records_dir.glob(f"exec-{run_id}-start-still-running-*.json"))
+        check(bool(er1), "ER1.still-running-record-written")
+        er1_doc = json.loads(er1[-1].read_text(encoding="utf-8"))
+        check(cr.validate(er1_doc) == [], "ER1.valid", str(cr.validate(er1_doc)))
+        check(er1_doc["completion"]["state"] == "running", "ER1.completion-running")
+        check(er1_doc["domain_outcome"]["outcome"] == "unknown"
+              and er1_doc["domain_outcome"]["exit_code"] == "unavailable",
+              "ER1.outcome-unknown")
+        check(er1_doc["next_action"]["action"] == "NEXT"
+              and f"qiven exec status {run_id}" in er1_doc["next_action"]["supported_by"]
+              and "lease" in er1_doc["next_action"]["supported_by"],
+              "ER1.next-status-handle", str(er1_doc["next_action"]))
+        check(er1_doc["retry_state"]["side_effects"] == "in_progress", "ER1.side-effects")
+
         # C8: record rewrites are atomic — a concurrent reader never sees
         # torn JSON while the watchdog heartbeats
         stop_flag = threading.Event()
@@ -950,6 +1114,18 @@ def main() -> int:
         observed_snap = exec_status(observed_id)
         check(observed_snap["exit_code"] == 0, "G2m.observed-code", str(observed_snap["exit_code"]))
 
+        # ER2: status observation of a DONE run -> completed + passed with
+        # the exact observed exit code (an exit only the living custodian
+        # observed - completion is NOT guessed from silence).
+        er2 = sorted(records_dir.glob(f"exec-{observed_id}-status-done-*.json"))
+        check(bool(er2), "ER2.done-record-written")
+        er2_doc = json.loads(er2[-1].read_text(encoding="utf-8"))
+        check(cr.validate(er2_doc) == [], "ER2.valid")
+        check(er2_doc["completion"]["state"] == "completed"
+              and er2_doc["domain_outcome"]["outcome"] == "passed"
+              and er2_doc["domain_outcome"]["exit_code"] == 0,
+              "ER2.done-shape", str(er2_doc["domain_outcome"]))
+
         # -------- G3: custody laws (the incident regression classes) ------
 
         # C1 node-reuse leak: primary exits, lingering grandchild must die
@@ -991,6 +1167,24 @@ def main() -> int:
         grand_pid = linger_pid()
         check(grand_pid is None or pid_dead(grand_pid), "C2.tree-dead")
 
+        # ER4: expired observation -> deadline_reached + RECONCILE. The
+        # deadline is terminal ONLY because the watchdog's custody/
+        # termination observation established it (status=expired written
+        # by the custodian that killed the tree) - the record carries the
+        # run id and unknown side effects, never an invented retry.
+        er4 = sorted(records_dir.glob(f"exec-{leased_id}-status-expired-*.json"))
+        check(bool(er4), "ER4.expired-record-written")
+        er4_doc = json.loads(er4[-1].read_text(encoding="utf-8"))
+        check(cr.validate(er4_doc) == [], "ER4.valid")
+        check(er4_doc["completion"]["state"] == "deadline_reached",
+              "ER4.completion-deadline", str(er4_doc["completion"]))
+        check(er4_doc["domain_outcome"]["outcome"] == "unknown"
+              and er4_doc["domain_outcome"]["exit_code"] == "unavailable",
+              "ER4.business-code-unknown")
+        check(er4_doc["next_action"]["action"] == "RECONCILE"
+              and "side effects unknown" in er4_doc["next_action"]["supported_by"],
+              "ER4.reconcile", str(er4_doc["next_action"]))
+
         # C3 custodian death => kernel tree-kill (kill-on-close): simulate
         # the session dying while a run is active
         holder2 = exec_start(sys.executable, str(sleep_holder), timeout="2", lifetime="60", expect=124)
@@ -1013,6 +1207,29 @@ def main() -> int:
         )
         check(got_indeterminate, "C3.indeterminate-honest",
               f"state={exec_status(holder2_id)['state']}")
+
+        # ER3: the 124 law rides the records - still-running (custody
+        # alive) and indeterminate (no living supervisor observed the
+        # exit) stay DISTINCT: different completion, different next
+        # action; indeterminate maps to RECONCILE (side effects unknown,
+        # never an automatic replay), with a deadline_reached record
+        # reserved for actual custody/termination observation.
+        er3 = sorted(records_dir.glob(f"exec-{holder2_id}-status-indeterminate-*.json"))
+        check(bool(er3), "ER3.indeterminate-record-written")
+        er3_doc = json.loads(er3[-1].read_text(encoding="utf-8"))
+        check(cr.validate(er3_doc) == [], "ER3.valid", str(cr.validate(er3_doc)))
+        check(er3_doc["completion"]["state"] == "unknown", "ER3.completion-unknown")
+        check(er3_doc["observation"]["coherence"] == "uncertain", "ER3.observation-uncertain")
+        check(er3_doc["domain_outcome"]["outcome"] == "unknown"
+              and er3_doc["domain_outcome"]["exit_code"] == "unavailable",
+              "ER3.exit-never-guessed")
+        check(er3_doc["next_action"]["action"] == "RECONCILE"
+              and f"qiven exec status {holder2_id}"
+              in er3_doc["next_action"]["supported_by"],
+              "ER3.reconcile-via-handle", str(er3_doc["next_action"]))
+        check(er3_doc["completion"]["state"] != er1_doc["completion"]["state"]
+              and er3_doc["next_action"]["action"] != er1_doc["next_action"]["action"],
+              "ER3.distinct-from-still-running")
 
         # C6 task custody: a gate/run task's tree cannot outlive the task
         (scratch / "linger.pid").unlink(missing_ok=True)

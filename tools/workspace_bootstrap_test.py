@@ -514,7 +514,123 @@ def main() -> int:
             assert "[stdout]" in message and "HEAD" in message, f"B16: stdout dropped: {message}"
             assert "[stderr]" in message and "fatal" in message, f"B16: stderr missing: {message}"
 
-    print("[ OK ] workspace-bootstrap contract test (B1-B16)")
+        # ---- B17-B20: Common Record v1 in typed envelopes (B+D batch) --
+
+        # helper: run the real bootstrap, return the parsed typed envelope
+        def _typed_envelope(extra: list[str]) -> dict:
+            result = _run_bootstrap(control, devkit, *extra)
+            assert result.returncode == 1, (
+                f"B17: rc={result.returncode} out={result.stdout[:200]} err={result.stderr[:200]}"
+            )
+            at = result.stdout.find('{\n  "schema"')
+            assert at >= 0, f"B17: no typed envelope: {result.stdout[:300]}"
+            return json.loads(result.stdout[at:])
+
+        # B17: BootstrapDevkitMismatch -> additive `record` field, valid
+        # against the FROZEN v1 envelope (devkit validator), admission
+        # rejected, completion completed, next FIX naming the WR-8
+        # trust-policy admission step class.
+        (devkit / "README.md").write_text("b17 advanced\n", encoding="utf-8", newline="\n")
+        _git(["add", "-A"], devkit)
+        _git(["commit", "-q", "-m", "b17 advance"], devkit)
+        envelope = _typed_envelope([])
+        assert "record" in envelope, "B17: envelope carries no record field"
+        b17 = envelope["record"]
+        import common_record as cr
+        assert cr.validate(b17) == [], f"B17: record invalid: {cr.validate(b17)}"
+        assert b17["admission"]["state"] == "rejected", "B17: admission"
+        assert b17["completion"]["state"] == "completed", "B17: completion"
+        assert b17["domain_outcome"]["outcome"] == "failed", "B17: outcome"
+        assert b17["next_action"]["action"] == "FIX", "B17: FIX class"
+        assert "WR-8" in b17["next_action"]["supported_by"], (
+            f"B17: FIX must name the trust-policy admission step: "
+            f"{b17['next_action']['supported_by'][:120]}"
+        )
+        assert b17["findings"][0]["rule_id"] == "bootstrap/devkit-mismatch", "B17: rule id"
+        _git(["reset", "-q", "--hard", "HEAD~1"], devkit)  # undo the B17 advance
+
+        # B18: RevisionUnavailable with no Devkit locator -> FIX names the
+        # exact corrected flag (mechanically known invocation class). The
+        # relocated control copy must NOT inherit B6's checkout mapping.
+        lonely2 = root / "lonely2"
+        lonely2.mkdir()
+        lonely_control2 = lonely2 / "control"
+        shutil.copytree(control, lonely_control2)
+        (lonely_control2 / ".qiven-workspace.local.json").unlink(missing_ok=True)
+        argv = [sys.executable, str(BOOTSTRAP), "--control", str(lonely_control2)]
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        b18_run = subprocess.run(argv, capture_output=True, text=True, timeout=180,
+                                 encoding="utf-8", errors="replace", env=env)
+        assert b18_run.returncode == 1, f"B18: rc={b18_run.returncode}"
+        b18 = json.loads(b18_run.stdout[b18_run.stdout.find('{\n  "schema"'):])
+        assert cr.validate(b18["record"]) == [], "B18: record invalid"
+        assert b18["error"]["type"] == "RevisionUnavailable", "B18: class"
+        assert b18["record"]["next_action"]["action"] == "FIX", "B18: FIX"
+        assert "--devkit" in b18["record"]["next_action"]["supported_by"] \
+            and "QIVEN_DEVKIT_CHECKOUT" in b18["record"]["next_action"]["supported_by"], (
+            "B18: FIX must name the exact corrected flag"
+        )
+
+        # B19: PreflightTimeout -> DIAGNOSE classify-before-retry; the
+        # supported_by correction is deliberately ABSENT (never an
+        # invented retry). In-process patched budget (B15's pattern).
+        resolver.write_text(
+            "import sys, time\n"
+            "sys.stdout.write('b19-marker\\n'); sys.stdout.flush()\n"
+            "time.sleep(30)\n",
+            encoding="utf-8", newline="\n")
+        spec = importlib.util.spec_from_file_location("qiven_bootstrap_b19", BOOTSTRAP)
+        b19_mod = importlib.util.module_from_spec(spec)
+        saved_dont_write = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        try:
+            spec.loader.exec_module(b19_mod)
+        finally:
+            sys.dont_write_bytecode = saved_dont_write
+        saved_budget = b19_mod.PREFLIGHT_TIMEOUT
+        b19_mod.PREFLIGHT_TIMEOUT = 3
+        b19_out, b19_err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(b19_out), contextlib.redirect_stderr(b19_err):
+                b19_rc = b19_mod.main(["--control", str(control), "--devkit", str(devkit),
+                                       "preflight"])
+        finally:
+            b19_mod.PREFLIGHT_TIMEOUT = saved_budget
+        assert b19_rc == 1, f"B19: rc={b19_rc}"
+        b19_text = b19_out.getvalue()
+        b19 = json.loads(b19_text[b19_text.find('{\n  "schema"'):])
+        assert cr.validate(b19["record"]) == [], "B19: record invalid"
+        assert b19["error"]["type"] == "PreflightTimeout", "B19: class"
+        next_action = b19["record"]["next_action"]
+        assert next_action["action"] == "DIAGNOSE", (
+            f"B19: timeout must DIAGNOSE, got {next_action}"
+        )
+        assert "supported_by" not in next_action, (
+            "B19: a timeout correction is NOT mechanically known; supported_by "
+            "must stay absent"
+        )
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+        # B20: the record never displaces the legacy envelope shape - the
+        # B4 duplicate-key leg's class still parses identically through
+        # the additive field (existing consumers key on error.type).
+        lock_text = (control / "workspace.lock.json").read_text(encoding="utf-8")
+        (control / "workspace.lock.json").write_text(
+            lock_text.replace('"workspace_id": "fixture-ws",',
+                              '"workspace_id": "fixture-ws", "workspace_id": "fixture-ws",'),
+            encoding="utf-8", newline="\n")
+        _git(["add", "-A"], control)
+        _git(["commit", "-q", "-m", "b20 dup"], control)
+        envelope = _typed_envelope([])
+        assert envelope["error"]["type"] == "DuplicateKey", "B20: legacy class"
+        assert envelope["schema"] == "qiven-workspace-bootstrap-error-v1", "B20: legacy schema"
+        b20 = envelope["record"]
+        assert cr.validate(b20) == [], "B20: record invalid"
+        assert b20["next_action"]["action"] == "FIX", "B20: FIX class"
+        assert b20["findings"][0]["location"]["path"] == "workspace.lock.json", "B20: pointer"
+        _git(["reset", "-q", "--hard", "HEAD~1"], control)
+
+    print("[ OK ] workspace-bootstrap contract test (B1-B20)")
     return 0
 
 

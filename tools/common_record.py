@@ -87,6 +87,65 @@ UNAVAILABLE = "unavailable"
 
 CONTRACT_REVISION = "qiven-common-record-v1"
 
+# --- class-aware next-action rules (ADR-0060 D3; B+D batch 2026-10-02) -----
+# Quote-adaptive from D3, normative: "FIX/NEXT only where the mechanism
+# mechanically knows the correction (invocation/schema/policy rejection);
+# DIAGNOSE for unexpected compiler/linker/test/crash failures; RECONCILE
+# for unknown side effects through the existing run/status handle, never
+# automatic mutation replay. Exit-zero report mode with findings is not a
+# PASS; a started/background operation is not completed; a deadline is
+# terminal only when custody/termination observation establishes it; no
+# exact-head gate proof from partial checks, uncertain observation or
+# another revision's result. Domain failure is a normal tool outcome when
+# transport/observation worked."
+#
+# The shared mapping table every producer maps through identically (the
+# devkit-side producers import THIS function; context/workspace producers
+# that cannot import the devkit before identity checks mirror this exact
+# table with a pointer back to this constant - it is frozen data law, not
+# shared code law, for them).
+
+#: event token -> next_action.action (ASCII-safe control vocabulary).
+NEXT_ACTION_EVENTS: dict[str, str] = {
+    # clean completion, nothing to do
+    "pass": "NONE",
+    "completed-clean": "NONE",
+    # the mechanism mechanically knows the correction (supported_by required)
+    "invocation-rejected": "FIX",
+    "policy-rejected": "FIX",
+    "schema-rejected": "FIX",
+    "finding-with-known-pointer": "FIX",
+    # unexpected failure classes - classify before touching anything
+    "unexpected-task-failure": "DIAGNOSE",
+    "process-crash": "DIAGNOSE",
+    "classify-before-retry": "DIAGNOSE",
+    "operator-error": "DIAGNOSE",
+    # a started/background operation is not completed - re-attach via the
+    # existing status handle (supported_by names it)
+    "operation-running": "NEXT",
+    # unknown side effects - reconcile through the run/status handle,
+    # never automatic mutation replay
+    "unknown-side-effects": "RECONCILE",
+    "lease-expired": "RECONCILE",
+    "exit-unknown": "RECONCILE",
+}
+
+
+def next_action_for(event: str, supported_by: str | None = None) -> "NextAction":
+    """Map one producer event token to the class-aware NextAction (D3).
+
+    FIX/NEXT require ``supported_by`` (the mechanically-known correction /
+    the status handle); passing neither is a loud invariant failure, never
+    a guessed record. An unknown event token is likewise rejected - a
+    producer must name its situation, not fall through to a default.
+    """
+    action = NEXT_ACTION_EVENTS.get(event)
+    if action is None:
+        raise ValueError(f"unknown next-action event: {event!r}")
+    if action in ("FIX", "NEXT") and not (supported_by and supported_by.strip()):
+        raise ValueError(f"event {event!r} maps to {action}: supported_by is required")
+    return NextAction(action=action, supported_by=supported_by or None)
+
 _SHA40_RE = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _JSON_POINTER_RE = re.compile(r"(/([^/~]|~[01])*)*\Z")

@@ -18,6 +18,17 @@ import time
 from typing import Any
 import uuid
 
+# Common Record v1 siblings (frozen envelope + B+D projection; ADR-0060
+# D3). They live in the SAME devkit tools directory as this operator, so
+# every consumer path (script invocation, WR-6 importlib load, operator
+# tests) resolves them at the executing devkit revision. The fallback
+# path insert is pure path resolution for spec-loaded module use.
+try:
+    import common_record as _cr
+except ImportError:  # pragma: no cover - spec-load without tools on sys.path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import common_record as _cr
+
 
 # WR-6 consumption model (2026-09-28; supersedes the ADR-0046 Decision-3
 # shim+pin wording, which is historical record): consumer repositories
@@ -926,7 +937,9 @@ def _spawn_watchdog(record_path: Path, diag_path: Path) -> int:
 def _exec_terminal_response(exec_id: str, current: dict[str, Any], console: Console) -> tuple[dict[str, Any], int]:
     """Map a terminal run state to its front-end payload and exit code."""
     state = _exec_state(current)
+    # additive Common Record (ADR-0060 D3): terminal front-end outcome
     snapshot = _exec_snapshot(current)
+    _emit_exec_record(f"start-{state}", current, state)
     if state == "done":
         code = int(current.get("exit_code") or 0)
         console.emit("ok" if code == 0 else "fail",
@@ -1011,6 +1024,7 @@ def _exec_start_frontend(argv: list[str], timeout_seconds: float, max_lifetime: 
             current["status"] = "error"
             current["error"] = detail
             _write_exec_record(current)
+            _emit_exec_record("start-error", current, "error")
             _kill_tree_hard(watchdog_pid)
             return {"status": "error", "error": detail, "id": exec_id, "argv": argv}, 2
         time.sleep(POLL_SECONDS)
@@ -1028,6 +1042,9 @@ def _exec_start_frontend(argv: list[str], timeout_seconds: float, max_lifetime: 
         now = time.monotonic()
         if now - started >= timeout_seconds:
             snapshot = _exec_snapshot(current)
+            # additive Common Record: the still-running 124 return (a
+            # live run under custody; never conflated with indeterminate)
+            _emit_exec_record("start-still-running", current, "running")
             console.emit(
                 "wait",
                 f"exec {exec_id}: still running after {timeout_seconds:.0f}s "
@@ -1572,6 +1589,299 @@ def _write_gate_receipt(payload: dict[str, Any]) -> None:
         pass
 
 
+# ===========================================================================
+# Common Record v1 emission (ADR-0060 D3; the B+D semantics + projection
+# batch, 2026-10-02). Records are ADDITIVE artifacts: the existing human
+# CLI output, exit codes and receipt JSON stay byte-compatible; the
+# record is one additional file (plus one additive FAIL summary line in
+# human gate mode). Emission is evidence, never a gate: a record that
+# cannot be written degrades to no record (fail-closed for proof, the
+# same law as _write_gate_receipt), which is why every emitter swallows
+# OSError/ValueError - record construction must never break an operation
+# whose result is already decided.
+# ===========================================================================
+
+def _new_operation_id() -> str:
+    """Collision-resistant operation id (ADR-0060 D6: stamp + pid + rand)."""
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    return f"{stamp}-{os.getpid():08d}-{os.urandom(3).hex()}"
+
+
+def _records_dir() -> Path:
+    # records sit beside the receipts subtree (same repo-local generated
+    # temp area, git-ignored, per the generated-temp convention)
+    return ROOT / ".generated-temp" / "operator" / "records"
+
+
+def _write_common_record(record: "_cr.CommonRecord", filename: str) -> str | None:
+    try:
+        path = _records_dir() / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_cr.serialize(record), encoding="utf-8", newline="\n")
+        return str(path)
+    except (OSError, ValueError):
+        return None
+
+
+def _emit_gate_record(payload: dict[str, Any], results: list[Result],
+                      expect_head: str | None, repository: str | None) -> dict[str, Any] | None:
+    """One Common Record per gate invocation (PASS and FAIL) at
+    .generated-temp/operator/records/<gate>-<head>-<operation-id>.json.
+    Returns the record's next_action section (for the additive human FAIL
+    summary line) or None when emission was skipped."""
+    try:
+        gate_name = str(payload.get("gate"))
+        head = str(payload.get("head"))
+        opid = _new_operation_id()
+        executed = [r.name for r in results if r.status != "not_run"]
+        not_executed = [
+            _cr.CoverageItem(name=r.name, reason=r.detail or "not started")
+            for r in results
+            if r.status == "not_run"
+        ]
+        failed = [r for r in results if r.returncode]
+        exact_head_failed = [
+            r for r in failed if r.name == "exact-head" and expect_head
+        ]
+
+        findings: list[_cr.Finding] = []
+        for result in failed:
+            if result.name == "exact-head":
+                findings.append(_cr.Finding(
+                    rule_id="operator/exact-head-mismatch",
+                    location=_cr.FindingLocation(path="git HEAD"),
+                    actual=result.detail or "HEAD does not match --expect-head",
+                    expected=f"HEAD == {expect_head}",
+                    contract_revision="unavailable",
+                ))
+            else:
+                findings.append(_cr.Finding(
+                    rule_id="operator/stage-failed",
+                    location=_cr.FindingLocation(path=result.name),
+                    actual=result.detail or f"exit {result.returncode}",
+                    expected="exit 0",
+                    contract_revision="unavailable",
+                ))
+        findings.sort(key=lambda f: (f.rule_id, f.location.path))
+
+        if not failed:
+            next_action = _cr.next_action_for("pass")
+        elif exact_head_failed:
+            next_action = _cr.next_action_for(
+                "invocation-rejected",
+                "exact-head is a string compare on the FULL 40-char sha: pass the "
+                "complete sha to --expect-head (commit/stash first if HEAD moved, "
+                "then re-run at the new head)",
+            )
+        else:
+            next_action = _cr.next_action_for(
+                "unexpected-task-failure",
+                "classify the failing task's failure class before any repair; do "
+                "not weaken the gate (docs/engineering/execution-protocol.md)",
+            )
+
+        evidence: list[_cr.Evidence] = []
+        for result in results:
+            if result.evidence_path:
+                digest = result.evidence_sha256 or ""
+                if digest and not digest.startswith("sha256:"):
+                    digest = f"sha256:{digest}"
+                evidence.append(_cr.Evidence(
+                    locator=result.evidence_path,
+                    digest=digest or None,
+                    byte_count=result.evidence_bytes,
+                    layout="stdout+stderr-merged",
+                    completeness="complete",
+                ))
+        receipt_path = _receipt_path(gate_name, head)
+        if not failed and receipt_path.is_file():
+            try:
+                receipt_bytes = receipt_path.read_bytes()
+                evidence.append(_cr.Evidence(
+                    locator=str(receipt_path),
+                    digest=f"sha256:{hashlib.sha256(receipt_bytes).hexdigest()}",
+                    byte_count=len(receipt_bytes),
+                    layout="json",
+                    completeness="complete",
+                ))
+            except OSError:
+                pass  # receipt evidence degrades to absent, never gates
+
+        if not failed:
+            payload_ref = _cr.Payload(kind="gate-receipt", locator=str(receipt_path))
+        else:
+            first_artifact = next(
+                (r.evidence_path for r in failed if r.evidence_path), None
+            )
+            payload_ref = _cr.Payload(
+                kind="gate-machine-json",
+                locator=first_artifact or "unavailable",
+            )
+
+        devkit_node = payload.get("devkit_node")
+        record = _cr.CommonRecord(
+            record_kind="gate-run",
+            producer=_cr.Producer(id="devkit-qiven-operator", version="operator-gate-v2"),
+            operation=_cr.Operation(
+                id=opid,
+                repository=repository or ROOT.name,
+                cwd=str(ROOT),
+                invocation="qiven gate " + gate_name + (
+                    f" --expect-head {expect_head}" if expect_head else ""),
+                gate=gate_name,
+                selected_revision=(
+                    devkit_node
+                    if isinstance(devkit_node, str) and len(devkit_node) == 40
+                    else None
+                ),
+                executing_revision=head if len(head) == 40 else None,
+                workspace_generation=(
+                    payload.get("workspace_generation")
+                    if isinstance(payload.get("workspace_generation"), str)
+                    and payload["workspace_generation"].startswith("sha256:")
+                    else None
+                ),
+            ),
+            observation=_cr.Observation(coherence="coherent"),
+            admission=_cr.Admission(state="accepted"),
+            completion=_cr.Completion(state="completed"),
+            domain_outcome=_cr.DomainOutcome(
+                outcome="passed" if not failed else "failed",
+                exit_code=0 if not failed else 1,
+            ),
+            coverage=_cr.Coverage(
+                collection="complete" if not not_executed else "partial",
+                executed=executed,
+                not_executed=not_executed,
+            ),
+            next_action=next_action,
+            retry_state=_cr.RetryState(side_effects="not_started"),
+            payload=payload_ref,
+            findings=findings,
+            evidence=evidence,
+        )
+        _write_common_record(record, f"{gate_name}-{head}-{opid}.json")
+        return asdict(next_action)
+    except (OSError, ValueError, KeyError):
+        # never-must-gate boundary: record construction failure must not
+        # alter a gate result that already ran (standard §4.2)
+        return None
+
+
+_EXEC_RECORD_MAP: dict[str, dict[str, Any]] = {
+    # state -> completion/outcome/event-token; the 124 law: still-running
+    # (a live run under custody) and indeterminate (no living supervisor
+    # observed the exit) stay DISTINCT; deadline_reached only because the
+    # WATCHDOG wrote status=expired after terminating the job (custody/
+    # termination observation, never a guess from silence).
+    "running":      {"completion": "running", "token": "operation-running"},
+    "starting":     {"completion": "running", "token": "operation-running"},
+    "reaping":      {"completion": "running", "token": "operation-running"},
+    "done":         {"completion": "completed", "token": None},
+    "expired":      {"completion": "deadline_reached", "token": "lease-expired"},
+    "indeterminate": {"completion": "unknown", "token": "exit-unknown"},
+    "orphaned":     {"completion": "unknown", "token": "unknown-side-effects"},
+    "stopped":      {"completion": "cancelled", "token": "unknown-side-effects"},
+    "error":        {"completion": "unknown", "token": "operator-error"},
+}
+
+
+def _emit_exec_record(event: str, run: dict[str, Any], state: str) -> None:
+    """One Common Record for an exec lifecycle observation (start
+    front-end outcomes + status observations), written to the records
+    area as exec-<run-id>-<event>-<opid>.json. Existing exec output
+    contracts are unchanged; the record is an additive artifact."""
+    try:
+        exec_id = str(run.get("id") or "unknown")
+        mapping = _EXEC_RECORD_MAP.get(state)
+        if mapping is None:
+            return
+        log_path = Path(str(run.get("log") or ""))
+        log_size: int | None = None
+        try:
+            if log_path.is_file():
+                log_size = log_path.stat().st_size
+        except OSError:
+            log_size = None
+
+        exit_code = run.get("exit_code")
+        if state == "done":
+            token = "pass" if exit_code == 0 else "unexpected-task-failure"
+        else:
+            token = mapping["token"]
+        deadline = str(run.get("deadline_utc") or "")
+        status_handle = f"qiven exec status {exec_id}" + (
+            f" (lease {deadline})" if deadline else ""
+        )
+        if token in ("operation-running",):
+            next_action = _cr.next_action_for(token, status_handle)
+        elif token in ("lease-expired", "exit-unknown", "unknown-side-effects"):
+            next_action = _cr.next_action_for(
+                token,
+                f"{status_handle}; inspect the log {log_path if str(log_path) else '(unknown)'}; "
+                "side effects unknown - never automatic mutation replay",
+            )
+        elif token == "operator-error":
+            next_action = _cr.next_action_for(
+                token, str(run.get("error") or "operator error - read the exec record")
+            )
+        else:
+            next_action = _cr.next_action_for(token)
+
+        side_effects = (
+            "in_progress" if mapping["completion"] == "running"
+            else "completed" if state == "done"
+            else "unknown"
+        )
+        reconciliation = None
+        if next_action.action == "RECONCILE":
+            reconciliation = status_handle + "; qiven exec list"
+
+        record = _cr.CommonRecord(
+            record_kind="exec-run",
+            producer=_cr.Producer(id="devkit-qiven-operator", version="operator-gate-v2"),
+            operation=_cr.Operation(
+                id=_new_operation_id(),
+                repository=ROOT.name,
+                cwd=str(ROOT),
+                invocation=" ".join(str(a) for a in (run.get("argv") or [])) or "qiven exec",
+                executing_revision=(run.get("head") if isinstance(run.get("head"), str)
+                                    and len(str(run.get("head"))) == 40 else None),
+            ),
+            observation=_cr.Observation(
+                coherence="coherent" if state not in ("indeterminate", "orphaned") else "uncertain"
+            ),
+            admission=_cr.Admission(state="accepted"),
+            completion=_cr.Completion(state=mapping["completion"]),
+            domain_outcome=_cr.DomainOutcome(
+                outcome=("passed" if exit_code == 0 else "failed") if state == "done"
+                else "unknown",
+                exit_code=exit_code if state == "done" and isinstance(exit_code, int)
+                else "unavailable",
+            ),
+            coverage=_cr.Coverage(collection="complete", executed=["custody-observe"]),
+            next_action=next_action,
+            retry_state=_cr.RetryState(
+                side_effects=side_effects, reconciliation=reconciliation
+            ),
+            payload=_cr.Payload(
+                kind="exec-run-record",
+                locator=str(_exec_record_path(exec_id)),
+            ),
+            evidence=[_cr.Evidence(
+                locator=str(log_path) if str(log_path) else "unavailable",
+                layout="stdout+stderr-merged",
+                completeness="unknown",
+                byte_count=log_size,
+            )],
+        )
+        _write_common_record(record, f"exec-{exec_id}-{event}-{_new_operation_id()}.json")
+    except (OSError, ValueError, KeyError):
+        # never-must-gate boundary (standard §4.2): exec custody/output
+        # contracts must never be altered by record emission
+        return None
+
+
 def _not_run_results(stages: list[Any], failed_stage: str) -> list[Result]:
     """Coverage reporting for stages after a fail-fast stop (P0 repair
     R3). These stages did NOT execute: status "not_run", returncode None
@@ -1997,6 +2307,109 @@ def _spill_large_logs(payload: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+# ===========================================================================
+# Bounded evidence read route (ADR-0060 D6; B+D batch). A consumer
+# utility, NOT a gate task: reads a retained evidence/log artifact one
+# BYTE range at a time (documented: --offset/--count are bytes, the only
+# addressing an arbitrary captured artifact supports), output byte-capped
+# at BOUNDED_READ_MAX_BYTES with an explicit EOF marker and a continue
+# cursor. Path boundary: a RELATIVE path addresses the repository's
+# .generated-temp/ evidence roots (leading ".generated-temp/" optional);
+# an ABSOLUTE path is allowed only when it resolves under the repository
+# root. Reads outside both boundaries are typed errors, never silent
+# redirects. Decoding is a view (utf-8 errors=replace); invalid captured
+# bytes stay recoverable in the artifact (D6).
+# ===========================================================================
+
+def _evidence_target(path_text: str) -> Path:
+    """Resolve one evidence-read locator inside the documented boundary."""
+    raw = Path(path_text)
+    if ".." in raw.parts:
+        raise OperatorError(
+            f"evidence-read rejects path traversal: {path_text!r}"
+        )
+    repo_root = ROOT.resolve()
+    if raw.is_absolute():
+        target = raw.resolve()
+        if target != repo_root and repo_root not in target.parents:
+            raise OperatorError(
+                f"evidence-read absolute paths must stay under the repository root "
+                f"{repo_root}; got {target}"
+            )
+        return target
+    generated = repo_root / ".generated-temp"
+    parts = raw.parts
+    if parts and parts[0] == ".generated-temp":
+        target = (repo_root / Path(*parts)).resolve()
+    else:
+        target = (generated / Path(*parts)).resolve()
+    if generated not in target.parents:
+        raise OperatorError(
+            f"relative evidence paths must stay under .generated-temp/ (use an "
+            f"absolute path under the repository root for other retained "
+            f"artifacts); got {path_text!r}"
+        )
+    return target
+
+
+def _evidence_read(path_text: str, offset: int, count: int,
+                   json_mode: bool, console: Console) -> int:
+    if offset < 0:
+        raise OperatorError(f"evidence-read --offset must be >= 0, got {offset}")
+    if count < 1:
+        # a count below 1 is a usage error, never silently enlarged (the
+        # documented law: counts are clamped DOWN only, never enlarged)
+        raise OperatorError(f"evidence-read --count must be >= 1, got {count}")
+    count = min(count, _cr.BOUNDED_READ_MAX_BYTES)
+    target = _evidence_target(path_text)
+    try:
+        size = target.stat().st_size
+    except FileNotFoundError as exc:
+        raise OperatorError(
+            f"evidence not found: {path_text} ({target}); an expired or "
+            "never-retained pointer stays visible as this typed error"
+        ) from exc
+    except OSError as exc:
+        raise OperatorError(f"evidence unreadable: {target}: {exc}") from exc
+    if target.is_dir():
+        raise OperatorError(f"evidence path is a directory: {target}")
+    try:
+        with target.open("rb") as handle:
+            handle.seek(offset)
+            data = handle.read(count)
+    except OSError as exc:
+        raise OperatorError(f"evidence unreadable: {target}: {exc}") from exc
+    text = data.decode("utf-8", errors="replace")
+    end = offset + len(data)
+    eof = end >= size
+    try:
+        display = str(target.relative_to(ROOT))
+    except ValueError:
+        display = str(target)
+    if json_mode:
+        _print_json({
+            "status": "ok",
+            "path": str(display),
+            "offset": offset,
+            "bytes_returned": len(data),
+            "total_bytes": size,
+            "eof": eof,
+            "next_offset": None if eof else end,
+            "content": text,
+        })
+        return 0
+    console.emit("run", f"evidence-read {display} (bytes {offset}..{end}/{size})")
+    console.block(text)
+    if eof:
+        console.emit("ok", f"evidence-read EOF at byte {end}/{size}")
+    else:
+        console.emit(
+            "wait",
+            f"more evidence bytes remain; continue: qiven evidence-read {display} --offset {end}",
+        )
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="qiven", description="Qiven local engineering operator", parents=[_common_flags()]
@@ -2046,6 +2459,15 @@ def _parser() -> argparse.ArgumentParser:
     exec_stop.add_argument("run_id", help="exec run id")
     exec_list = exec_sub.add_parser("list", help="list known runs with state and lease", parents=[_common_flags()])
     exec_sweep = exec_sub.add_parser("sweep", help="terminate expired runs, finalize stale records", parents=[_common_flags()])
+    evidence = sub.add_parser(
+        "evidence-read",
+        help="bounded BYTE-range read of a retained evidence/log artifact (EOF marker + continue cursor; capped at 16384 bytes)",
+        parents=[_common_flags()],
+    )
+    evidence.add_argument("path", help="relative stays under .generated-temp/ (leading '.generated-temp/' optional); absolute must be under the repository root")
+    evidence.add_argument("--offset", type=int, default=0, help="byte offset to start reading at (default 0)")
+    evidence.add_argument("--count", type=int, default=16384,
+                          help=f"max bytes to return (capped at {_cr.BOUNDED_READ_MAX_BYTES})")
     return parser
 
 
@@ -2092,6 +2514,11 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(tasks, dict):
             raise OperatorError("config tasks must be an object")
 
+        if args.command == "evidence-read":
+            # consumer utility (ADR-0060 D6): no gate registration, no
+            # custody - a bounded read of retained evidence
+            return _evidence_read(args.path, args.offset, args.count, args.json, console)
+
         if args.command == "gate":
             gate_name = args.gate or args.gate_flag or config.get("default_gate")
             gates = config.get("gates")
@@ -2113,10 +2540,24 @@ def main(argv: list[str] | None = None) -> int:
             }
             _workspace_identity_fields(payload)
             _write_gate_receipt(payload)
+            # Common Record v1 (additive; ADR-0060 D3): one record per
+            # gate invocation, PASS and FAIL. The FAIL human view gains
+            # exactly ONE next-action summary line after the existing
+            # banner/detail flow - markers, exit codes and receipts are
+            # unchanged.
+            gate_next = _emit_gate_record(
+                payload, results, args.expect_head, config.get("repository_name")
+            )
             if args.json:
                 _print_json(_spill_large_logs(payload))
             else:
                 console.emit("fail" if failed else "ok", f"gate:{gate_name}: {payload['status'].upper()}")
+                if failed and gate_next:
+                    # ASCII-safe control syntax (D3): the separator is a
+                    # plain hyphen, never a localized punctuation mark
+                    console.block(
+                        f"NEXT action: {gate_next['action']} - {gate_next.get('supported_by', '')}"
+                    )
             return 1 if failed else 0
 
         if args.command == "run":
@@ -2186,6 +2627,11 @@ def main(argv: list[str] | None = None) -> int:
                 record = _read_exec_record(args.run_id)
                 snapshot = _exec_snapshot(record)
                 tail = _tail_text(Path(snapshot["log"]), max(0, int(args.tail)))
+                # additive Common Record: one status observation (the 124
+                # law rides the record: still-running vs indeterminate
+                # stay DISTINCT; deadline_reached only from custody
+                # observation - see _EXEC_RECORD_MAP)
+                _emit_exec_record(f"status-{snapshot['state']}", record, snapshot["state"])
                 payload = dict(snapshot, status=snapshot["state"], tail=tail)
                 _workspace_identity_fields(payload)
                 if args.json:
