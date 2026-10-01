@@ -372,7 +372,42 @@ def main() -> int:
         )
         _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
 
-    print("[ OK ] workspace-bootstrap contract test (B1-B12)")
+        # B13 (R6a receipt-content completeness): a receipt that DECODES
+        # and matches the generation but names no adapter file is a
+        # receipt-CONTENT failure site - its banner must name the actual
+        # received vs expected values (same law as the generation-mismatch
+        # sites). The stub also emits NOTHING on stderr: an empty captured
+        # stream must still render its labeled header with an explicit
+        # empty marker - an absent header would be indistinguishable from
+        # the discarded-stream defect the repair exists to remove.
+        stub_receipt = json.dumps({"workspace_generation": lock["generation"],
+                                   "adapter_path": ""})
+        resolver.write_text(
+            "import sys\n"
+            f"sys.stdout.write({stub_receipt!r})\n"
+            "sys.exit(0)\n",
+            encoding="utf-8", newline="\n")
+        result = _run_bootstrap(control, devkit, "gate-configure",
+                                "--control", str(control), "--devkit", str(devkit),
+                                "--repo", "qiven-devkit", "--repo-root", str(devkit),
+                                "--preset", "default", "--cmake", "cmake")
+        assert result.returncode == 1, f"B13: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert "[FAIL] adapter receipt names no adapter file" in result.stderr, (
+            f"B13: untyped receipt-content failure: {result.stderr[:300]}"
+        )
+        assert "received adapter_path=''" in result.stderr, (
+            f"B13: receipt-content banner does not name the received value: {result.stderr[:300]}"
+        )
+        assert "[resolver-adapter stdout]" in result.stdout and "adapter_path" in result.stdout, (
+            f"B13: relayed receipt payload not surfaced: {result.stdout[:300]}"
+        )
+        assert "[resolver-adapter stderr]" in result.stdout, (
+            f"B13: empty stream header missing: {result.stdout[:300]}"
+        )
+        assert "(nothing captured)" in result.stdout, "B13: empty stream not explicitly marked"
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+    print("[ OK ] workspace-bootstrap contract test (B1-B13)")
     return 0
 
 

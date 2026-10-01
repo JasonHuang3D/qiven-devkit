@@ -380,6 +380,35 @@ def main() -> int:
               str(par_payload["results"][3].get("detail")))
         check(not marker_c.exists(), "R3.parallel-stopped",
               "gate executed a stage after a parallel-stage failure")
+        # R3 edge: a gate whose FIRST stage fails leaves EVERY later stage
+        # not_run - including the members of a later PARALLEL stage (each
+        # member gets its own not_run Result; this exercises the list
+        # branch of _not_run_results, which the cases above never reach)
+        # and nothing in the unexecuted stages actually runs.
+        config["gates"]["fixture-first-fail-parallel-later"] = [
+            "fixture-fail",
+            ["fixture-pass", "fixture-must-not-run"],
+            "fixture-slow",
+        ]
+        config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        ff_failed = run(
+            [sys.executable, OPERATOR, "--json", "gate", "--name", "fixture-first-fail-parallel-later"],
+            cwd=repo,
+            expect=1,
+        )
+        ff_rows = [(item["name"], item["status"], item["returncode"])
+                   for item in json.loads(ff_failed.stdout)["results"]]
+        check(ff_rows == [("fixture-fail", "fail", 7),
+                          ("fixture-pass", "not_run", None),
+                          ("fixture-must-not-run", "not_run", None),
+                          ("fixture-slow", "not_run", None)],
+              "R3.first-fail-all-later-not-run", str(ff_rows))
+        check(all(item["detail"] == "not started: gate stopped after failed stage fixture-fail"
+                  for item in json.loads(ff_failed.stdout)["results"][1:]),
+              "R3.first-fail-detail-names-stage",
+              str([item.get("detail") for item in json.loads(ff_failed.stdout)["results"][1:]]))
+        check(not marker_c.exists(), "R3.first-fail-parallel-member-not-executed",
+              "a later parallel-stage member executed after the first stage failed")
 
         parallel = run(
             [
@@ -479,6 +508,19 @@ def main() -> int:
         check(mid_row["output"] == "m" * 1800 and mid_row["output_bytes_omitted"] == 0,
               "R1.mid-band-keeps-full-text", str(mid_row.get("output_bytes_omitted")))
         check(mid_row["output_bytes_total"] == 1800, "R1.mid-band-total")
+        # exact threshold boundary: spill triggers strictly ABOVE 4096
+        # serialized bytes - exactly 4096 stays inline and unchanged (same
+        # object, no log_file, no counters); one byte more spills.
+        exact_payload = {"gate": "r1-exact", "results": [
+            {"name": "r1-exact-task", "status": "pass", "returncode": 0, "output": "e" * 4096}]}
+        check(operator._spill_large_logs(exact_payload) is exact_payload,
+              "R1.exact-threshold-inline")
+        plus_payload = {"gate": "r1-exact-plus", "results": [
+            {"name": "r1-exact-plus-task", "status": "pass", "returncode": 0, "output": "e" * 4097}]}
+        plus = operator._spill_large_logs(plus_payload)
+        check("log_file" in plus and Path(plus["log_file"]).is_file(),
+              "R1.one-past-threshold-spills")
+        check(plus["results"][0]["output_bytes_total"] == 4097, "R1.one-past-total")
         # CJK excerpt boundaries: a 1024-byte slice can cut a 3-byte
         # codepoint (dropped on decode), so the excerpt bytes are 1023 -
         # the head+tail+omitted identity must still hold exactly
