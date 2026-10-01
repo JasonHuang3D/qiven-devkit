@@ -867,6 +867,13 @@ def main() -> int:
         check(capped["bytes_returned"] == 16384, "EVR.cap-16384",
               str(capped["bytes_returned"]))
 
+        # a count below 1 is a typed usage error, never silently enlarged
+        # to 1 byte (the doc law: clamped DOWN only, never enlarged)
+        zero_count = run([sys.executable, OPERATOR, "--json", "evidence-read",
+                          "evr/big.log", "--count", "0"], cwd=repo, expect=2)
+        check("--count must be >= 1" in zero_count.stdout,
+              "EVR.count-zero-typed", zero_count.stdout[:200])
+
         absolute = json.loads(qiven_cli("evidence-read", str(big_path),
                                         "--count", "16").stdout)
         check(absolute["status"] == "ok" and absolute["bytes_returned"] == 16,

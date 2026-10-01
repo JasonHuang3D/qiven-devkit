@@ -2356,7 +2356,11 @@ def _evidence_read(path_text: str, offset: int, count: int,
                    json_mode: bool, console: Console) -> int:
     if offset < 0:
         raise OperatorError(f"evidence-read --offset must be >= 0, got {offset}")
-    count = max(1, min(count, _cr.BOUNDED_READ_MAX_BYTES))
+    if count < 1:
+        # a count below 1 is a usage error, never silently enlarged (the
+        # documented law: counts are clamped DOWN only, never enlarged)
+        raise OperatorError(f"evidence-read --count must be >= 1, got {count}")
+    count = min(count, _cr.BOUNDED_READ_MAX_BYTES)
     target = _evidence_target(path_text)
     try:
         size = target.stat().st_size

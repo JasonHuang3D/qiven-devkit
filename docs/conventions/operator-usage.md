@@ -76,7 +76,9 @@ registered in NO gate — it reads what producers already retained.
 - **Addressing is BYTES** (`--offset`/`--count` are byte offsets, the only
   addressing an arbitrary captured artifact supports); output is byte-
   capped at 16384 (`BOUNDED_READ_MAX_BYTES`) per call, larger `--count`
-  values are clamped, never enlarged. Each result carries an explicit EOF
+  values are clamped, never enlarged — and a negative `--offset` or a
+  `--count` below 1 is a typed usage error (exit 2), never a silently
+  altered range. Each result carries an explicit EOF
   marker or a `continue:` cursor naming the exact next call, so a large
   artifact is walked incrementally and never loaded whole (D6).
 - **Path boundary**: a RELATIVE path addresses the repository's
