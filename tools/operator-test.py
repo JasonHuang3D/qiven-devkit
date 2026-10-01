@@ -350,6 +350,36 @@ def main() -> int:
                            ("fixture-must-not-run", "not_run", None)],
               "R3.run-not-run-coverage", str(run_rows))
         check(not marker_c.exists(), "R3.run-stopped", "run executed a task after a failure")
+        # R3 parallel-stage path: a failing PARALLEL stage still stops the
+        # gate (the later stage never executes) and the not_run detail
+        # names the failed task(s) - with TWO failures the join must name
+        # both, in stage order.
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["tasks"]["fixture-fail-2"] = {"argv": [sys.executable, "-c", "raise SystemExit(4)"]}
+        config["gates"]["fixture-parallel-fail-fast"] = [
+            ["fixture-pass", "fixture-fail", "fixture-fail-2"],
+            "fixture-must-not-run",
+        ]
+        config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        par_failed = run(
+            [sys.executable, OPERATOR, "--json", "gate", "--name", "fixture-parallel-fail-fast"],
+            cwd=repo,
+            expect=1,
+        )
+        par_payload = json.loads(par_failed.stdout)
+        par_rows = [(item["name"], item["status"], item["returncode"])
+                    for item in par_payload["results"]]
+        check(par_rows == [("fixture-pass", "pass", 0),
+                           ("fixture-fail", "fail", 7),
+                           ("fixture-fail-2", "fail", 4),
+                           ("fixture-must-not-run", "not_run", None)],
+              "R3.parallel-not-run-coverage", str(par_rows))
+        check(par_payload["results"][3]["detail"]
+              == "not started: gate stopped after failed stage fixture-fail,fixture-fail-2",
+              "R3.parallel-names-failed-tasks",
+              str(par_payload["results"][3].get("detail")))
+        check(not marker_c.exists(), "R3.parallel-stopped",
+              "gate executed a stage after a parallel-stage failure")
 
         parallel = run(
             [
@@ -530,6 +560,82 @@ def main() -> int:
               and r2_big.evidence_bytes > operator.RAW_LOG_RETAIN_THRESHOLD_BYTES,
               "R2.over-threshold-retained", str(r2_big.evidence_bytes))
         check(Path(r2_big.evidence_path).read_bytes().startswith(b"r2-big"), "R2.big-raw-content")
+
+        # R2 edge (empty-output failure): a FAILED task with zero captured
+        # bytes is still retained (the failure condition, not the size,
+        # triggers retention); the artifact is a truthful 0-byte file
+        # carrying the empty digest.
+        r2_empty = operator._run_process(
+            "r2-empty-fail-task",
+            {"argv": [sys.executable, "-c", "raise SystemExit(3)"]},
+            r2_console,
+        )
+        check(r2_empty.status == "fail" and r2_empty.returncode == 3, "R2.empty-fail-shape")
+        check(r2_empty.evidence_path is not None and r2_empty.evidence_bytes == 0
+              and Path(r2_empty.evidence_path).stat().st_size == 0,
+              "R2.empty-fail-retained", str(r2_empty.evidence_bytes))
+        check(r2_empty.evidence_sha256 == hashlib.sha256(b"").hexdigest(),
+              "R2.empty-fail-digest")
+        # R2 edge (zero-byte success): rc 0 with no output captures
+        # nothing worth retaining (success AND under threshold); the
+        # evidence fields stay None.
+        r2_silent = operator._run_process(
+            "r2-silent-ok-task", {"argv": [sys.executable, "-c", "pass"]}, r2_console)
+        check(r2_silent.status == "pass" and r2_silent.returncode == 0
+              and r2_silent.output == "", "R2.silent-ok-shape")
+        check(r2_silent.evidence_path is None and r2_silent.evidence_sha256 is None
+              and r2_silent.evidence_bytes is None, "R2.zero-byte-success-not-retained")
+        # R2 edge (exact threshold boundary): retention triggers strictly
+        # ABOVE the threshold - an exactly-65536-byte SUCCESS capture is
+        # NOT retained; one byte more IS (raw bytes written, no text-mode
+        # newline translation, so the byte counts are exact).
+        r2_edge = operator._run_process(
+            "r2-edge-task",
+            {"argv": [sys.executable, "-c",
+                      "import sys; sys.stdout.buffer.write(b'a' * 65536); "
+                      "sys.stdout.buffer.flush()"]},
+            r2_console,
+        )
+        check(r2_edge.status == "pass", "R2.edge-ok-shape")
+        check(r2_edge.evidence_path is None and r2_edge.evidence_bytes is None,
+              "R2.exact-threshold-not-retained", str(r2_edge.evidence_bytes))
+        r2_edge_plus = operator._run_process(
+            "r2-edge-plus-task",
+            {"argv": [sys.executable, "-c",
+                      "import sys; sys.stdout.buffer.write(b'a' * 65537); "
+                      "sys.stdout.buffer.flush()"]},
+            r2_console,
+        )
+        check(r2_edge_plus.status == "pass" and r2_edge_plus.evidence_bytes == 65537,
+              "R2.one-past-threshold-retained", str(r2_edge_plus.evidence_bytes))
+        # R2 degradation law: a retention COPY failure degrades to no
+        # artifact and NEVER changes the verdict or the bounded render
+        # (boundary seam: _retain_raw_log is the filesystem boundary; a
+        # real read-only tempdir is not reliably constructible on Windows).
+        real_retain = operator._retain_raw_log
+        operator._retain_raw_log = lambda name, raw: None
+        try:
+            r2_degrade_buffer = io.StringIO()
+            r2_degrade_console = operator.Console(json_mode=False, verbose=False, no_color=True)
+            with contextlib.redirect_stdout(r2_degrade_buffer):
+                r2_degrade = operator._run_process(
+                    "r2-degrade-task",
+                    {"argv": [sys.executable, "-c",
+                              "print('r2-degrade-head'); raise SystemExit(6)"]},
+                    r2_degrade_console,
+                )
+        finally:
+            operator._retain_raw_log = real_retain
+        check(r2_degrade.status == "fail" and r2_degrade.returncode == 6,
+              "R2.copy-failure-verdict-unchanged", r2_degrade.detail)
+        check(r2_degrade.evidence_path is None and r2_degrade.evidence_sha256 is None
+              and r2_degrade.evidence_bytes is None, "R2.copy-failure-no-artifact")
+        degrade_render = r2_degrade_buffer.getvalue()
+        check("r2-degrade-head" in degrade_render, "R2.copy-failure-still-rendered",
+              degrade_render[:200])
+        check("not retained: evidence copy failed" in degrade_render
+              and "captured output:" in degrade_render,
+              "R2.copy-failure-honest-note", degrade_render[-300:])
         assert_no_repo_bytecode(repo)
 
         # -------- G2/G3 fixtures + helpers ---------------------------------

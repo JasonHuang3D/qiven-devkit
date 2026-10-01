@@ -315,7 +315,64 @@ def main() -> int:
         )
         _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
 
-    print("[ OK ] workspace-bootstrap contract test (B1-B10)")
+        # B11 (R6a adapter-site completeness): the gate-configure ADAPTER
+        # nonzero-exit site carries the same both-streams law as the
+        # preflight site - typed banner, labeled streams, bounded excerpt.
+        # NOTE: the locators are repeated AFTER the subcommand - the
+        # bootstrap's subparsers inherit parents=[common] with plain
+        # defaults, so a pre-subcommand --control/--devkit is silently
+        # overwritten (adjacent pre-existing defect, reported as finding
+        # F-bootstrap-argparse; the subparser values win, which is the
+        # working spelling).
+        resolver.write_text(
+            "import sys\n"
+            "sys.stdout.write('b11-adapter-out-marker\\n' + 'a' * 5000 + '\\n')\n"
+            "sys.stderr.write('b11-adapter-err-marker\\n')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8", newline="\n")
+        result = _run_bootstrap(control, devkit, "gate-configure",
+                                "--control", str(control), "--devkit", str(devkit),
+                                "--repo", "qiven-devkit", "--repo-root", str(devkit),
+                                "--preset", "default", "--cmake", "cmake")
+        assert result.returncode == 1, f"B11: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert "[FAIL] resolver-adapter failed; both captured streams follow" in result.stdout, (
+            f"B11: untyped adapter failure: {result.stdout[:300]}"
+        )
+        assert "[resolver-adapter stdout]" in result.stdout and "b11-adapter-out-marker" in result.stdout, (
+            f"B11: adapter stdout not surfaced: {result.stdout[:300]}"
+        )
+        assert "[resolver-adapter stderr]" in result.stdout and "b11-adapter-err-marker" in result.stdout, (
+            f"B11: adapter stderr discarded: {result.stdout[:300]}"
+        )
+        assert "bytes omitted" in result.stdout, "B11: unbounded or unmarked adapter stream excerpt"
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+        # B12 (R6a adapter-site completeness): the gate-configure ADAPTER
+        # no-receipt decode-failure site relays the unparseable payload
+        # (labeled, bounded) instead of discarding it.
+        resolver.write_text(
+            "import sys\n"
+            "sys.stdout.write('b12-garbage-adapter-not-json\\n')\n"
+            "sys.stderr.write('b12-adapter-stderr-note\\n')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8", newline="\n")
+        result = _run_bootstrap(control, devkit, "gate-configure",
+                                "--control", str(control), "--devkit", str(devkit),
+                                "--repo", "qiven-devkit", "--repo-root", str(devkit),
+                                "--preset", "default", "--cmake", "cmake")
+        assert result.returncode == 1, f"B12: rc={result.returncode} out={result.stdout} err={result.stderr}"
+        assert "emitted no receipt" in result.stderr, "B12: untyped adapter decode failure"
+        assert "[resolver-adapter stdout]" in result.stdout \
+            and "b12-garbage-adapter-not-json" in result.stdout, (
+            f"B12: adapter stdout payload discarded: {result.stdout[:300]}"
+        )
+        assert "[resolver-adapter stderr]" in result.stdout \
+            and "b12-adapter-stderr-note" in result.stdout, (
+            f"B12: adapter stderr payload discarded: {result.stdout[:300]}"
+        )
+        _git(["checkout", "--", "tools/workspace_resolver.py"], devkit)
+
+    print("[ OK ] workspace-bootstrap contract test (B1-B12)")
     return 0
 
 
