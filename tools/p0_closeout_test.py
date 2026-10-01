@@ -154,6 +154,7 @@ def main() -> int:
                 "ec-utf8-fail": ["ec-bad-utf8"],
                 "ec-sel-fail": ["ec-sel-pass", "ec-bad-utf8"],
                 "ec-sel-pass-gate": ["ec-sel-pass"],
+                "ec-degraded": ["ec-sel-pass"],
             },
             "ci": {},
         }
@@ -284,6 +285,25 @@ def main() -> int:
         receipt_path = Path(receipt_token)
         check(receipt_path.is_file(), "EC3.receipt-ref-resolves", receipt_token)
         check(pass_summary in grep_lines(pass_lines), "EC3.grep-keeps-pass-summary")
+        # degraded receipt write: the PASS summary must never claim a
+        # receipt that does not exist (honesty law - the same wording the
+        # record's reference carries). A fresh gate name guarantees no
+        # earlier run's receipt is standing in for the degraded write.
+        operator = load_operator()
+        real_write = operator._write_gate_receipt
+        operator._write_gate_receipt = lambda payload: None
+        degraded = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(degraded):
+                degraded_rc = operator.main(
+                    ["--no-color", "gate", "--name", "ec-degraded"])
+        finally:
+            operator._write_gate_receipt = real_write
+        degraded_lines = degraded.getvalue().splitlines()
+        check(degraded_rc == 0
+              and degraded_lines[-1].startswith("[ OK ] gate:ec-degraded: PASS")
+              and "receipt: none (receipt write degraded" in degraded_lines[-1],
+              "EC3.degraded-receipt-honest", degraded_lines[-1])
 
         # ---------------- EC4: selectors over the projection view --------
         fail_doc = latest_record(f"ec-sel-fail-{head}")

@@ -106,7 +106,7 @@ existing tests that already cover the class (no new fixture needed).
 | qiven-devkit | `python tools/common_record_test.py` | CR1-CR10 OK |
 | qiven-devkit | `python tools/record_projection_test.py` | PJ1-PJ12 OK |
 | qiven-devkit | `python tools/router_record_adapter_test.py` | RA/RB OK |
-| qiven-devkit | `python tools/p0_closeout_test.py` | EC1-EC11 OK (73 named checks) |
+| qiven-devkit | `python tools/p0_closeout_test.py` | EC1-EC11 OK (74 named checks) |
 | qiven-devkit | `python tools/context_records_crosscheck_test.py` | XC1 + live XC2 OK |
 | qiven-devkit | `python tools/operator-test.py` | G1-G4/G2/G3 + R1-R3 + EVR + ER1-ER4 OK (140 named checks) |
 | qiven-context | `./.venv/Scripts/python.exe tools/test_all.py` | all groups OK (incl. the p0-closeout suite CX1-CX5) |

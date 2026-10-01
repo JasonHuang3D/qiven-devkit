@@ -2663,8 +2663,17 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     receipt_note = ""
                     if not failed:
+                        # observe the receipt, never assume it: a degraded
+                        # receipt write (_write_gate_receipt swallows OSError,
+                        # fail-closed for proof) must not be claimed as an
+                        # existing locator in the model-facing summary line -
+                        # the same honest wording the record carries
+                        receipt = _receipt_path(gate_name, str(payload["head"]))
                         receipt_note = (
-                            f" - receipt: {_utf8_prefix(str(_receipt_path(gate_name, str(payload['head']))), 200)}"
+                            f" - receipt: {_utf8_prefix(str(receipt), 200)}"
+                            if receipt.is_file()
+                            else " - receipt: none (receipt write degraded at "
+                                 f"{_utf8_prefix(str(receipt), 200)})"
                         )
                     console.emit(
                         "fail" if failed else "ok",
