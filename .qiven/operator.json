@@ -78,6 +78,18 @@
         "tools/record_projection_test.py"
       ]
     },
+    "p0-closeout-tests": {
+      "argv": [
+        "{python}",
+        "tools/p0_closeout_test.py"
+      ]
+    },
+    "context-records-crosscheck-tests": {
+      "argv": [
+        "{python}",
+        "tools/context_records_crosscheck_test.py"
+      ]
+    },
     "router-record-adapter-tests": {
       "argv": [
         "{python}",
@@ -136,6 +148,8 @@
       "router-tests",
       "common-record-tests",
       "record-projection-tests",
+      "p0-closeout-tests",
+      "context-records-crosscheck-tests",
       "router-record-adapter-tests",
       "workspace-schemas-tests",
       "workspace-resolver-tests",

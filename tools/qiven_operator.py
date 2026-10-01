@@ -1709,6 +1709,8 @@ def _emit_gate_record(payload: dict[str, Any], results: list[Result],
 
         if not failed:
             payload_ref = _cr.Payload(kind="gate-receipt", locator=str(receipt_path))
+            reference = str(receipt_path) if receipt_path.is_file() else (
+                f"none (receipt write degraded at {receipt_path})")
         else:
             first_artifact = next(
                 (r.evidence_path for r in failed if r.evidence_path), None
@@ -1717,6 +1719,7 @@ def _emit_gate_record(payload: dict[str, Any], results: list[Result],
                 kind="gate-machine-json",
                 locator=first_artifact or "unavailable",
             )
+            reference = first_artifact or "none retained"
 
         devkit_node = payload.get("devkit_node")
         record = _cr.CommonRecord(
@@ -1761,7 +1764,9 @@ def _emit_gate_record(payload: dict[str, Any], results: list[Result],
             evidence=evidence,
         )
         _write_common_record(record, f"{gate_name}-{head}-{opid}.json")
-        return asdict(next_action)
+        summary = asdict(next_action)
+        summary["reference"] = reference
+        return summary
     except (OSError, ValueError, KeyError):
         # never-must-gate boundary: record construction failure must not
         # alter a gate result that already ran (standard §4.2)
@@ -1880,6 +1885,53 @@ def _emit_exec_record(event: str, run: dict[str, Any], state: str) -> None:
         # never-must-gate boundary (standard §4.2): exec custody/output
         # contracts must never be altered by record emission
         return None
+
+
+def _emit_exec_unknown_record(run_id: str) -> None:
+    """One Common Record for an exec status query naming a run id that has
+    no record (ADR-0060 D15 'unknown running operations'): completion
+    unknown, observation unavailable (nothing about the queried run could
+    be observed), next FIX naming the mechanically-known enumeration
+    handle. The existing typed CLI answer (`unknown exec id`, exit 2) is
+    unchanged; the record is the additive artifact."""
+    try:
+        record_path = _exec_record_path(run_id)
+        record = _cr.CommonRecord(
+            record_kind="exec-status",
+            producer=_cr.Producer(id="devkit-qiven-operator", version="operator-gate-v2"),
+            operation=_cr.Operation(
+                id=_new_operation_id(),
+                repository=ROOT.name,
+                cwd=str(ROOT),
+                invocation=f"qiven exec status {run_id}",
+            ),
+            observation=_cr.Observation(coherence="unavailable"),
+            admission=_cr.Admission(state="accepted"),
+            completion=_cr.Completion(state="unknown"),
+            domain_outcome=_cr.DomainOutcome(outcome="unknown", exit_code="unavailable"),
+            coverage=_cr.Coverage(collection="complete", executed=["record-lookup"]),
+            findings=[_cr.Finding(
+                rule_id="operator/unknown-exec-id",
+                location=_cr.FindingLocation(path=str(record_path)),
+                actual=f"no exec record exists for run id {run_id!r}",
+                expected="an existing exec run record (qiven exec list enumerates them)",
+                contract_revision="unavailable",
+            )],
+            next_action=_cr.next_action_for(
+                "invocation-rejected",
+                "run `qiven exec list` to enumerate known run ids; an id "
+                "without a record never gains a guessed state",
+            ),
+            retry_state=_cr.RetryState(side_effects="unknown"),
+            payload=_cr.Payload(kind="exec-status-query",
+                                locator=f"qiven exec status {run_id}"),
+        )
+        safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in run_id)[:80]
+        _write_common_record(
+            record, f"exec-status-unknown-{safe or 'id'}-{_new_operation_id()}.json"
+        )
+    except (OSError, ValueError, KeyError):
+        return
 
 
 def _not_run_results(stages: list[Any], failed_stage: str) -> list[Result]:
@@ -2315,11 +2367,30 @@ def _spill_large_logs(payload: dict[str, Any]) -> dict[str, Any]:
 # at BOUNDED_READ_MAX_BYTES with an explicit EOF marker and a continue
 # cursor. Path boundary: a RELATIVE path addresses the repository's
 # .generated-temp/ evidence roots (leading ".generated-temp/" optional);
-# an ABSOLUTE path is allowed only when it resolves under the repository
-# root. Reads outside both boundaries are typed errors, never silent
+# an ABSOLUTE path is allowed when it resolves under the repository root
+# OR under one of the operator's retained-evidence roots outside it (the
+# qiven-owned spill/retention area under the OS temp dir - retained task
+# evidence stays recoverable through this route, E-batch closeout law).
+# Reads outside both boundaries are typed errors, never silent
 # redirects. Decoding is a view (utf-8 errors=replace); invalid captured
-# bytes stay recoverable in the artifact (D6).
+# bytes stay recoverable in the artifact (D6). Expiry: when the artifact
+# is gone but a `<artifact>.expired` sibling marker exists, the read is a
+# typed `expired` error naming the ORIGINAL locator (and the marker's
+# bounded note) - an expired pointer stays visible and never justifies
+# dropping the diagnostic (D6). When both artifact and marker exist the
+# BYTES win (readable evidence is served; the marker alone never hides
+# surviving diagnostics).
 # ===========================================================================
+
+def _operator_evidence_roots() -> list[Path]:
+    """Qiven-owned retained-evidence roots OUTSIDE the repository (the
+    spill/retention area under the OS temp dir; ADR-0060 D6 - retained
+    task evidence stays recoverable through evidence-read)."""
+    try:
+        return [(Path(tempfile.gettempdir()) / "qiven-operator").resolve()]
+    except OSError:
+        return []
+
 
 def _evidence_target(path_text: str) -> Path:
     """Resolve one evidence-read locator inside the documented boundary."""
@@ -2331,10 +2402,15 @@ def _evidence_target(path_text: str) -> Path:
     repo_root = ROOT.resolve()
     if raw.is_absolute():
         target = raw.resolve()
-        if target != repo_root and repo_root not in target.parents:
+        allowed = target == repo_root or repo_root in target.parents or any(
+            root == target or root in target.parents
+            for root in _operator_evidence_roots()
+        )
+        if not allowed:
             raise OperatorError(
                 f"evidence-read absolute paths must stay under the repository root "
-                f"{repo_root}; got {target}"
+                f"{repo_root} or the operator evidence roots "
+                f"{[str(r) for r in _operator_evidence_roots()]}; got {target}"
             )
         return target
     generated = repo_root / ".generated-temp"
@@ -2365,6 +2441,24 @@ def _evidence_read(path_text: str, offset: int, count: int,
     try:
         size = target.stat().st_size
     except FileNotFoundError as exc:
+        # expiry marker (E-batch closeout, D6 "expiration/unavailable
+        # artifacts stay visible"): the retention contract removed the
+        # artifact but left `<artifact>.expired` - answer with the typed
+        # `expired` error naming the ORIGINAL locator plus the marker's
+        # bounded note, never a bare not-found that hides the expiry fact
+        marker = target.with_name(target.name + ".expired")
+        if marker.is_file():
+            try:
+                note = marker.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                note = ""
+            note_text = f"; marker note: {_utf8_prefix(note, 200)}" if note else ""
+            raise OperatorError(
+                f"evidence expired: {path_text} (original locator {target}; "
+                f"retention removed the artifact and left the expiry marker "
+                f"{marker}{note_text}) - the expired pointer stays visible, it "
+                "never justifies dropping the diagnostic (D6)"
+            ) from exc
         raise OperatorError(
             f"evidence not found: {path_text} ({target}); an expired or "
             "never-retained pointer stays visible as this typed error"
@@ -2551,12 +2645,39 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 _print_json(_spill_large_logs(payload))
             else:
-                console.emit("fail" if failed else "ok", f"gate:{gate_name}: {payload['status'].upper()}")
+                # ONE summary line carrying class + action + reference
+                # (D3 selector law: the documented FAIL/receipt selectors
+                # and head/tail previews receive class, next action and
+                # locator in the selected summary line - E-batch fix; the
+                # marker prefix and status word are byte-stable). ASCII-
+                # safe control syntax: plain-hyphen separators.
+                verdict_word = str(payload["status"]).upper()
                 if failed and gate_next:
-                    # ASCII-safe control syntax (D3): the separator is a
-                    # plain hyphen, never a localized punctuation mark
-                    console.block(
-                        f"NEXT action: {gate_next['action']} - {gate_next.get('supported_by', '')}"
+                    console.emit(
+                        "fail",
+                        f"gate:{gate_name}: {verdict_word}"
+                        f" - NEXT action: {gate_next['action']}"
+                        f" - {_utf8_prefix(gate_next.get('supported_by') or '', 200)}"
+                        f" - evidence: {_utf8_prefix(gate_next.get('reference') or 'none retained', 200)}",
+                    )
+                else:
+                    receipt_note = ""
+                    if not failed:
+                        # observe the receipt, never assume it: a degraded
+                        # receipt write (_write_gate_receipt swallows OSError,
+                        # fail-closed for proof) must not be claimed as an
+                        # existing locator in the model-facing summary line -
+                        # the same honest wording the record carries
+                        receipt = _receipt_path(gate_name, str(payload["head"]))
+                        receipt_note = (
+                            f" - receipt: {_utf8_prefix(str(receipt), 200)}"
+                            if receipt.is_file()
+                            else " - receipt: none (receipt write degraded at "
+                                 f"{_utf8_prefix(str(receipt), 200)})"
+                        )
+                    console.emit(
+                        "fail" if failed else "ok",
+                        f"gate:{gate_name}: {verdict_word}{receipt_note}",
                     )
             return 1 if failed else 0
 
@@ -2624,6 +2745,13 @@ def main(argv: list[str] | None = None) -> int:
                     _print_json(payload)
                 return exit_code
             if args.exec_command == "status":
+                # unknown running operations (ADR-0060 D15): a query for a
+                # run id with no record yields the typed CLI answer AND one
+                # additive record with completion=unknown (a corrupt record
+                # is a different class - it exists - and stays unrecorded
+                # here)
+                if not _exec_record_path(args.run_id).is_file():
+                    _emit_exec_unknown_record(args.run_id)
                 record = _read_exec_record(args.run_id)
                 snapshot = _exec_snapshot(record)
                 tail = _tail_text(Path(snapshot["log"]), max(0, int(args.tail)))
