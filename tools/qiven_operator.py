@@ -29,6 +29,15 @@ except ImportError:  # pragma: no cover - spec-load without tools on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import common_record as _cr
 
+# B1 (ADR-0060 D3; register row devkit-record-projection-py): the bounded
+# model view stops being test-only - the FAIL carriers of gate/run adopt
+# it as the additive record view after the selector-law summary line.
+try:
+    import record_projection as _rp
+except ImportError:  # pragma: no cover - spec-load without tools on sys.path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import record_projection as _rp
+
 
 # WR-6 consumption model (2026-09-28; supersedes the ADR-0046 Decision-3
 # shim+pin wording, which is historical record): consumer repositories
@@ -634,7 +643,11 @@ def _write_exec_record(record: dict[str, Any]) -> None:
 def _read_exec_record(exec_id: str) -> dict[str, Any]:
     path = _exec_record_path(exec_id)
     if not path.is_file():
-        raise OperatorError(f"unknown exec id: {exec_id} (no record at {path})")
+        raise OperatorError(
+            f"unknown exec id: {exec_id} (no record at {path})"
+            " - NEXT action: FIX - run 'qiven exec list' to enumerate known"
+            " run ids (an id typo or a swept/expired run is the usual cause)"
+        )
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -1104,7 +1117,19 @@ def _exec_stop(record: dict[str, Any], console: Console) -> tuple[dict[str, Any]
     snapshot = _exec_snapshot(record)
     snapshot["stop_note"] = note
     snapshot["status"] = "stopped"
-    console.emit("ok" if terminated else "fail", f"exec stop {exec_id}: stopped ({note})")
+    if terminated:
+        console.emit("ok", f"exec stop {exec_id}: stopped ({note})")
+    else:
+        # B1 (D3): a failed termination teaches its own next step instead
+        # of a bare FAIL; the record keeps pid + job_name for the manual
+        # route.
+        console.emit(
+            "fail",
+            f"exec stop {exec_id}: stopped ({note})"
+            " - NEXT action: DIAGNOSE - the job-object terminate failed;"
+            " verify the process state before retrying (taskkill /PID"
+            f" {record.get('pid')} /T; the run record keeps pid + job_name)",
+        )
     return snapshot, 0 if terminated else 1
 
 
@@ -1766,10 +1791,225 @@ def _emit_gate_record(payload: dict[str, Any], results: list[Result],
         _write_common_record(record, f"{gate_name}-{head}-{opid}.json")
         summary = asdict(next_action)
         summary["reference"] = reference
+        try:
+            # B1: the bounded model view of the SAME record rides the
+            # FAIL carrier (additive block after the selector-law line).
+            summary["projection"] = _rp.project(record)
+        except Exception:
+            summary["projection"] = None
         return summary
     except (OSError, ValueError, KeyError):
         # never-must-gate boundary: record construction failure must not
         # alter a gate result that already ran (standard §4.2)
+        return None
+
+
+def _emit_run_record(payload: dict[str, Any], results: list[Result],
+                     repository: str | None) -> dict[str, Any] | None:
+    """One Common Record per `qiven run` invocation (PASS and FAIL) at
+    .generated-temp/operator/records/run-<head>-<operation-id>.json
+    (B1; mirrors _emit_gate_record without the gate/receipt legs)."""
+    try:
+        head = str(payload.get("head") or "")
+        opid = _new_operation_id()
+        executed = [r.name for r in results if r.status != "not_run"]
+        not_executed = [
+            _cr.CoverageItem(name=r.name, reason=r.detail or "not started")
+            for r in results
+            if r.status == "not_run"
+        ]
+        failed = [r for r in results if r.returncode]
+
+        findings = [
+            _cr.Finding(
+                rule_id="operator/stage-failed",
+                location=_cr.FindingLocation(path=r.name),
+                actual=r.detail or f"exit {r.returncode}",
+                expected="exit 0",
+                contract_revision="unavailable",
+            )
+            for r in failed
+        ]
+        findings.sort(key=lambda f: (f.rule_id, f.location.path))
+
+        if not failed:
+            next_action = _cr.next_action_for("pass")
+        else:
+            next_action = _cr.next_action_for(
+                "unexpected-task-failure",
+                "classify the failing task's failure class before any repair; "
+                "the task contract lives in .qiven/operator.json (declare the "
+                "same task in a gate for receipt+coverage, or re-run single "
+                "tasks while diagnosing)",
+            )
+
+        evidence = [
+            _cr.Evidence(
+                locator=r.evidence_path,
+                digest=(f"sha256:{r.evidence_sha256}" if r.evidence_sha256 else None),
+                byte_count=r.evidence_bytes,
+                layout="stdout+stderr-merged",
+                completeness="complete",
+            )
+            for r in results
+            if r.evidence_path
+        ]
+        first_artifact = next(
+            (r.evidence_path for r in failed if r.evidence_path), None
+        )
+        payload_ref = _cr.Payload(
+            kind="run-machine-json", locator=first_artifact or "unavailable"
+        )
+        devkit_node = payload.get("devkit_node")
+        record = _cr.CommonRecord(
+            record_kind="task-run",
+            producer=_cr.Producer(id="devkit-qiven-operator", version="operator-gate-v2"),
+            operation=_cr.Operation(
+                id=opid,
+                repository=repository or ROOT.name,
+                cwd=str(ROOT),
+                invocation="qiven run " + " ".join(str(r.name) for r in results),
+                selected_revision=(
+                    devkit_node
+                    if isinstance(devkit_node, str) and len(devkit_node) == 40
+                    else None
+                ),
+                executing_revision=head if len(head) == 40 else None,
+                workspace_generation=(
+                    payload.get("workspace_generation")
+                    if isinstance(payload.get("workspace_generation"), str)
+                    and payload["workspace_generation"].startswith("sha256:")
+                    else None
+                ),
+            ),
+            observation=_cr.Observation(coherence="coherent"),
+            admission=_cr.Admission(state="accepted"),
+            completion=_cr.Completion(state="completed"),
+            domain_outcome=_cr.DomainOutcome(
+                outcome="passed" if not failed else "failed",
+                exit_code=0 if not failed else 1,
+            ),
+            coverage=_cr.Coverage(
+                collection="complete" if not not_executed else "partial",
+                executed=executed,
+                not_executed=not_executed,
+            ),
+            next_action=next_action,
+            retry_state=_cr.RetryState(side_effects="not_started"),
+            payload=payload_ref,
+            findings=findings,
+            evidence=evidence,
+        )
+        _write_common_record(record, f"run-{head}-{opid}.json")
+        summary = asdict(next_action)
+        summary["reference"] = first_artifact or "none retained"
+        try:
+            summary["projection"] = _rp.project(record)
+        except Exception:
+            summary["projection"] = None
+        return summary
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def _emit_ci_dispatch_record(payload: dict[str, Any],
+                             repository: str | None) -> None:
+    """One Common Record per successful `qiven ci start` dispatch
+    (B1): the carrier's NEXT line names the watch handle, and the record
+    carries the same next-action mechanically."""
+    try:
+        head = str(payload.get("head") or "")
+        opid = _new_operation_id()
+        profile = str(payload.get("profile") or "")
+        watch_handle = f"qiven ci watch {profile} (run_in_background)"
+        record = _cr.CommonRecord(
+            record_kind="ci-dispatch",
+            producer=_cr.Producer(id="devkit-qiven-operator", version="operator-gate-v2"),
+            operation=_cr.Operation(
+                id=opid,
+                repository=repository or ROOT.name,
+                cwd=str(ROOT),
+                invocation=f"qiven ci start {profile}",
+                executing_revision=head if len(head) == 40 else None,
+            ),
+            observation=_cr.Observation(coherence="coherent"),
+            admission=_cr.Admission(state="accepted"),
+            completion=_cr.Completion(state="completed"),
+            domain_outcome=_cr.DomainOutcome(outcome="passed", exit_code=0),
+            coverage=_cr.Coverage(collection="complete", executed=["ci-dispatch"],
+                                  not_executed=[]),
+            next_action=_cr.next_action_for("operation-running", watch_handle),
+            retry_state=_cr.RetryState(side_effects="in_progress"),
+            payload=_cr.Payload(kind="ci-dispatch-payload",
+                                locator=str(payload.get("url") or "unavailable")),
+        )
+        _write_common_record(record, f"ci-dispatch-{head}-{opid}.json")
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def _emit_ci_watch_record(payload: dict[str, Any],
+                          repository: str | None) -> str | None:
+    """One Common Record per `qiven ci watch` terminal observation
+    (B1). Returns the additive NEXT-action suffix for the FAIL carrier
+    line (None on success or construction failure)."""
+    try:
+        verdict = str(payload.get("conclusion") or "unknown")
+        head = str(payload.get("head") or "")
+        opid = _new_operation_id()
+        profile = str(payload.get("profile") or "")
+        run_id = str(payload.get("run_id") or "")
+        repo = str(payload.get("repository") or "")
+        if verdict == "success":
+            next_action = _cr.next_action_for("pass")
+            findings = []
+        else:
+            gh_handle = (
+                f"read the failing job log: gh run view {run_id} --repo {repo} "
+                f"--log-failed (classify the failure class before any repair; "
+                f"do not re-dispatch blind)"
+            )
+            next_action = _cr.next_action_for("unexpected-task-failure", gh_handle)
+            findings = [
+                _cr.Finding(
+                    rule_id=f"ci/conclusion-{verdict}",
+                    location=_cr.FindingLocation(path=f"gh run {run_id}"),
+                    actual=f"workflow conclusion={verdict}",
+                    expected="conclusion=success",
+                    contract_revision="unavailable",
+                )
+            ]
+        record = _cr.CommonRecord(
+            record_kind="ci-watch",
+            producer=_cr.Producer(id="devkit-qiven-operator", version="operator-gate-v2"),
+            operation=_cr.Operation(
+                id=opid,
+                repository=repository or ROOT.name,
+                cwd=str(ROOT),
+                invocation=f"qiven ci watch {profile}".strip(),
+                executing_revision=head if len(head) == 40 else None,
+            ),
+            observation=_cr.Observation(coherence="coherent"),
+            admission=_cr.Admission(state="accepted"),
+            completion=_cr.Completion(state="completed"),
+            domain_outcome=_cr.DomainOutcome(
+                outcome="passed" if verdict == "success" else "failed",
+                exit_code=0 if verdict == "success" else 1,
+            ),
+            coverage=_cr.Coverage(collection="complete", executed=["ci-watch"],
+                                  not_executed=[]),
+            next_action=next_action,
+            retry_state=_cr.RetryState(side_effects="unknown"),
+            payload=_cr.Payload(kind="ci-watch-payload",
+                                locator=str(payload.get("url") or "unavailable")),
+            findings=findings,
+        )
+        _write_common_record(record, f"ci-watch-{head}-{opid}.json")
+        if verdict == "success":
+            return None
+        summary = asdict(next_action)
+        return str(summary.get("supported_by") or "")
+    except (OSError, ValueError, KeyError):
         return None
 
 
@@ -2284,11 +2524,16 @@ def _ci_watch(config: dict[str, Any], profile: str | None, console: Console,
         "duration_seconds": round(time.monotonic() - started, 1),
     }
     exit_code = 0 if verdict == "success" else 1
+    # B1 (D3): a non-success terminal verdict teaches its own next step
+    # (DIAGNOSE + the exact gh log command) and leaves a ci-watch record.
+    watch_next = _emit_ci_watch_record(payload, config.get("repository_name"))
     if json_receipt:
         _print_json(payload)
     else:
-        console.emit("ok" if verdict == "success" else "fail",
-                     f"ci:watch:{profile}: run {run_id} conclusion={verdict} {url}")
+        line = f"ci:watch:{profile}: run {run_id} conclusion={verdict} {url}"
+        if verdict != "success" and watch_next:
+            line += f" - NEXT action: DIAGNOSE - {watch_next}"
+        console.emit("ok" if verdict == "success" else "fail", line)
     payload["_exit"] = exit_code
     return payload
 
@@ -2653,6 +2898,13 @@ def main(argv: list[str] | None = None) -> int:
                 # safe control syntax: plain-hyphen separators.
                 verdict_word = str(payload["status"]).upper()
                 if failed and gate_next:
+                    # B1 (D3): the bounded model view of the SAME record
+                    # rides the FAIL carrier in the DETAIL region (before
+                    # the summary) - the selector-law summary line stays
+                    # the TAIL line (E-batch recency law: the last line a
+                    # truncated preview keeps carries class+action+locator).
+                    if gate_next.get("projection"):
+                        console.block(str(gate_next["projection"]))
                     console.emit(
                         "fail",
                         f"gate:{gate_name}: {verdict_word}"
@@ -2688,19 +2940,43 @@ def main(argv: list[str] | None = None) -> int:
             failed = [result for result in results if result.returncode]
             payload = {
                 "status": "fail" if failed else "pass",
+                # additive (B1): record identity for the task-run record
+                "head": _git_head_or_empty(),
                 "duration_seconds": round(time.monotonic() - started, 3),
                 "results": [asdict(result) for result in results],
             }
             _workspace_identity_fields(payload)
+            # B1 (D3): `run` stops being the emission asymmetry - one
+            # task-run record per invocation (PASS and FAIL), and the FAIL
+            # human view gains the same selector-law summary line + record
+            # view the gate carries. The PASS line stays byte-stable.
+            run_next = _emit_run_record(payload, results, config.get("repository_name"))
             if args.json:
                 _print_json(_spill_large_logs(payload))
             else:
-                console.emit("fail" if failed else "ok", f"run: {payload['status'].upper()}")
+                if failed and run_next:
+                    # B1 (D3): view first, actionable tail line last (the
+                    # same recency law the gate FAIL carrier obeys).
+                    if run_next.get("projection"):
+                        console.block(str(run_next["projection"]))
+                    console.emit(
+                        "fail",
+                        f"run: {payload['status'].upper()}"
+                        f" - NEXT action: {run_next['action']}"
+                        f" - {_utf8_prefix(run_next.get('supported_by') or '', 200)}"
+                        f" - evidence: {_utf8_prefix(run_next.get('reference') or 'none retained', 200)}",
+                    )
+                else:
+                    console.emit("fail" if failed else "ok", f"run: {payload['status'].upper()}")
             return 1 if failed else 0
 
         if args.command == "ci" and args.ci_command == "start":
             payload = _ci_start(config, args.profile, console)
             _workspace_identity_fields(payload)
+            # B1 (D3): the dispatch success names its own watch handle
+            # (NEXT, supported_by = the exact re-call) and leaves a
+            # ci-dispatch record; additive, json payload unchanged.
+            _emit_ci_dispatch_record(payload, config.get("repository_name"))
             if args.json:
                 _print_json(payload)
             elif not console.json_mode:
@@ -2710,6 +2986,12 @@ def main(argv: list[str] | None = None) -> int:
                     f"      head:        {payload['head']}\n"
                     f"      remote-head: {payload['remote_head']}\n"
                     f"      workflow:    {payload['workflow']}"
+                )
+                console.emit(
+                    "run",
+                    f"ci:start:{args.profile}: dispatched"
+                    f" - NEXT action: qiven ci watch {args.profile}"
+                    f" (run_in_background; terminal verdict + receipt)",
                 )
             return 0
 
@@ -2795,6 +3077,14 @@ def main(argv: list[str] | None = None) -> int:
                 if args.json:
                     _print_json(payload)
                 else:
+                    if not runs:
+                        # B1: silent success is not a result - an empty
+                        # list states itself (D3: a model view retains
+                        # requested data; empty is data).
+                        console.emit(
+                            "ok",
+                            "exec list: no runs (nothing to reconcile)",
+                        )
                     for snapshot in runs:
                         console.emit(
                             "wait" if snapshot["state"] in ("running", "reaping", "orphaned") else "ok",
