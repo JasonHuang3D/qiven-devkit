@@ -18,10 +18,23 @@ USAGE = ("usage: new_cpp_library.py DEST REPOSITORY PROJECT TARGET ALIAS "
          "NAMESPACE TEST_OPTION [SOLUTION]")
 
 
+def usage_failure(argv: list[str]) -> int:
+    # B7a four-element carrier for the usage rejection (register row
+    # devkit-tool-new-cpp-library): what + why + evidence + the FIX route.
+    print(f"[FAIL] new_cpp_library.py: usage rejected - {USAGE}")
+    print("  why: the positional contract is fixed (DEST REPOSITORY PROJECT TARGET "
+          "ALIAS NAMESPACE TEST_OPTION [SOLUTION] [TEMPLATE]; docs/conventions/"
+          "cross-repo-cmake.md)")
+    print(f"  evidence: got {len(argv)} argument(s): {argv}")
+    print("  NEXT: FIX - re-run with the documented argument order; the generated "
+          "repository then needs git init + a baseline commit before adoption-era "
+          "syncs")
+    return 2
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 7:
-        print(USAGE)
-        return 2
+        return usage_failure(argv)
     keys = ("DESTINATION", "REPOSITORY_NAME", "CMAKE_PROJECT_NAME", "CMAKE_TARGET_NAME",
             "CMAKE_ALIAS", "CPP_NAMESPACE", "TEST_OPTION_NAME")
     values = dict(zip(keys, argv[:7]))

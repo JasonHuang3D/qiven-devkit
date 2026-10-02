@@ -4,19 +4,30 @@ foreach(variable IN ITEMS DEVKIT_ROOT MODE REPOSITORY REPOSITORY_NAME CMAKE_PROJ
     qiven_validate_value(${variable})
 endforeach()
 if(NOT MODE STREQUAL "check" AND NOT MODE STREQUAL "apply")
-    message(FATAL_ERROR "MODE must be exactly check or apply")
+    message(FATAL_ERROR "MODE must be exactly check or apply\n"
+        "  rule: qivenrepo/adopt/mode-law (MODE is case-sensitive: check | apply)\n"
+        "  evidence: got MODE='${MODE}'\n"
+        "  NEXT: FIX - re-run with MODE check (read-only plan) or apply (materialize), "
+        "spelled exactly")
 endif()
 
 cmake_path(ABSOLUTE_PATH REPOSITORY NORMALIZE OUTPUT_VARIABLE repository)
 if(NOT IS_DIRECTORY "${repository}")
-    message(FATAL_ERROR "Repository path does not exist or is not a directory: ${repository}")
+    message(FATAL_ERROR "Repository path does not exist or is not a directory: ${repository}\n"
+        "  rule: qivenrepo/adopt/target-missing (adoption needs the repository root)\n"
+        "  evidence: resolved path ${repository}\n"
+        "  NEXT: FIX - pass the root path of the repository to adopt, then re-run")
 endif()
 
 find_program(QIVEN_GIT_EXECUTABLE NAMES git REQUIRED)
 execute_process(COMMAND "${QIVEN_GIT_EXECUTABLE}" -C "${repository}" rev-parse --show-toplevel
     RESULT_VARIABLE root_result OUTPUT_VARIABLE git_root ERROR_VARIABLE root_error OUTPUT_STRIP_TRAILING_WHITESPACE)
 if(NOT root_result EQUAL 0)
-    message(FATAL_ERROR "Target is not a Git working tree: ${repository}\n${root_error}")
+    message(FATAL_ERROR "Target is not a Git working tree: ${repository}\n${root_error}\n"
+        "  rule: qivenrepo/adopt/not-a-work-tree (adoption records ownership in git "
+        "state, so the target must be one)\n"
+        "  NEXT: FIX - initialize the repository (git init) or point REPOSITORY at "
+        "the real work tree, then re-run")
 endif()
 file(REAL_PATH "${repository}" repository_real)
 file(REAL_PATH "${git_root}" git_root_real)
@@ -28,24 +39,46 @@ else()
     set(git_root_compare "${git_root_real}")
 endif()
 if(NOT repository_compare STREQUAL git_root_compare)
-    message(FATAL_ERROR "Target must be the root of its Git working tree: ${repository}")
+    message(FATAL_ERROR "Target must be the root of its Git working tree: ${repository}\n"
+        "  rule: qivenrepo/adopt/not-work-tree-root (adoption plans against the tree "
+        "root so nothing outside ownership is touched)\n"
+        "  evidence: passed ${repository}; git root resolves to ${git_root}\n"
+        "  NEXT: FIX - re-run with REPOSITORY=${git_root}")
 endif()
 
 execute_process(COMMAND "${QIVEN_GIT_EXECUTABLE}" -C "${repository}" rev-parse --verify HEAD
     RESULT_VARIABLE head_result OUTPUT_QUIET ERROR_VARIABLE head_error)
 if(NOT head_result EQUAL 0)
-    message(FATAL_ERROR "Target Git repository has no HEAD commit: ${repository}\n${head_error}")
+    message(FATAL_ERROR "Target Git repository has no HEAD commit: ${repository}\n${head_error}\n"
+        "  rule: qivenrepo/adopt/no-head (a baseline commit is required so adoption "
+        "conflicts are diffable and reversible)\n"
+        "  NEXT: FIX - commit the current state first (git add --all; git commit), "
+        "then re-run")
 endif()
 if(EXISTS "${repository}/.qiven" OR IS_SYMLINK "${repository}/.qiven")
-    message(FATAL_ERROR "Target already contains .qiven ownership state; use sync-repo for an already-managed repository")
+    message(FATAL_ERROR "Target already contains .qiven ownership state; use sync-repo for an already-managed repository\n"
+        "  rule: qivenrepo/adopt/already-managed (adoption is for unmanaged "
+        "repositories; a managed one is updated by sync, never re-adopted)\n"
+        "  evidence: ${repository}/.qiven exists\n"
+        "  NEXT: FIX - run the sync path instead: python tools/sync_repo.py "
+        "\"${repository}\"")
 endif()
 execute_process(COMMAND "${QIVEN_GIT_EXECUTABLE}" --no-optional-locks -C "${repository}" status --porcelain=v1 --untracked-files=all
     RESULT_VARIABLE status_result OUTPUT_VARIABLE porcelain ERROR_VARIABLE status_error)
 if(NOT status_result EQUAL 0)
-    message(FATAL_ERROR "Could not inspect target Git status: ${status_error}")
+    message(FATAL_ERROR "Could not inspect target Git status: ${status_error}\n"
+        "  rule: qivenrepo/adopt/status-unreadable (the clean-tree precondition "
+        "cannot be established, so adoption does not proceed)\n"
+        "  NEXT: DIAGNOSE - run git -C \"${repository}\" status --porcelain=v1 "
+        "--untracked-files=all yourself; fix the git condition it reports, then re-run")
 endif()
 if(NOT porcelain STREQUAL "")
-    message(FATAL_ERROR "Target Git repository is not clean; adoption made no changes")
+    message(FATAL_ERROR "Target Git repository is not clean; adoption made no changes\n"
+        "  rule: qivenrepo/adopt/dirty-tree (adoption requires a clean tree so no "
+        "consumer work is overwritten or hidden by the plan)\n"
+        "  evidence: git status --porcelain=v1 --untracked-files=all reports:\n"
+        "${porcelain}\n"
+        "  NEXT: FIX - commit or stash every path listed above, then re-run")
 endif()
 set(template "${DEVKIT_ROOT}/templates/cpp-library")
 include("${template}/managed-files.cmake")
@@ -53,10 +86,17 @@ string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef nonce)
 set(stage "${repository}.qiven-adopt-${nonce}")
 cmake_path(IS_PREFIX repository "${stage}" stage_inside_repository NORMALIZE)
 if(stage_inside_repository)
-    message(FATAL_ERROR "Could not place adoption staging outside the target repository: ${repository}")
+    message(FATAL_ERROR "Could not place adoption staging outside the target repository: ${repository}\n"
+        "  rule: qivenrepo/adopt/stage-inside-target (staging must never pollute the "
+        "clean-tree plan it is building)\n"
+        "  NEXT: DIAGNOSE - this is a path-layout collision, not an input class; "
+        "inspect ${stage}, then re-run")
 endif()
 if(EXISTS "${stage}" OR IS_SYMLINK "${stage}")
-    message(FATAL_ERROR "Temporary path already exists: ${stage}")
+    message(FATAL_ERROR "Temporary path already exists: ${stage}\n"
+        "  rule: qivenrepo/adopt/stage-collision (a random-nonce staging dir already "
+        "exists - unexpected, not a normal input class)\n"
+        "  NEXT: DIAGNOSE - inspect and remove the stale staging dir, then re-run")
 endif()
 file(MAKE_DIRECTORY "${stage}")
 
@@ -112,7 +152,15 @@ qiven_print_adoption_category("CONFLICT" conflict_paths)
 if(conflict_paths)
     file(REMOVE_RECURSE "${stage}")
     list(JOIN conflict_paths ", " conflict_text)
-    message(FATAL_ERROR "Adoption conflict; no repository files changed: ${conflict_text}")
+    message(FATAL_ERROR "Adoption conflict; no repository files changed: ${conflict_text}\n"
+        "  rule: qivenrepo/adopt/conflict (a managed path whose current bytes differ "
+        "from the template render; adoption is all-or-nothing, so one conflict "
+        "blocks everything and no repository file was touched)\n"
+        "  evidence: conflicting path(s): ${conflict_text}; the desired bytes are "
+        "the current devkit template render\n"
+        "  NEXT: FIX - for each listed path: port your local change into the devkit "
+        "template or restore the template bytes; commit, re-run MODE check, then "
+        "MODE apply")
 endif()
 
 if(MODE STREQUAL "check")

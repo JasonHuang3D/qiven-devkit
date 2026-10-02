@@ -224,6 +224,11 @@ def main() -> int:
     if located is None:
         print("[SKIP] XC2: no sibling qiven-context checkout with .venv "
               "(pass records cross-checked against the frozen envelope only)")
+        print("[SKIP] XC2: evidence: sibling probes found no qiven-context with a "
+              ".venv next to this devkit; XC1 (frozen-envelope leg) ran completely")
+        print("[SKIP] XC2: NEXT: NEXT - run inside the qiven workspace layout for "
+              "the live builder crosscheck (no FIX applies: absence is environment, "
+              "not a defect)")
         print("[ OK ] context records crosscheck (XC1; XC2 skipped - checkout absent)")
         return 0
     context, venv_python = located
@@ -253,4 +258,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import selftest_carrier
+    raise SystemExit(selftest_carrier.run(__file__, main))

@@ -16,7 +16,12 @@ from toolchain import resolve
 
 def main(argv: list[str]) -> int:
     if len(argv) != 1:
-        print("usage: sync_repo.py REPOSITORY")
+        # B7a four-element carrier (register row devkit-tool-sync-repo)
+        print("[FAIL] sync_repo.py: usage rejected - usage: sync_repo.py REPOSITORY")
+        print("  why: exactly one argument - the root path of a qiven-managed "
+              "repository (docs/conventions/cross-repo-cmake.md)")
+        print(f"  evidence: got {len(argv)} argument(s): {argv}")
+        print("  NEXT: FIX - re-run as: python tools/sync_repo.py <repository-root>")
         return 2
     devkit = Path(__file__).resolve().parent.parent
     command = [resolve()["cmake"], f"-DDEVKIT_ROOT={devkit}",

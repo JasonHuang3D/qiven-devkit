@@ -587,7 +587,14 @@ def main() -> int:
         print("[FAIL] gate inside exec must be allowed")
 
     if failures:
-        print(f"[FAIL] router-tests: {failures} case(s)")
+        print(f"[FAIL] router-tests: {failures} case(s) - verdict classification "
+              "mismatch(es) above (rule: hook_exec_router verdict-class taxonomy, "
+              "tools/hook_exec_router.py docstring + ROUTER_PROFILE)")
+        print("[FAIL] router-tests: evidence: each [FAIL] line above carries the "
+              "command, the expected verdict class and the actual one")
+        print("[FAIL] router-tests: NEXT: DIAGNOSE - re-run `python "
+              "tools/hook_exec_router_test.py`; fix the classifier branch for the "
+              "class shown as 'got'; never widen a denial class to pass a case")
         return 1
     print(f"[ OK ] router-tests: {len(CASES)} classification + {len(probe_cases())} probe + "
           f"{len(background_cases())} v4-background + provenance cases")
@@ -595,4 +602,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import selftest_carrier
+    raise SystemExit(selftest_carrier.run(__file__, main))

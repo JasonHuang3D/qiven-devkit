@@ -3,6 +3,21 @@ if(NOT DEFINED DEVKIT_ROOT)
     get_filename_component(DEVKIT_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 endif()
 
+# B7a four-element carrier (defined BEFORE first use - the version-derivation
+# guard below calls it at parse time): WHAT (assertion text, byte-stable
+# prefix), WHY (the assertion names its law; rule = this suite), evidence
+# (cmake output above + disposable fixture root once set), NEXT (DIAGNOSE
+# with the exact re-run). Never weaken or skip the assertion to pass it.
+function(fail message_text)
+    message(FATAL_ERROR "TEST FAILURE: ${message_text}\n"
+        "  rule: devkit-regression assertion (tools/test.cmake + adoption-test.cmake; "
+        "the assertion text names the violated law)\n"
+        "  evidence: full cmake -P output above; disposable fixtures at ${fixtures}\n"
+        "  NEXT: DIAGNOSE - re-run qiven run devkit-regression (or cmake "
+        "-DDEVKIT_ROOT=${CMAKE_CURRENT_LIST_DIR}/.. -P ${CMAKE_CURRENT_LIST_DIR}/test.cmake); "
+        "fix the condition named above; never weaken or skip the assertion")
+endfunction()
+
 # The CURRENT template version, derived from the manifest — version bumps
 # must not require editing this test (the repeated-pin drift class; the
 # simulated future versions below append suffixes to the derived value).
@@ -12,10 +27,6 @@ if(NOT _version_match)
     fail("could not derive the current template version from managed-files.cmake")
 endif()
 set(CURRENT_TEMPLATE_VERSION "${CMAKE_MATCH_1}")
-
-function(fail message_text)
-    message(FATAL_ERROR "TEST FAILURE: ${message_text}")
-endfunction()
 function(assert_exists path)
     if(NOT EXISTS "${path}")
         fail("expected path does not exist: ${path}")

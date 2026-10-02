@@ -132,4 +132,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import selftest_carrier
+    raise SystemExit(selftest_carrier.run(__file__, main))

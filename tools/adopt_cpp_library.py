@@ -19,10 +19,23 @@ USAGE = ("usage: adopt_cpp_library.py MODE REPOSITORY REPOSITORY_NAME PROJECT TA
          "ALIAS NAMESPACE TEST_OPTION [SOLUTION]; MODE must be exactly check or apply")
 
 
+def usage_failure(argv: list[str]) -> int:
+    # B7a four-element carrier for the usage/mode rejection (register row
+    # devkit-tool-adopt-cpp-library): what + why + evidence + the FIX route.
+    print(f"[FAIL] adopt_cpp_library.py: usage rejected - {USAGE}")
+    why = ("MODE is case-sensitive and must be exactly 'check' or 'apply'"
+           if argv and argv[0] not in ("check", "apply")
+           else "the positional contract is fixed (8 required arguments)")
+    print(f"  why: {why} (docs/conventions/cross-repo-cmake.md)")
+    print(f"  evidence: got {len(argv)} argument(s): {argv}")
+    print("  NEXT: FIX - re-run with MODE check first (read-only plan), then MODE "
+          "apply to materialize the adoption")
+    return 2
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 8 or argv[0] not in ("check", "apply"):
-        print(USAGE)
-        return 2
+        return usage_failure(argv)
     mode = argv[0]
     keys = ("REPOSITORY", "REPOSITORY_NAME", "CMAKE_PROJECT_NAME", "CMAKE_TARGET_NAME",
             "CMAKE_ALIAS", "CPP_NAMESPACE", "TEST_OPTION_NAME")

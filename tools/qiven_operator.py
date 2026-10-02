@@ -1275,6 +1275,10 @@ RESULT_EXCERPT_TAIL_BYTES = 1024
 # task FAILED or the captured bytes exceed this threshold (declared
 # decision, not happenstance)
 RAW_LOG_RETAIN_THRESHOLD_BYTES = 65536
+# B7a (four-element law): builtin FAIL listings (diff-check findings,
+# clean-tree dirty paths) are bounded to the D3 inline-finding budget of
+# 8 with an explicit omission count; the full listing command is named
+BUILTIN_FINDINGS_SHOWN = 8
 
 
 def _utf8_prefix(text: str, budget: int) -> str:
@@ -1494,13 +1498,32 @@ def _builtin(name: str, spec: dict[str, Any], console: Console, expect_head: str
             console.emit("fail", f"{name}: {detail}")
             return Result(name, "fail", 1, time.monotonic() - started, detail=detail)
         if not receipt_file.is_file():
+            # B7a (four-element law): the FAIL carrier names the P-53 law,
+            # the receipt locator and the exact re-run (prefix bytes pinned
+            # by p0_closeout_test EC6: "no <gate> PASS receipt ...")
             detail = f"no {gate_name} PASS receipt for exact head {head[:12]}"
             console.emit("fail", f"{name}: {detail}")
+            console.block(
+                f"  rule: operator/gate-proof-missing-receipt (pit P-53: merge-class\n"
+                f"  publication requires a recorded full-gate PASS for the EXACT head;\n"
+                f"  a scoped or stale gate is not the gate)\n"
+                f"  evidence: expected receipt at: {receipt_file} (absent)\n"
+                f"  NEXT: FIX - run `qiven gate --name {gate_name}` at this head and\n"
+                f"  let it write the PASS receipt, then re-run this proof"
+            )
             return Result(name, "fail", 1, time.monotonic() - started, detail=detail)
         receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
         if receipt.get("status") != "pass" or receipt.get("head") != head:
             detail = f"receipt for {head[:12]} is not a matching PASS"
             console.emit("fail", f"{name}: {detail}")
+            console.block(
+                f"  rule: operator/gate-proof-stale-receipt (pit P-53: the proof is a\n"
+                f"  full-gate PASS recorded for the EXACT 40-char head)\n"
+                f"  evidence: receipt at {receipt_file} has status="
+                f"{receipt.get('status')!r}, head={str(receipt.get('head'))[:12]}\n"
+                f"  NEXT: FIX - run `qiven gate --name {gate_name}` at the current\n"
+                f"  head {head[:12]}, then re-run this proof"
+            )
             return Result(name, "fail", 1, time.monotonic() - started, detail=detail)
         console.emit("ok", f"{name}: {gate_name} PASS @ {head[:12]} "
                            f"({receipt.get('timestamp')})")
@@ -1509,16 +1532,45 @@ def _builtin(name: str, spec: dict[str, Any], console: Console, expect_head: str
         base = str(spec.get("base", "origin/main"))
         completed = _git("diff", "--check", f"{base}...HEAD")
         if completed.returncode:
-            console.emit("fail", f"{name}: git diff --check failed")
-            console.block(completed.stdout)
+            # B7a (four-element law): typed rule + BOUNDED listing (the raw
+            # git block was unbounded) + the exact FIX route
+            lines = [ln for ln in completed.stdout.splitlines() if ln.strip()]
+            shown, omitted = lines[:BUILTIN_FINDINGS_SHOWN], len(lines) - min(
+                len(lines), BUILTIN_FINDINGS_SHOWN)
+            block = "\n".join(shown)
+            if omitted > 0:
+                block += (f"\n  [evidence: first {len(shown)} of {len(lines)} "
+                          f"finding(s); full listing: git diff --check {base}...HEAD]")
+            console.emit("fail", f"{name}: git diff --check failed vs {base}...HEAD "
+                                 "(rule: operator/diff-check - whitespace errors and "
+                                 "conflict markers block publication)")
+            console.block(block)
+            console.emit("fail", f"{name}: NEXT: FIX - fix the whitespace/conflict "
+                                 f"markers at the paths above, then re-run; full "
+                                 f"listing: git diff --check {base}...HEAD")
             return Result(name, "fail", completed.returncode, time.monotonic() - started, output=completed.stdout)
     elif kind == "git_clean_tree":
         completed = _git("status", "--porcelain=v1", "--untracked-files=all")
         dirty = completed.stdout.strip()
         if completed.returncode or dirty:
             detail = "working tree is not clean" if dirty else "git status failed"
-            console.emit("fail", f"{name}: {detail}")
-            console.block(completed.stdout)
+            # B7a (four-element law): typed rule + BOUNDED dirty listing
+            # (was unbounded) + the commit/stash FIX route; the detail
+            # string stays pinned by operator-test G1.clean-tree-detail
+            lines = [ln for ln in completed.stdout.splitlines() if ln.strip()]
+            shown, omitted = lines[:BUILTIN_FINDINGS_SHOWN], len(lines) - min(
+                len(lines), BUILTIN_FINDINGS_SHOWN)
+            block = "\n".join(shown)
+            if omitted > 0:
+                block += (f"\n  [evidence: first {len(shown)} of {len(lines)} "
+                          f"dirty path(s); full listing: git status --porcelain=v1 "
+                          f"--untracked-files=all]")
+            console.emit("fail", f"{name}: {detail} (rule: operator/clean-tree - "
+                                 "gates publish from a clean tree)")
+            console.block(block)
+            if dirty:
+                console.emit("fail", f"{name}: NEXT: FIX - commit or stash the paths "
+                                     "above, then re-run; never force the check green")
             return Result(name, "fail", 1, time.monotonic() - started, detail=detail, output=completed.stdout)
     else:
         detail = f"unknown builtin: {kind}"
