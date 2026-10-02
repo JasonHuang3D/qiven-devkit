@@ -57,6 +57,7 @@ SELFTEST_SCRIPTS = (
     "workspace_resolver_test.py", "workspace_bootstrap_test.py",
     "workspace_shadow_test.py", "workspace_profile_b_test.py",
     "hook_exec_router_test.py", "check_resolver_patterns_test.py",
+    "b2_envelope_test.py",
 )
 
 

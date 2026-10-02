@@ -102,6 +102,12 @@
         "tools/b7a_carrier_test.py"
       ]
     },
+    "b2-envelope-tests": {
+      "argv": [
+        "{python}",
+        "tools/b2_envelope_test.py"
+      ]
+    },
     "context-records-crosscheck-tests": {
       "argv": [
         "{python}",
@@ -170,6 +176,7 @@
       "b1-emission-tests",
       "b3-template-tests",
       "b7a-carrier-tests",
+      "b2-envelope-tests",
       "context-records-crosscheck-tests",
       "router-record-adapter-tests",
       "workspace-schemas-tests",
