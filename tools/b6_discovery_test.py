@@ -261,7 +261,7 @@ def b6_5_deploy(base: pathlib.Path) -> None:
     bad = run([sys.executable, DEPLOY, "--verify", str(bundle)], cwd=ROOT, expect=1)
     check("[FAIL] digest mismatch app.exe" in bad.stdout,
           "B6-5.per-file-bytes-stable", bad.stdout)
-    check("- NEXT action: NEXT - re-run the deploy" in bad.stdout,
+    check("- NEXT action: re-run the deploy" in bad.stdout,
           "B6-5.verify-next", bad.stdout)
     empty = run([sys.executable, DEPLOY, "--verify", str(base / "empty")],
                 cwd=ROOT, expect=1)
@@ -291,7 +291,7 @@ def b6_5_deploy(base: pathlib.Path) -> None:
     )
     check(noreceipt.returncode == 1, "B6-5.noreceipt-exit", noreceipt.stderr)
     check(f"--expect-head {head}" in noreceipt.stderr
-          and "NEXT action: NEXT - run `qiven gate local" in noreceipt.stderr,
+          and "NEXT action: run `qiven gate local" in noreceipt.stderr,
           "B6-5.noreceipt-next-exact", noreceipt.stderr)
     (repo / "dirty.txt").write_text("x", encoding="utf-8")
     dirty = subprocess.run(
