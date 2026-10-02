@@ -47,7 +47,7 @@ run_expect_success("${CMAKE_COMMAND}"
     -DVS_SOLUTION_NAME=adopt-missing-sync -P "${DEVKIT_ROOT}/cmake/QivenRepoNew.cmake")
 
 file(REMOVE_RECURSE "${repo}/.qiven")
-file(REMOVE "${repo}/.clang-format" "${repo}/tools/format.cmd")
+file(REMOVE "${repo}/.clang-format" "${repo}/tools/qiven.cmd")
 run_expect_success(git -C "${repo}" init -b main)
 run_expect_success(git -C "${repo}" add --all)
 run_expect_success(git -C "${repo}" -c user.name=QivenFixture -c user.email=fixture@example.invalid commit -m baseline)
