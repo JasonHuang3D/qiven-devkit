@@ -17,6 +17,22 @@ encoding of {"lock": <lock sans generation>, "manifest": <manifest>} —
 independent of local absolute paths and timestamps by construction.
 
 Exit codes: 0 validated / 1 typed failure / 2 usage or environment error.
+
+Next-action dimension (ADR-0060 D3; P0 repair batch B2, SG-4): every
+typed error envelope and every emitted receipt carries a mechanically
+supported ``next_action`` (``NONE``/``FIX``/``NEXT``/``DIAGNOSE``/
+``RECONCILE``). FIX/NEXT name their correction in ``supported_by`` (the
+exact flag, path, or transaction); DIAGNOSE/NONE never carry one — the
+message itself is the classification input and an invented correction
+would be a guess. The class assignment mirrors the frozen event table
+in qiven-devkit tools/common_record.py NEXT_ACTION_EVENTS (frozen data
+law, not shared code law: the resolver cannot import the Common Record
+builder without widening its own import surface). Schema versions stay
+at *-v1: ``next_action`` is an ADDITIVE optional field on the receipt
+and error shapes, the same additive pattern the workspace bootstrap
+used for ``record`` (readers key on known fields; the graph receipt
+digest covers the new field because it is inserted before the digest
+is computed).
 """
 
 from __future__ import annotations
@@ -42,20 +58,163 @@ ERROR_SCHEMA = "qiven-workspace-resolution-error-v1"
 
 _SHORT_ESCAPES = {"\x08": "\\b", "\x09": "\\t", "\x0A": "\\n", "\x0C": "\\f", "\x0D": "\\r"}
 
+#: next-action vocabulary (ADR-0060 D3 "Next action" dimension).
+NEXT_ACTIONS = ("NONE", "FIX", "NEXT", "DIAGNOSE", "RECONCILE")
+
+#: typed kind -> (action, supported_by). The mechanically-known
+#: correction for each section-11 taxonomy kind; kinds that depend on
+#: classifying captured evidence (git failures, object-store
+#: inconsistencies) map to DIAGNOSE with NO supported_by — a guessed
+#: correction would violate the class-aware law. Per-site overrides at
+#: the raise sites handle the kinds whose class depends on WHERE they
+#: fire (RevisionUnavailable: environment failure vs missing checkout).
+_NEXT_ACTIONS: dict[str, tuple[str, str]] = {
+    "CanonicalEncoding": (
+        "FIX",
+        "fix the named value to stay inside the canonical JSON vocabulary "
+        "(RFC 8785 subset: no floats, no lone surrogates, string keys only)",
+    ),
+    "RevisionUnavailable": ("DIAGNOSE", ""),
+    "RevisionMismatch": (
+        "FIX",
+        "check out the locked commit in the named node worktree, or move the "
+        "lock to the checkout HEAD via lock-update --move (choose the "
+        "direction deliberately; lock-update is the lock's only writer)",
+    ),
+    "TreeMismatch": ("DIAGNOSE", ""),
+    "DirtyDependency": (
+        "FIX",
+        "clean the named worktree (commit or stash), or rerun in shadow mode "
+        "which labels the dirt instead of refusing",
+    ),
+    "WorkspaceNotFound": (
+        "FIX",
+        "point --control at the workspace control checkout carrying "
+        "workspace.json + workspace.lock.json",
+    ),
+    "SchemaViolation": (
+        "FIX", "fix the named violation at the cited path, then rerun",
+    ),
+    "GenerationMismatch": (
+        "FIX",
+        "restore workspace.lock.json from control history, or regenerate it "
+        "via a lock-update transaction for the current manifest (choose "
+        "deliberately)",
+    ),
+    "WorkspaceIdMismatch": (
+        "FIX",
+        "align workspace_id between workspace.json and workspace.lock.json "
+        "through a lock-update transaction",
+    ),
+    "UntrustedControlRevision": (
+        "FIX",
+        "authoritative mode requires --trust-policy admitting the exact "
+        "control revision: admit the revision in the policy (or rerun in "
+        "shadow mode, which is the fail-safe default)",
+    ),
+    "ControlTreeDirty": (
+        "FIX",
+        "commit or stash the control working tree before consuming it as "
+        "admitted (lock-update transactions validate before committing and "
+        "are exempt)",
+    ),
+    "MissingDeclaration": (
+        "FIX",
+        "restore the named declaration record at the locked digest, or "
+        "refresh the declaration cache through a lock-update transaction",
+    ),
+    "DeclarationBlobMismatch": (
+        "FIX",
+        "restore the declaration file to the locked blob, or regenerate the "
+        "lock + declaration cache via lock-update (choose deliberately)",
+    ),
+    "DeclarationDigestMismatch": (
+        "FIX",
+        "restore the declaration content to the locked digest, or regenerate "
+        "the lock + declaration cache via lock-update (choose deliberately)",
+    ),
+    "DeclarationRepositoryMismatch": (
+        "FIX",
+        "the overlay checkout's .qiven/dependencies.json must declare "
+        "repository == the overlay node id",
+    ),
+    "UnknownNode": (
+        "FIX",
+        "point the edge at a base lock node, or add the node through a "
+        "lock-update transaction (choose deliberately)",
+    ),
+    "PlatformMismatch": (
+        "FIX",
+        "align the dependency platform with the locked node platform in the "
+        "consumer declaration",
+    ),
+    "DependencyConflict": (
+        "FIX",
+        "fix the consumer dependency edge to a contract/package the provider "
+        "actually provides (the locked provisions are authoritative)",
+    ),
+    "CycleDetected": (
+        "FIX",
+        "break the architectural cycle in the named declarations (the "
+        "declared graph must be acyclic)",
+    ),
+    "BaselineConflict": (
+        "FIX",
+        "reconcile the legacy consumer pin with the locked selection (WR-6 "
+        "reconciliation target): update the pin or move the lock via "
+        "lock-update",
+    ),
+    "CandidateRejected": (
+        "FIX",
+        "use the overlay subcommand for existing lock nodes; candidate "
+        "admission validates NEW repositories only",
+    ),
+    "BootstrapDevkitMismatch": (
+        "FIX",
+        "run the resolver from the locked devkit revision (check it out), or "
+        "advance the lock deliberately through the WR-8 trust-policy "
+        "admission step",
+    ),
+}
+
+#: the fallback for taxonomy-superset kinds raised outside the table.
+_DEFAULT_NEXT_ACTION: tuple[str, str] = ("DIAGNOSE", "")
+
+
+def _next_action_dict(action: str, supported_by: str) -> dict[str, str]:
+    if action not in NEXT_ACTIONS:
+        raise ValueError(f"unknown next-action class {action!r}")
+    if action in ("FIX", "NEXT") and not supported_by.strip():
+        raise ValueError(f"action {action!r} requires supported_by")
+    payload = {"action": action}
+    if action in ("FIX", "NEXT"):
+        payload["supported_by"] = supported_by
+    return payload
+
 
 class ResolutionError(Exception):
     """A typed failure from the section 11 taxonomy (superset allowed)."""
 
     def __init__(self, kind: str, message: str, *, node: str | None = None,
-                 consumer_edge: str | None = None) -> None:
+                 consumer_edge: str | None = None,
+                 next_action: tuple[str, str] | None = None) -> None:
         super().__init__(f"{kind}: {message}")
         self.kind = kind
         self.message = message
         self.node = node
         self.consumer_edge = consumer_edge
+        # next_action: per-site (action, supported_by) override; None derives
+        # from the _NEXT_ACTIONS kind table (frozen class-aware law).
+        action, supported_by = (
+            next_action or _NEXT_ACTIONS.get(kind, _DEFAULT_NEXT_ACTION))
+        self.next_action = _next_action_dict(action, supported_by)
 
-    def as_dict(self) -> dict[str, str]:
-        payload = {"type": self.kind, "message": self.message}
+    def as_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "type": self.kind,
+            "message": self.message,
+            "next_action": self.next_action,
+        }
         if self.node:
             payload["node"] = self.node
         if self.consumer_edge:
@@ -459,6 +618,12 @@ def _load_declaration(node_id: str, node: dict, control: Path, checkout: Path | 
                     f"{node_id}: no checkout and unreadable declaration cache "
                     f"{declaration['path']}: {error}",
                     node=node_id,
+                    next_action=(
+                        "FIX",
+                        "pass the node's checkout via --checkouts (or "
+                        "--workspace-root), or refresh its declaration cache "
+                        "through a lock-update transaction, then rerun",
+                    ),
                 ) from error
             blob = _git(["hash-object", str(control / declaration["path"])], control)
             if blob != declaration["blob"]:
@@ -473,6 +638,12 @@ def _load_declaration(node_id: str, node: dict, control: Path, checkout: Path | 
                 "RevisionUnavailable",
                 f"{node_id}: checkout needed for manifest read (no declaration cache)",
                 node=node_id,
+                next_action=(
+                    "FIX",
+                    "pass the node's checkout via --checkouts (or "
+                    "--workspace-root), or refresh its declaration cache "
+                    "through a lock-update transaction, then rerun",
+                ),
             )
         try:
             record = schemas.parse_strict(record_text)
@@ -648,6 +819,9 @@ def resolve(control: Path, checkouts: dict[str, str], workspace_root: Path | Non
         "nodes": node_receipts,
         "edges": edges,
         "baseline_conflicts": conflicts,
+        # D3 next-action dimension: a clean validation is DONE — NONE is the
+        # honest class (no invented follow-up work on a completed operation).
+        "next_action": {"action": "NONE"},
     }
     receipt["graph_receipt_digest"] = content_digest(
         {k: v for k, v in receipt.items() if k != "graph_receipt_digest"}
@@ -765,6 +939,16 @@ def validate_candidate(control: Path, manifest_path: Path) -> dict:
         "base_graph_valid": True,
         "candidate_validated": not failures,
         "failures": failures,
+        # D3: a validated candidate is done (NONE); failures are edge
+        # rejections whose correction the mechanism knows (FIX).
+        "next_action": {"action": "NONE"} if not failures else {
+            "action": "FIX",
+            "supported_by": (
+                "address each listed failure edge in the candidate manifest, "
+                "then rerun; the base lock nodes and their provisions are "
+                "authoritative"
+            ),
+        },
     }
 
 
@@ -915,6 +1099,10 @@ def _validate_effective(control: Path, manifest: dict, effective_lock: dict,
         "nodes": node_receipts,
         "edges": edges,
         "baseline_conflicts": conflicts,
+        # D3 next-action default for the effective-graph family; the
+        # operation wrappers (adapter / lock-update) override it with the
+        # operation-specific class before recomputing the digest.
+        "next_action": {"action": "NONE"},
     }
     receipt["graph_receipt_digest"] = content_digest(
         {k: v for k, v in receipt.items() if k != "graph_receipt_digest"}
@@ -1065,6 +1253,12 @@ def emit_adapter(control: Path, repo_id: str, repo_checkout: Path, mode: str,
                 "RevisionUnavailable",
                 f"provider {provider_id} has no checkout for adapter materialization",
                 node=provider_id,
+                next_action=(
+                    "FIX",
+                    "pass the provider's checkout via --checkouts (or "
+                    "--workspace-root) so the adapter can name its resolved "
+                    "root, then rerun",
+                ),
             )
         # operation-closure materialization IS verified: exact commit,
         # clean tree in authoritative mode (doc 01 section 5 step 6)
@@ -1105,6 +1299,17 @@ def emit_adapter(control: Path, repo_id: str, repo_checkout: Path, mode: str,
     receipt["providers"] = providers
     receipt["adapter_path"] = str(adapter_path)
     receipt["adapter_sha256"] = adapter_sha
+    # D3: the adapter exists FOR the configure step — the mechanically-known
+    # next action is the governed preset invocation with the adapter bound.
+    receipt["next_action"] = {
+        "action": "NEXT",
+        "supported_by": (
+            "run the approved CMake configure preset with "
+            f"QIVEN_RESOLUTION_FILE={adapter_path} (doc 01 section 4: CMake "
+            "receives the resolved roots; the bootstrap gate-configure path "
+            "performs this binding)"
+        ),
+    }
     receipt["graph_receipt_digest"] = content_digest(
         {k: v for k, v in receipt.items() if k != "graph_receipt_digest"}
     )
@@ -1180,6 +1385,18 @@ def lock_update(control: Path, moves: dict[str, Path], mode: str,
     receipt["changed_nodes"] = changed
     receipt["declaration_cache"] = declaration_cache
     receipt["new_lock"] = effective
+    # D3: the WR-3 cutover transaction law, mechanized into the receipt (the
+    # --help text alone was the register's recorded gap): an unapplied
+    # transaction is NOT done. main() replaces this with the commit-now
+    # wording when --apply has written the control tree.
+    receipt["next_action"] = {
+        "action": "NEXT",
+        "supported_by": (
+            "write the emitted lock + declaration cache into the control "
+            "tree (re-run with --apply), then commit the control repository "
+            "as one auditable transaction"
+        ),
+    }
     receipt["graph_receipt_digest"] = content_digest(
         {k: v for k, v in receipt.items() if k != "graph_receipt_digest"}
     )
@@ -1225,8 +1442,18 @@ def _emit(receipt: dict, as_json: bool, out: Path | None) -> None:
         print(json.dumps(receipt, sort_keys=True))
     else:
         print("[ OK ] workspace resolution")
-        print(f"       generation {receipt['workspace_generation']}")
+        generation = receipt.get("workspace_generation") or receipt.get("effective_generation")
+        print(f"       generation {generation}")
         print(f"       mode {receipt['mode']} shadow_only={receipt['shadow_only']}")
+        next_action = receipt.get("next_action", {"action": "NONE"})
+        summary = next_action.get("supported_by", "")
+        if next_action["action"] in ("FIX", "NEXT") and summary:
+            summary = " - " + summary
+        elif next_action["action"] == "NONE":
+            summary = " (validated; no further action)"
+        else:
+            summary = ""
+        print(f"       next {next_action['action']}{summary}")
         for conflict in receipt.get("baseline_conflicts", []):
             print(f"       [SPLIT] {conflict['consumer_edge']}: pin {conflict['legacy_pin'][:12]} != lock {conflict['locked_node'][:12]}")
         if out is not None:
@@ -1248,6 +1475,21 @@ def _parse_node_map(pairs: list[str], label: str) -> dict[str, Path]:
     if not out:
         raise ResolutionError("SchemaViolation", f"--{label} requires at least one NODE=CHECKOUT")
     return out
+
+
+def _print_next_action_line(next_action: dict) -> None:
+    """Human-mode NEXT carrier line (D3): the fourth element rides every
+    typed failure; DIAGNOSE names the classification duty, never an
+    invented correction."""
+    action = next_action["action"]
+    if action in ("FIX", "NEXT"):
+        print(f"       NEXT: {action} - {next_action['supported_by']}")
+    elif action == "DIAGNOSE":
+        print("       NEXT: DIAGNOSE - classify the failure above (captured "
+              "evidence rides the typed message) before retrying; no "
+              "correction is mechanically known")
+    else:
+        print(f"       NEXT: {action}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1307,8 +1549,13 @@ def main(argv: list[str] | None = None) -> int:
             if failures:
                 for failure in failures:
                     print(f"[FAIL] {failure}")
+                print("[FAIL] golden vectors: NEXT: FIX - the pinned vectors "
+                      "(docs/schemas/workspace-generation-golden-vectors.json) "
+                      "are the frozen canonicalization contract; fix the "
+                      "implementation to match them, never the vectors")
                 return 1
             print("[ OK ] golden vectors")
+            print("       next NONE (both canonicalizers agree with every pinned vector)")
             return 0
 
         control = Path(args.control).resolve()
@@ -1346,6 +1593,20 @@ def main(argv: list[str] | None = None) -> int:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(cache_text, encoding="utf-8", newline="\n")
                 receipt["applied_to"] = str(control)
+                # the transaction is WRITTEN but not committed: the commit is
+                # the session's step (the law the --help text carries)
+                receipt["next_action"] = {
+                    "action": "NEXT",
+                    "supported_by": (
+                        "commit the control repository now - the lock + "
+                        "declaration cache are written as one uncommitted "
+                        "transaction at " + str(control)
+                    ),
+                }
+                receipt["graph_receipt_digest"] = content_digest(
+                    {k: v for k, v in receipt.items()
+                     if k not in ("graph_receipt_digest", "_cache_files")}
+                )
             else:
                 receipt.pop("_cache_files", None)
         out = Path(args.out) if args.out else _default_out(control, args.command)
@@ -1353,18 +1614,35 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except ResolutionError as error:
         payload = {"schema": ERROR_SCHEMA, "error": error.as_dict()}
-        print(json.dumps(payload, sort_keys=True) if args.json else f"[FAIL] {error}")
+        if args.json:
+            print(json.dumps(payload, sort_keys=True))
+        else:
+            print(f"[FAIL] {error}")
+            _print_next_action_line(error.next_action)
         return 1
     except json.JSONDecodeError as error:
         # safety net: malformed JSON anywhere in the control tree is typed,
         # never a bare traceback through the CLI
         payload = {"schema": ERROR_SCHEMA, "error": {
-            "type": "SchemaViolation", "message": f"malformed JSON: {error}"}}
-        print(json.dumps(payload, sort_keys=True) if args.json else f"[FAIL] {error}")
+            "type": "SchemaViolation", "message": f"malformed JSON: {error}",
+            "next_action": _next_action_dict(*_NEXT_ACTIONS["SchemaViolation"]),
+        }}
+        if args.json:
+            print(json.dumps(payload, sort_keys=True))
+        else:
+            print(f"[FAIL] {error}")
+            _print_next_action_line(payload["error"]["next_action"])
         return 1
     except schemas.SchemaError as error:
-        payload = {"schema": ERROR_SCHEMA, "error": error.as_dict()}
-        print(json.dumps(payload, sort_keys=True) if args.json else f"[FAIL] {error}")
+        payload = {"schema": ERROR_SCHEMA, "error": {
+            **error.as_dict(),
+            "next_action": _next_action_dict(*_NEXT_ACTIONS["SchemaViolation"]),
+        }}
+        if args.json:
+            print(json.dumps(payload, sort_keys=True))
+        else:
+            print(f"[FAIL] {error}")
+            _print_next_action_line(payload["error"]["next_action"])
         return 1
 
 
