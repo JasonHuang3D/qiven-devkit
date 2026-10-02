@@ -21,6 +21,11 @@ workspace-launcher-qiven-cmd; structural gaps SG-3 + SG-4):
              ConfigureFailed DIAGNOSE), gate producer identity, pinned
              banner bytes intact (B11-B13 behavioral pins live in
              workspace_bootstrap_test)
+  b2-17..19  preflight child-interaction return-1 paths carry the typed
+             envelope too (PreflightFailed DIAGNOSE, PreflightNoReceipt
+             DIAGNOSE, PreflightGenerationMismatch FIX naming
+             lock-update) with the compliant v1 preflight producer
+             identity and pinned stderr banner bytes intact
   b2-14      preflight records keep the compliant v1 shape (producer
              discrimination against gate records)
   b2-15      workspace qiven.cmd: typed interpreter-failure carriers
@@ -375,6 +380,89 @@ def gate_configure_legs(temp: Path) -> None:
               json.dumps(record["next_action"]))
         check(record["findings"][0]["rule_id"] == "gate-configure/configure-failed",
               "b2-13.rule-id", record["findings"][0]["rule_id"])
+
+        # b2-17..19: preflight child-interaction return-1 paths carry the
+        # typed envelope with the compliant v1 preflight producer identity
+        # (README layout law: EVERY typed failure - preflight AND
+        # gate-configure - emits the envelope; the three resolver-preflight
+        # child sites were the un-enveloped gap).
+        def preflight_run() -> subprocess.CompletedProcess:
+            argv = [sys.executable, str(BOOTSTRAP),
+                    "--control", str(control), "--devkit", str(devkit)]
+            env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+            return subprocess.run(argv, capture_output=True, text=True,
+                                  timeout=180, encoding="utf-8", errors="replace",
+                                  env=env)
+
+        # b2-17: preflight child failure -> PreflightFailed DIAGNOSE
+        resolver.write_text(
+            "import sys\n"
+            "sys.stdout.write('b2-17-preflight-out\\n')\n"
+            "sys.stderr.write('b2-17-preflight-err\\n')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8", newline="\n")
+        done = preflight_run()
+        check(done.returncode == 1, "b2-17.exit", done.stdout)
+        check("[FAIL] resolver-preflight failed; both captured streams follow"
+              in done.stdout, "b2-17.pinned-banner", done.stdout[:300])
+        envelope = _envelope(done.stdout)
+        check(envelope["error"]["type"] == "PreflightFailed", "b2-17.kind",
+              done.stdout[-400:])
+        record = envelope["record"]
+        check(cr.validate(record) == [], "b2-17.record-valid",
+              json.dumps(cr.validate(record)))
+        check(record["producer"]["id"] == "workspace-bootstrap-preflight",
+              "b2-17.producer", record["producer"]["id"])
+        check(record["findings"][0]["rule_id"] == "bootstrap/preflight-failed",
+              "b2-17.rule-id", record["findings"][0]["rule_id"])
+        check(record["next_action"] == {"action": "DIAGNOSE"}, "b2-17.diagnose",
+              json.dumps(record["next_action"]))
+
+        # b2-18: preflight exit-0 with no parseable receipt -> PreflightNoReceipt
+        resolver.write_text(
+            "import sys\n"
+            "sys.stdout.write('b2-18-garbage-not-json\\n')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8", newline="\n")
+        done = preflight_run()
+        check(done.returncode == 1, "b2-18.exit", done.stdout)
+        check("[FAIL] resolver preflight emitted no receipt" in done.stderr,
+              "b2-18.pinned-banner", done.stderr[:300])
+        envelope = _envelope(done.stdout)
+        check(envelope["error"]["type"] == "PreflightNoReceipt", "b2-18.kind",
+              done.stdout[-400:])
+        record = envelope["record"]
+        check(cr.validate(record) == [], "b2-18.record-valid",
+              json.dumps(cr.validate(record)))
+        check(record["findings"][0]["rule_id"] == "bootstrap/preflight-no-receipt",
+              "b2-18.rule-id", record["findings"][0]["rule_id"])
+        check(record["next_action"] == {"action": "DIAGNOSE"}, "b2-18.diagnose",
+              json.dumps(record["next_action"]))
+
+        # b2-19: preflight generation mismatch -> FIX naming the lock-update route
+        stub_receipt = json.dumps({"workspace_generation": "sha256:" + "0" * 64})
+        resolver.write_text(
+            "import sys\n"
+            f"sys.stdout.write({stub_receipt!r})\n"
+            "sys.exit(0)\n",
+            encoding="utf-8", newline="\n")
+        done = preflight_run()
+        check(done.returncode == 1, "b2-19.exit", done.stdout)
+        check("preflight generation does not match the lock" in done.stderr,
+              "b2-19.pinned-banner", done.stderr[:300])
+        envelope = _envelope(done.stdout)
+        check(envelope["error"]["type"] == "PreflightGenerationMismatch",
+              "b2-19.kind", done.stdout[-400:])
+        record = envelope["record"]
+        check(cr.validate(record) == [], "b2-19.record-valid",
+              json.dumps(cr.validate(record)))
+        check(record["findings"][0]["rule_id"]
+              == "bootstrap/preflight-generation-mismatch",
+              "b2-19.rule-id", record["findings"][0]["rule_id"])
+        check(record["next_action"]["action"] == "FIX", "b2-19.fix",
+              json.dumps(record["next_action"]))
+        check("lock-update" in record["next_action"]["supported_by"],
+              "b2-19.route-named", json.dumps(record["next_action"]))
 
         # b2-14: preflight records keep the compliant v1 producer shape
         (devkit / "README.md").write_text("b2-14 advanced\n", encoding="utf-8", newline="\n")
