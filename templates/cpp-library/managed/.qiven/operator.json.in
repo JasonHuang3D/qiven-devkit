@@ -21,6 +21,9 @@
     "delete-all-branches-but-main": {
       "argv": ["{python}", "tools/delete_all_branches.py"]
     },
+    "b3-carrier-tests": {
+      "argv": ["{python}", "tools/b3_carrier_test.py"]
+    },
     "build-debug": {
       "argv": ["{cmake}", "--build", "--preset", "vs2022-x64-debug", "--parallel"]
     },
@@ -47,6 +50,7 @@
   "gates": {
     "local": [
       "check-toolchain",
+      "b3-carrier-tests",
       "format-check",
       "configure",
       ["build-debug", "build-release"],

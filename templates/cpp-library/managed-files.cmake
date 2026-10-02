@@ -1,4 +1,4 @@
-set(QIVEN_TEMPLATE_VERSION "0.1.10")
+set(QIVEN_TEMPLATE_VERSION "0.1.11")
 set(QIVEN_FILE_CLASS managed)
 set(QIVEN_MANAGED_FILES
     .clang-format
@@ -14,6 +14,7 @@ set(QIVEN_MANAGED_FILES
     tools/qiven.cmd
     tools/qiven.py
     tools/delete_all_branches.py
+    tools/b3_carrier_test.py
 )
 # WR-6 (2026-09-28, v44): tools/qiven_operator.py is REMOVED from the
 # managed set - generated repositories launch through the workspace
