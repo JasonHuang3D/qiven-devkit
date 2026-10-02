@@ -1426,6 +1426,72 @@ def main() -> int:
         check(ci_payload["remote_head"] == local_head, "G1.ci-remote-head")
         check(ci_payload["branch"] == "fixture-branch", "G1.ci-branch")
 
+        # Candidate law (2026-10-03 redesign): default candidate = HEAD,
+        # dispatched explicitly as workflow input 'candidate'; workspace_ref
+        # is omitted entirely when absent (never an empty -f value).
+        dispatched = dispatch_calls[-1]
+        check(f"candidate={local_head}" in dispatched, "G1.ci-default-candidate-head")
+        check(ci_payload["candidate"] == local_head, "G1.ci-candidate-payload-default")
+        check(ci_payload["candidate_origin"] == "head", "G1.ci-candidate-origin-head")
+        check(ci_payload["workspace_ref"] is None, "G1.ci-workspace-ref-absent")
+        check(not any(str(item).startswith("workspace_ref=") for item in dispatched),
+              "G1.ci-workspace-ref-omitted-from-f")
+
+        # Explicit --candidate (case-normalized) + --workspace-ref passthrough.
+        explicit = "c" * 40
+        ci_payload = operator._ci_start(ci_config, "full", ci_console,
+                                        candidate=explicit.upper(),
+                                        workspace_ref="  wr-ref  ")
+        dispatched = dispatch_calls[-1]
+        check(f"candidate={explicit}" in dispatched, "G1.ci-explicit-candidate-dispatched")
+        check("workspace_ref=wr-ref" in dispatched, "G1.ci-workspace-ref-passthrough")
+        check(ci_payload["candidate"] == explicit, "G1.ci-candidate-payload-explicit")
+        check(ci_payload["candidate_origin"] == "flag", "G1.ci-candidate-origin-flag")
+        check(ci_payload["workspace_ref"] == "wr-ref", "G1.ci-workspace-ref-payload")
+
+        # Malformed candidates: typed four-element refusal, ZERO dispatches.
+        before_dispatches = len(dispatch_calls)
+        for malformed in ("abc123", "z" * 40, "a" * 41, ""):
+            try:
+                operator._ci_start(ci_config, "full", ci_console, candidate=malformed)
+            except operator.OperatorError as exc:
+                text = str(exc)
+                check(all(marker in text for marker in
+                          ("40-hex", "WHY:", "evidence:", "NEXT action: FIX")),
+                      "G1.ci-malformed-candidate-carrier", repr(malformed))
+            else:
+                raise AssertionError(f"CI dispatch accepted malformed candidate {malformed!r}")
+        check(len(dispatch_calls) == before_dispatches, "G1.ci-malformed-no-dispatch")
+
+        # Empty --workspace-ref: typed refusal, ZERO dispatches.
+        try:
+            operator._ci_start(ci_config, "full", ci_console,
+                               candidate=explicit, workspace_ref="   ")
+        except operator.OperatorError as exc:
+            check("--workspace-ref is empty" in str(exc), "G1.ci-empty-workspace-ref-rejected")
+        else:
+            raise AssertionError("CI dispatch accepted an empty --workspace-ref")
+        check(len(dispatch_calls) == before_dispatches, "G1.ci-empty-workspace-ref-no-dispatch")
+
+        # HEAD unresolvable (default candidate): typed four-element refusal.
+        real_head_fn = operator._head
+
+        def broken_head():
+            raise operator.OperatorError("cannot resolve HEAD")
+
+        operator._head = broken_head
+        try:
+            operator._ci_start(ci_config, "full", ci_console)
+        except operator.OperatorError as exc:
+            text = str(exc)
+            check(all(marker in text for marker in
+                      ("could not be resolved", "WHY:", "evidence:", "NEXT action: FIX")),
+                  "G1.ci-head-unresolvable-carrier")
+        else:
+            raise AssertionError("CI dispatched with an unresolvable HEAD default")
+        check(len(dispatch_calls) == before_dispatches, "G1.ci-head-unresolvable-no-dispatch")
+        operator._head = real_head_fn
+
         # ---------------- G4: ci watch (observation-only runner) ----------
         # Pure helpers first.
         runs = [

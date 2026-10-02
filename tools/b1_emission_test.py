@@ -8,8 +8,12 @@ Covers the B1 emission-completion carriers at the devkit side:
         (`run: PASS`, no suffix); a task-run record with outcome=passed
         still lands
   B1-3  `qiven ci start` success names its own watch handle (NEXT,
-        supported_by = the exact re-call) + ci-dispatch record; gh is
-        stubbed at the network seam only (in-process _run_capture)
+        supported_by = the exact re-call) + ci-dispatch record carrying the
+        selected candidate (selected_revision + materialized invocation);
+        gh is stubbed at the network seam only (in-process _run_capture)
+  B1-3b `qiven ci start --candidate <malformed>` refuses LOCALLY with the
+        typed four-element carrier (WHAT/WHY/evidence/NEXT) and dispatches
+        nothing (no gh call is made)
   B1-4  `qiven ci watch` non-success terminal verdict teaches its next
         step (DIAGNOSE + the exact gh log command) + ci-watch record;
         explicit-identity mode, gh stubbed at _gh_capture
@@ -239,6 +243,37 @@ def main() -> int:
               "B1-3.record-next")
         check("qiven ci watch full" in str(dispatch_record.get("next_action", {}).get("supported_by")),
               "B1-3.record-supported-by")
+        # candidate law (2026-10-03): the record carries the SELECTED
+        # candidate (selected_revision) and the materialized invocation —
+        # the explicit selection is recorded even in the default-HEAD case.
+        check(dispatch_record.get("operation", {}).get("selected_revision") == head,
+              "B1-3.record-candidate-selected-revision")
+        check(f"--candidate {head}" in str(dispatch_record.get("operation", {}).get("invocation")),
+              "B1-3.record-invocation-materialized")
+        cr.validate(cr._as_record_dict(dispatch_record))
+        check(True, "B1-3.record-valid-with-candidate")
+
+        # ---------------- B1-3b: malformed --candidate refuses locally --
+        # The typed four-element carrier fires BEFORE any dispatch surface
+        # is touched (fail closed; nothing reaches gh).
+        gh_before = [a for a in fake.seen if a[:1] == ["gh"]]
+        buffer = _io.StringIO()
+        try:
+            sys.stdout = buffer
+            sys.argv = [OPERATOR, "--no-color", "ci", "start", "full",
+                        "--candidate", "deadbeef"]
+            code = operator.main()
+        finally:
+            sys.argv, sys.stdout = old_argv, old_stdout
+        out = buffer.getvalue()
+        check(code == 2, "B1-3b.exit", out[-400:])
+        fail_line = next((ln for ln in out.splitlines() if "[FAIL]" in ln), "")
+        check(all(marker in fail_line for marker in
+                  ("40-hex", "WHY:", "evidence:", "NEXT action: FIX")),
+              "B1-3b.four-element-carrier", fail_line)
+        gh_after = [a for a in fake.seen if a[:1] == ["gh"]]
+        check(gh_after == gh_before, "B1-3b.no-dispatch",
+              "a malformed candidate must never reach gh")
 
         # ---------------- B1-4: ci watch failure verdict teaches --------
         terminal_run = {

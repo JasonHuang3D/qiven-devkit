@@ -2021,6 +2021,16 @@ def _emit_ci_dispatch_record(payload: dict[str, Any],
         head = str(payload.get("head") or "")
         opid = _new_operation_id()
         profile = str(payload.get("profile") or "")
+        # candidate law (2026-10-03): the record carries the SELECTED
+        # candidate (selected_revision — same field the run record uses for
+        # the chosen node) and the invocation materializes the flags so the
+        # last-run-as-record semantics show the explicit selection even in
+        # the default-HEAD case; workspace_ref rides the same invocation.
+        candidate = str(payload.get("candidate") or "")
+        workspace_ref = payload.get("workspace_ref")
+        invocation = f"qiven ci start {profile} --candidate {candidate}".rstrip()
+        if workspace_ref:
+            invocation += f" --workspace-ref {workspace_ref}"
         watch_handle = f"qiven ci watch {profile} (run_in_background)"
         record = _cr.CommonRecord(
             record_kind="ci-dispatch",
@@ -2029,7 +2039,12 @@ def _emit_ci_dispatch_record(payload: dict[str, Any],
                 id=opid,
                 repository=repository or ROOT.name,
                 cwd=str(ROOT),
-                invocation=f"qiven ci start {profile}",
+                invocation=invocation,
+                selected_revision=(
+                    candidate
+                    if len(candidate) == 40 and set(candidate) <= _CI_CANDIDATE_HEX
+                    else None
+                ),
                 executing_revision=head if len(head) == 40 else None,
             ),
             observation=_cr.Observation(coherence="coherent"),
@@ -2407,7 +2422,38 @@ def _remote_branch_head(branch: str) -> str:
     return parts[0]
 
 
-def _ci_start(config: dict[str, Any], profile: str, console: Console) -> dict[str, Any]:
+# CI candidate law (2026-10-03 workflow redesign): the redesigned
+# workflow_dispatch gates on input candidate = full 40-hex SHA of the repo
+# commit under test (typed failure by design without it). This dispatcher
+# tool carries the WHAT+WHY+evidence+NEXT for its own candidate selection:
+# the input is ALWAYS selected explicitly here (exact-head law — default
+# HEAD resolved by this tool, never a workflow-side fallback) and never
+# dispatched empty or malformed.
+_CI_CANDIDATE_HEX = set("0123456789abcdef")
+
+
+def _require_ci_candidate(profile: str, value: str, source: str) -> str:
+    """Validate one candidate selection: exactly 40 hex chars, normalized
+    lowercase. Typed four-element refusal otherwise (never dispatched)."""
+    candidate = value.strip().lower()
+    if len(candidate) == 40 and set(candidate) <= _CI_CANDIDATE_HEX:
+        return candidate
+    raise OperatorError(
+        f"ci:{profile}: dispatch refused - candidate is not a full 40-hex SHA"
+        f" (got {len(candidate)} chars: '{value}')"
+        " - WHY: the redesigned workflow_dispatch REQUIRES input candidate ="
+        " the full 40-hex commit SHA under test (typed failure by design),"
+        " selected explicitly by this dispatcher - never a workflow-side fallback"
+        f" - evidence: {source}='{value}'"
+        " - NEXT action: FIX - pass --candidate <full-40-hex-sha> (an"
+        " abbreviated sha fails even when it names the same commit), or omit"
+        " the flag to dispatch the repository's current HEAD"
+    )
+
+
+def _ci_start(config: dict[str, Any], profile: str, console: Console,
+              candidate: str | None = None,
+              workspace_ref: str | None = None) -> dict[str, Any]:
     ci = config.get("ci", {})
     spec = ci.get(profile) if isinstance(ci, dict) else None
     if not isinstance(spec, dict):
@@ -2415,12 +2461,58 @@ def _ci_start(config: dict[str, Any], profile: str, console: Console) -> dict[st
     inputs = spec.get("inputs", {})
     if not isinstance(inputs, dict):
         raise OperatorError("CI profile inputs must be an object")
+    # CANDIDATE selection (before any dispatch surface is touched): default
+    # is the invoking repository's current HEAD — a DELIBERATE explicit
+    # selection resolved and recorded by this tool, not a workflow-side
+    # fallback; --candidate overrides it. Both paths validate 40-hex and
+    # fail typed with nothing dispatched.
+    if candidate is None:
+        try:
+            head_probe = _head()
+        except OperatorError as exc:
+            raise OperatorError(
+                f"ci:{profile}: dispatch refused - the default candidate"
+                " (current HEAD) could not be resolved"
+                " - WHY: the redesigned workflow_dispatch REQUIRES input"
+                " candidate = the full 40-hex commit SHA under test, and this"
+                " dispatcher selects it explicitly - a detached or invalid"
+                " HEAD leaves nothing lawful to send"
+                f" - evidence: git rev-parse HEAD failed in {ROOT}: {exc}"
+                " - NEXT action: FIX - repair the checkout (attach/commit the"
+                " detached HEAD), or pass --candidate <full-40-hex-sha>"
+                " explicitly"
+            ) from exc
+        selected_candidate = _require_ci_candidate(profile, head_probe, "HEAD")
+        candidate_origin = "head"
+    else:
+        selected_candidate = _require_ci_candidate(profile, candidate, "--candidate")
+        candidate_origin = "flag"
+    if workspace_ref is not None and not workspace_ref.strip():
+        raise OperatorError(
+            f"ci:{profile}: dispatch refused - --workspace-ref is empty"
+            " - WHY: an empty workflow input would be dispatched as an empty"
+            " string; the input is omitted entirely only when the flag is absent"
+            f" - evidence: --workspace-ref='{workspace_ref}'"
+            " - NEXT action: FIX - pass a real ref, or omit --workspace-ref"
+            " (the workflow then uses the workspace default branch head)"
+        )
+    selected_workspace_ref = workspace_ref.strip() if workspace_ref is not None else None
     workflow, branch, head, repo = _ci_resolve_guard(config, profile, "ci:" + profile)
     console.emit("ok", f"ci:{profile}: origin/{branch} matches {head}")
     argv = ["gh", "workflow", "run", workflow, "--repo", repo, "--ref", branch]
-    for key, value in inputs.items():
+    # candidate (and workspace_ref when used) ride the SAME -f list as the
+    # profile inputs — set as dict keys so a config-declared duplicate is
+    # overridden by this tool's explicit selection, never sent twice.
+    dispatch_inputs = dict(inputs)
+    dispatch_inputs["candidate"] = selected_candidate
+    if selected_workspace_ref is not None:
+        dispatch_inputs["workspace_ref"] = selected_workspace_ref
+    for key, value in dispatch_inputs.items():
         argv.extend(["-f", f"{key}={value}"])
-    console.emit("run", f"ci:{profile}: dispatch {workflow} on {branch}")
+    console.emit("run", f"ci:{profile}: dispatch {workflow} on {branch}"
+                        f" (candidate {selected_candidate} via {candidate_origin}"
+                        + (f", workspace_ref {selected_workspace_ref})"
+                           if selected_workspace_ref is not None else ")"))
     completed = _run_capture(argv)
     if completed.returncode:
         console.block(completed.stdout)
@@ -2433,6 +2525,9 @@ def _ci_start(config: dict[str, Any], profile: str, console: Console) -> dict[st
         "branch": branch,
         "head": head,
         "remote_head": head,
+        "candidate": selected_candidate,
+        "candidate_origin": candidate_origin,
+        "workspace_ref": selected_workspace_ref,
         "status": "dispatched",
     }
 
@@ -3049,6 +3144,10 @@ def _parser() -> argparse.ArgumentParser:
     ci_sub = ci.add_subparsers(dest="ci_command", required=True)
     ci_start = ci_sub.add_parser("start", help="dispatch CI and return immediately", parents=[_common_flags()])
     ci_start.add_argument("profile", help="declared CI profile")
+    ci_start.add_argument("--candidate", default=None,
+                          help="candidate commit SHA sent as workflow input 'candidate' (exactly 40 hex chars; DEFAULT: the repository's current HEAD, resolved and recorded explicitly by this tool)")
+    ci_start.add_argument("--workspace-ref", dest="workspace_ref", default=None,
+                          help="optional workspace_ref workflow input passthrough (omitted from the dispatch entirely when absent)")
     ci_watch = ci_sub.add_parser(
         "watch", help="observe an already-dispatched CI run to terminal state (observation only; run under run_in_background)",
         parents=[_common_flags()],
@@ -3270,7 +3369,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if failed else 0
 
         if args.command == "ci" and args.ci_command == "start":
-            payload = _ci_start(config, args.profile, console)
+            payload = _ci_start(config, args.profile, console,
+                                getattr(args, "candidate", None),
+                                getattr(args, "workspace_ref", None))
             _workspace_identity_fields(payload)
             # B1 (D3): the dispatch success names its own watch handle
             # (NEXT, supported_by = the exact re-call) and leaves a
@@ -3284,7 +3385,11 @@ def main(argv: list[str] | None = None) -> int:
                     f"      branch:      {payload['branch']}\n"
                     f"      head:        {payload['head']}\n"
                     f"      remote-head: {payload['remote_head']}\n"
-                    f"      workflow:    {payload['workflow']}"
+                    f"      workflow:    {payload['workflow']}\n"
+                    f"      candidate:   {payload['candidate']}"
+                    f" (via {payload['candidate_origin']})"
+                    + (f"\n      workspace:   {payload['workspace_ref']}"
+                       if payload.get("workspace_ref") is not None else "")
                 )
                 console.emit(
                     "run",

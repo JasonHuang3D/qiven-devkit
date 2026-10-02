@@ -144,10 +144,20 @@ registered in NO gate — it reads what producers already retained.
 
 ## ci — explicit dispatch + observation-only watch
 
-`qiven ci start PROFILE` verifies the remote branch matches local HEAD,
-dispatches the declared workflow via `gh`, and returns immediately. Qiven
-workflows are `workflow_dispatch`-only — a push never triggers CI
-(`collaboration/session-ci-handoff-contract.md`).
+`qiven ci start PROFILE [--candidate SHA] [--workspace-ref REF]` verifies
+the remote branch matches local HEAD, dispatches the declared workflow via
+`gh`, and returns immediately. Qiven workflows are `workflow_dispatch`-only
+— a push never triggers CI (`collaboration/session-ci-handoff-contract.md`).
+Candidate law (2026-10-03 workflow redesign): the redesigned workflows
+REQUIRE input `candidate` = the full 40-hex SHA of the repo commit under
+test (typed failure by design without it). The tool selects it EXPLICITLY
+(exact-head law, never a workflow-side fallback): `--candidate` overrides;
+absent it defaults to the invoking repository's current HEAD, resolved and
+recorded (ci-dispatch record `selected_revision` + materialized
+invocation). A malformed candidate (not exactly 40 hex chars) or an
+unresolvable HEAD is a typed local refusal (four-element carrier, exit 2)
+— nothing is dispatched. `--workspace-ref` passes through to the optional
+workflow input when given and is omitted entirely when absent.
 
 `qiven ci watch PROFILE [--timeout MINUTES] [--receipt]` (2026-09-26,
 OBL-F1A2B3 owner design) observes an ALREADY-DISPATCHED run to its
