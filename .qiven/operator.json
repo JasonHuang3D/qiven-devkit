@@ -90,6 +90,12 @@
         "tools/b1_emission_test.py"
       ]
     },
+    "b3-template-tests": {
+      "argv": [
+        "{python}",
+        "tools/b3_template_test.py"
+      ]
+    },
     "context-records-crosscheck-tests": {
       "argv": [
         "{python}",
@@ -156,6 +162,7 @@
       "record-projection-tests",
       "p0-closeout-tests",
       "b1-emission-tests",
+      "b3-template-tests",
       "context-records-crosscheck-tests",
       "router-record-adapter-tests",
       "workspace-schemas-tests",
