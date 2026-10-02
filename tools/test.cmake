@@ -162,16 +162,20 @@ assert_contains("${repo}/CMakeLists.txt" "consumer cmake edit")
 assert_contains("${repo}/.github/workflows/ci.yml" "consumer ci edit")
 
 # Managed-set evolution: safe addition, addition collision, removal, removal conflict, and rename.
+# Manifest insertions anchor on the FIRST managed entry (.clang-format):
+# appending entries at the list tail must not break these fixtures (the
+# 0.1.11 managed-set append broke the previous delete_all_branches.py
+# tail anchor with a silent no-op REPLACE).
 set(add_devkit "${fixtures}/add-devkit")
 file(COPY "${DEVKIT_ROOT}/" DESTINATION "${add_devkit}"
      PATTERN ".git" EXCLUDE
      PATTERN ".generated-temp" EXCLUDE)
 file(READ "${add_devkit}/templates/cpp-library/managed-files.cmake" add_manifest)
 string(REPLACE "QIVEN_TEMPLATE_VERSION \"${CURRENT_TEMPLATE_VERSION}\"" "QIVEN_TEMPLATE_VERSION \"${CURRENT_TEMPLATE_VERSION}-add\"" add_manifest "${add_manifest}")
-string(REPLACE "    tools/delete_all_branches.py
-)" "    tools/delete_all_branches.py
+string(REPLACE "    .clang-format
+" "    .clang-format
     docs/engineering/new-managed.md
-)" add_manifest "${add_manifest}")
+" add_manifest "${add_manifest}")
 file(WRITE "${add_devkit}/templates/cpp-library/managed-files.cmake" "${add_manifest}")
 file(WRITE "${add_devkit}/templates/cpp-library/managed/docs/engineering/new-managed.md.in" "# Newly managed\n")
 
@@ -225,10 +229,10 @@ file(COPY "${DEVKIT_ROOT}/" DESTINATION "${old_devkit}"
      PATTERN ".git" EXCLUDE
      PATTERN ".generated-temp" EXCLUDE)
 file(READ "${old_devkit}/templates/cpp-library/managed-files.cmake" old_manifest)
-string(REPLACE "    tools/delete_all_branches.py
-)" "    tools/delete_all_branches.py
+string(REPLACE "    .clang-format
+" "    .clang-format
     docs/engineering/old-name.md
-)" old_manifest "${old_manifest}")
+" old_manifest "${old_manifest}")
 file(WRITE "${old_devkit}/templates/cpp-library/managed-files.cmake" "${old_manifest}")
 file(WRITE "${old_devkit}/templates/cpp-library/managed/docs/engineering/old-name.md.in" "# Renamed content\n")
 set(rename_repo "${fixtures}/rename-repo")
