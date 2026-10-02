@@ -48,15 +48,19 @@ heartbeats).
 `qiven info` — repository name, default gate, exact HEAD. Cheap identity
 probe for a fresh session.
 
-## surface — O(1) gates/tasks introspection (B6)
+## surface — O(1) gates/tasks/ci introspection (B6)
 
 `qiven surface` — ONE call lists every declared gate (with its task
-sequence; the default gate is marked) and every declared task (builtin or
-argv) straight from `.qiven/operator.json`. Use it BEFORE opening any
-config file or guessing task names — `qiven run` on an unknown name
-returns alternatives, but `surface` answers the question without a
-failing round trip. `--json` carries `gates`/`tasks`/`default_gate`
-machine-parsed.
+sequence; the default gate is marked), every declared task (builtin or
+argv), and every declared CI profile (the `ci` section: name + the
+workflow file `qiven ci start <profile>` dispatches — the profile names
+are the entry points, so guessing them or opening the config is the
+DG-2 defect this closes) straight from `.qiven/operator.json`. Use it
+BEFORE opening any config file or guessing task names — `qiven run` on
+an unknown name returns alternatives, but `surface` answers the
+question without a failing round trip. `--json` carries
+`gates`/`tasks`/`ci_profiles`/`default_gate` machine-parsed (a repo
+with no `ci` section lists `0 ci profile(s)` / an empty array).
 
 ## records — Common Record read-back (B6)
 

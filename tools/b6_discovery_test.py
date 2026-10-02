@@ -4,8 +4,12 @@ DG-3/DG-4 row fix, 2026-10-02).
 Pins the B6 discovery claims:
 
   B6-1  `qiven surface` lists gates (default marker, sequence with
-        parallel groups) and tasks (builtin/argv) - the O(1) tasks/gates
-        introspection (DG-2); --json machine payload parses.
+        parallel groups), tasks (builtin/argv), and CI profiles (name +
+        workflow pointer - the `qiven ci start <profile>` entry points;
+        zero-profile repos carry the 0 count and an empty JSON array,
+        malformed profile entries list with a null workflow, never an
+        error) - the O(1) tasks/gates/ci introspection (DG-2);
+        --json machine payload parses.
   B6-2  `qiven records` empty state states itself (B1 exec-list law).
   B6-3  `qiven records` lists newest-first with kind/verdict/next and a
         read-back route; `qiven records NAME` prints the ADOPTED
@@ -147,6 +151,44 @@ def b6_1_surface(repo: pathlib.Path) -> None:
     check(set(payload.get("gates", {})) == {"b6-default-gate", "b6-parallel-gate"},
           "B6-1.json-gates")
     check(set(payload.get("tasks", {})) == {"b6-pass", "b6-clean"}, "B6-1.json-tasks")
+    # zero-profile state: 0 count in the summary, no ci lines, empty JSON
+    # array, NEXT action unchanged (the fixture declares no `ci` section)
+    check("surface: 2 gate(s), 2 task(s), 0 ci profile(s)" in human.stdout,
+          "B6-1.zero-ci-count", human.stdout)
+    check(not any(ln.strip().startswith("ci ") for ln in human.stdout.splitlines()),
+          "B6-1.zero-ci-no-profile-lines", human.stdout)
+    check("ci start" not in human.stdout, "B6-1.zero-ci-next-unchanged", human.stdout)
+    check(payload.get("ci_profiles") == [], "B6-1.json-zero-ci", machine.stdout)
+    # profile listing: one line per profile (name + workflow pointer), the
+    # dispatch route named in NEXT action, JSON shape name/workflow;
+    # malformed entries (non-dict spec) surface defensively, never error
+    config = json.loads((repo / ".qiven" / "operator.json").read_text(encoding="utf-8"))
+    config["ci"] = {
+        "full": {"workflow": "b6-ci.yml", "inputs": {"jobs": "full"}},
+        "b6-broken": "not-a-dict",
+    }
+    (repo / ".qiven" / "operator.json").write_text(
+        json.dumps(config, indent=2) + "\n", encoding="utf-8"
+    )
+    enriched = run([sys.executable, OPERATOR, "--no-color", "surface"], cwd=repo)
+    check("surface: 2 gate(s), 2 task(s), 2 ci profile(s)" in enriched.stdout,
+          "B6-1.ci-count", enriched.stdout)
+    check(any(ln.strip() == "ci full: b6-ci.yml" for ln in enriched.stdout.splitlines()),
+          "B6-1.ci-profile-line", enriched.stdout)
+    check(any(ln.strip() == "ci b6-broken: (no workflow declared)"
+              for ln in enriched.stdout.splitlines()),
+          "B6-1.ci-malformed-defensive", enriched.stdout)
+    check("qiven ci start <profile>" in enriched.stdout,
+          "B6-1.ci-next-dispatch", enriched.stdout)
+    machine_ci = run([sys.executable, OPERATOR, "--json", "surface"], cwd=repo)
+    payload_ci = json.loads(machine_ci.stdout.splitlines()[-1])
+    check(payload_ci.get("ci_profiles") == [
+        {"name": "b6-broken", "workflow": None},
+        {"name": "full", "workflow": "b6-ci.yml"},
+    ], "B6-1.json-ci-shape", machine_ci.stdout)
+    check(set(payload_ci.get("gates", {})) == {"b6-default-gate", "b6-parallel-gate"}
+          and set(payload_ci.get("tasks", {})) == {"b6-pass", "b6-clean"},
+          "B6-1.json-existing-fields-unchanged", machine_ci.stdout)
     # help lists the discovery surface (the O(1) entry itself)
     helper = run([sys.executable, OPERATOR, "--no-color", "--help"], cwd=repo)
     check("surface" in helper.stdout and "records" in helper.stdout,

@@ -2946,8 +2946,9 @@ def _evidence_read(path_text: str, offset: int, count: int,
 
 # ===========================================================================
 # Discovery surface (B6, register DG-2/DG-3). `surface` is the O(1)
-# tasks/gates introspection (names discoverable without opening
-# .qiven/operator.json per repo); `records` is the read-back route for
+# tasks/gates/ci introspection (names discoverable without opening
+# .qiven/operator.json per repo; ci profiles carry the `ci start`
+# entry points); `records` is the read-back route for
 # the Common Records the gate/run/ci/exec carriers WRITE - until B6 they
 # were write-only (no stdout carrier named them). The bounded view is
 # the ADOPTED record_projection (never a second renderer).
@@ -2957,11 +2958,17 @@ _RECORDS_LIST_CAP = 40
 
 
 def _surface(config: dict[str, Any], console: Console, json_mode: bool) -> int:
-    """One call lists every declared gate and task (DG-2)."""
+    """One call lists every declared gate, task, and CI profile (DG-2)."""
     gates_raw = config.get("gates")
     gates = gates_raw if isinstance(gates_raw, dict) else {}
     tasks_raw = config.get("tasks")
     tasks = tasks_raw if isinstance(tasks_raw, dict) else {}
+    # CI profiles (the `qiven ci start <profile>` entry points) ride the
+    # same O(1) discovery surface: a missing/empty `ci` section is zero
+    # profiles, never an error, and a malformed profile entry lists with
+    # a null workflow rather than failing the whole surface.
+    ci_raw = config.get("ci")
+    ci_table = ci_raw if isinstance(ci_raw, dict) else {}
     default = config.get("default_gate")
     task_summary: dict[str, dict[str, Any]] = {}
     for name, spec in sorted(tasks.items()):
@@ -2981,6 +2988,14 @@ def _surface(config: dict[str, Any], console: Console, json_mode: bool) -> int:
                 parts.append(str(item))
         return " -> ".join(parts)
 
+    ci_profiles: list[dict[str, Any]] = []
+    for name, spec in sorted(ci_table.items()):
+        workflow = spec.get("workflow") if isinstance(spec, dict) else None
+        ci_profiles.append({
+            "name": str(name),
+            "workflow": workflow if isinstance(workflow, str) and workflow else None,
+        })
+
     if json_mode:
         payload: dict[str, Any] = {
             "status": "ok",
@@ -2988,13 +3003,15 @@ def _surface(config: dict[str, Any], console: Console, json_mode: bool) -> int:
             "default_gate": default,
             "gates": {str(name): _sequence(spec) for name, spec in sorted(gates.items())},
             "tasks": task_summary,
+            "ci_profiles": ci_profiles,
         }
         _workspace_identity_fields(payload)
         _print_json(payload)
         return 0
     console.emit(
         "ok",
-        f"surface: {len(gates)} gate(s), {len(tasks)} task(s) -"
+        f"surface: {len(gates)} gate(s), {len(tasks)} task(s),"
+        f" {len(ci_profiles)} ci profile(s) -"
         " config: .qiven/operator.json",
     )
     for name, spec in sorted(gates.items()):
@@ -3007,10 +3024,16 @@ def _surface(config: dict[str, Any], console: Console, json_mode: bool) -> int:
             console.block(f"  task {name}: {' '.join(spec['argv'])}")
         else:
             console.block(f"  task {name}: (unrecognized task spec)")
-    console.block(
-        "  NEXT action: NONE - run `qiven gate <name>` or `qiven run <task>`;\n"
-        "  record read-back: `qiven records`"
-    )
+    for entry in ci_profiles:
+        workflow = entry["workflow"]
+        console.block(
+            f"  ci {entry['name']}: {workflow if workflow else '(no workflow declared)'}"
+        )
+    next_lines = "  NEXT action: NONE - run `qiven gate <name>` or `qiven run <task>`;\n"
+    if ci_profiles:
+        next_lines += "  ci dispatch: `qiven ci start <profile>`;\n"
+    next_lines += "  record read-back: `qiven records`"
+    console.block(next_lines)
     return 0
 
 
@@ -3121,7 +3144,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("info", help="show repository/operator metadata", parents=[_common_flags()])
     surface = sub.add_parser(
         "surface",
-        help="O(1) introspection: list this repository's declared gates and tasks",
+        help="O(1) introspection: list this repository's declared gates, tasks, and ci profiles",
         parents=[_common_flags()],
     )
     records = sub.add_parser(
