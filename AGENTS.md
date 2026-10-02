@@ -13,6 +13,10 @@ machinery, the Operator runtime, and the canonical engineering conventions.
 - Engineering standards (implementation, testing, execution,
   specification) are ALSO canonical here: `docs/engineering/README.md`
   (ADR-0046; this pointer is the entry).
+- Operator discovery surface (B6): `tools/qiven.py` (`--help` first);
+  `qiven surface` lists gates/tasks, `qiven records` reads back records.
+  Canonical usage incl. workspace mechanisms (lock-update, resolver,
+  bootstrap): `docs/conventions/operator-usage.md`.
 
 Roles, typed handoffs, execution authority and workflow are canonical in
 `JasonHuang3D/qiven-context` (collaboration contracts, loaded at cold

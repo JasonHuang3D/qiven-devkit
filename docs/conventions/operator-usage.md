@@ -33,7 +33,7 @@ first use with `--help`, then the subcommand's own `--help` — the
 installed snapshot is the truth, this document is the map.
 
 ```text
-qiven [--json] [--verbose] [--no-color] {info,gate,run,ci,exec} ...
+qiven [--json] [--verbose] [--no-color] {info,surface,records,gate,run,evidence-read,ci,exec} ...
 ```
 
 Global flags are accepted before or after the subcommand. `--json` is the
@@ -47,6 +47,36 @@ heartbeats).
 
 `qiven info` — repository name, default gate, exact HEAD. Cheap identity
 probe for a fresh session.
+
+## surface — O(1) gates/tasks introspection (B6)
+
+`qiven surface` — ONE call lists every declared gate (with its task
+sequence; the default gate is marked) and every declared task (builtin or
+argv) straight from `.qiven/operator.json`. Use it BEFORE opening any
+config file or guessing task names — `qiven run` on an unknown name
+returns alternatives, but `surface` answers the question without a
+failing round trip. `--json` carries `gates`/`tasks`/`default_gate`
+machine-parsed.
+
+## records — Common Record read-back (B6)
+
+`qiven records` — the read-back surface for the operator's Common Records
+(`.generated-temp/operator/records/`, `common-record-v1`; written by
+every gate/run/ci/exec invocation). Until B6 these were write-only: no
+stdout carrier named them.
+
+```text
+qiven records                list newest-first (name, kind, verdict, next)
+qiven records NAME           one record's bounded model view
+                             (the record_projection; QIVEN-RECORD v1)
+```
+
+The bounded view is the SAME projection that rides the gate/run FAIL
+carriers (ADR-0060 D3 budgets 8192/2048/8/16384 — the view is bounded,
+sorted, EOF-marked). Raw JSON bytes stay reachable through
+`qiven evidence-read .generated-temp/operator/records/<name>`. An empty
+records directory states itself (`records: none yet`); an unknown name is
+a typed exit-2 error that points back at the listing.
 
 ## gate — the configured local validation
 
@@ -213,6 +243,113 @@ Semantics that matter to a caller:
   indeterminate. Runs you abandon are still bounded: the lease kills
   them without any caller.
 
+## Workspace mechanisms — the lock, the resolver, the bootstrap (B6)
+
+Motivating friction (named, v58): during the v58 workspace-advance the
+lock-update entry point was discoverable only through the qiven-workspace
+README, which no devkit/context doc chain advertised — the owner hit real
+multi-call discovery friction for a Qiven-owned mechanism (the
+register's DG-1 LIVE class). This section is the fix: every
+workspace-mechanism entry point, exact invocation shapes, in the canonical
+operator doc. The workspace-side view (locator vocabulary, trust policy,
+WR history) stays canonical in the qiven-workspace `README.md`.
+
+All examples assume `<devkit>` = the locked qiven-devkit checkout and
+`<control>` = the qiven-workspace control checkout. The resolver is
+`<devkit>/tools/workspace_resolver.py`; the bootstrap is
+`<control>/bootstrap/qiven-bootstrap.py` (stdlib-only, runs without the
+devkit). Every subcommand prints a receipt to
+`<workspace-root>/.generated-temp/workspace-resolver/<stamp>-<op>/receipt.json`
+(override with `--out`); machine mode is `--json`.
+
+Resolver subcommands (common flags on all: `--control` required,
+`--mode shadow|authoritative`, `--trust-policy` for authoritative):
+
+```text
+validate                                resolve + validate the whole graph
+preflight  --devkit <devkit>            lock-subset validation + devkit identity-check
+candidate  --manifest <file>            validate a candidate dependencies-v1 file
+overlay    --overlay NODE=<checkout>    resolve with candidate nodes overlaid (repeatable)
+adapter    --repo <id> --repo-checkout <path>
+                                        emit the resolution adapter for one repo
+lock-update --move NODE=<checkout> [--apply]
+                                        move lock node(s) to a checkout's exact clean HEAD
+golden-vectors                          run the frozen canonicalization vectors
+```
+
+Lock movement — the exact invocation shape (the v58 friction site):
+
+```text
+python <devkit>/tools/workspace_resolver.py lock-update \
+    --control <control> --move NODE=<checkout> [--move NODE2=<checkout2>]
+```
+
+Validation-only by default (receipt only, no tree writes; shadow mode).
+Authoritative movement adds `--mode authoritative --trust-policy
+<qiven-context>/governance/workspace-control-trust-policy.json` and
+`--apply`, which writes the new lock + declaration cache INTO the control
+tree as one uncommitted transaction — the session then commits the
+control repository (the receipt's `next_action` says exactly this).
+`lock-update` is the lock's ONLY writer; `--move` targets must be clean
+(at their exact HEAD) and identity-checked. Routine advance (WR-8): a
+control commit whose diff from the closest admitted ancestor is limited
+to node advancement auto-admits.
+
+Bootstrap (the gate-configure path every configure rides, WR-5):
+
+```text
+python <control>/bootstrap/qiven-bootstrap.py preflight --control <control> --devkit <devkit>
+python <control>/bootstrap/qiven-bootstrap.py gate-configure \
+    --control <control> --devkit <devkit> --repo <name> --repo-root <path> \
+    --preset <preset> [--mode authoritative --trust-policy <path>]
+```
+
+Preflight is the cheap workspace health probe (run it before blaming a
+build); gate-configure is what `cmake --preset` must go through (a bare
+configure fails typed on every repo under the WR-5 binding). Every typed
+failure — preflight AND the gate-configure return-1 sites — emits the
+`qiven-workspace-bootstrap-error-v1` envelope with a Common Record
+(`rule_id` + `next_action`). The deploy path calls gate-configure itself
+(`deploy_bundle.py`); you never configure by hand for a deploy.
+
+Identity-skew qualification note (SG-5, register DG-5 — what a consumer
+must know about invoking-repo checkout vs lock node drift): `qiven info`
+reports `workspace_generation`, `devkit_node` (the lock's qiven-devkit
+node), `devkit_head` (the checkout actually executing) and `devkit_drift`
+— for the DEVKIT only. NO consumer validates the INVOKING repository's
+own checkout against its lock node (the observed skew class: qiven-context
+executing checkout 98639a8 ahead of its locked node 1329bcf). Until SG-5
+closes, a consumer that needs that guarantee compares `git rev-parse HEAD`
+in the invoking repo against its entry in `<control>/workspace.lock.json`
+manually. Known residual in the same family: qiven-foundation carries
+`tools/toolchain.py` one revision behind the devkit canonical (the devkit
+revision guards git-unavailability with a typed `[FAIL]` carrier);
+converging it is a one-file adoption deliberately left to an owner-scoped
+change.
+
+## Devkit tool surfaces (B6 discovery)
+
+Two devkit tools are model-facing CLIs of their own (not operator
+subcommands); both are O(1)-discoverable through their own `--help`:
+
+```text
+python <devkit>/tools/workspace_schemas.py --list
+python <devkit>/tools/workspace_schemas.py --check <file> --schema docs/schemas/<name>.schema.json
+python <devkit>/tools/deploy_bundle.py --repo <repo> [--profile <p>]
+python <devkit>/tools/deploy_bundle.py --verify <bundle-dir>
+```
+
+Schema-check (`--check`/`--schema`, exit 0/1/2) validates workspace.json,
+workspace.lock.json and `.qiven/dependencies.json` against the schema
+documents in `docs/schemas/` (`--list` enumerates them). Strictness is
+the contract: duplicate keys, floats and unknown fields are typed
+rejections, never warnings (WR-1, ADR-0052). Deploy (`--repo`) enforces
+the HOW of `.qiven/deploy.json` (schema `qiven-deploy-policy-v1`; the
+policy shape rides the tool's `--help` epilog and
+`docs/engineering/deployment.md`): clean exact head + gate receipt,
+release build, digests, in-bundle smoke, atomic publish, append-only
+deploy log. `--verify` checks a published bundle against its manifest.
+
 ## What NOT to do
 
 - Do not pipe a machine-JSON stream through text filters; parse it or read
@@ -243,6 +380,15 @@ commands and instructs the ADR-0051 re-call. It is a backstop, never the
 contract; it fails open on unparseable input and cannot catch indirection
 (`BASE=<tool>; $BASE ...`). Its classification table is pinned by
 `tools/hook_exec_router_test.py` (gate task `router-tests`).
+
+Registration location (DG-4, B6): the hook is wired in the harness's
+MACHINE-LOCAL, untracked config `D:\JasonWork\.zcode\config.json` (the
+ZCode client's config at the workspace root — OUTSIDE every repository;
+no tracked file can carry it verbatim, it names machine-local paths).
+Live-verify: read that file, or run any build-class command raw (e.g. a
+foreground `cmake --build ...`) and observe the `[qiven-hook]` denial —
+the hook firing IS the registration proof. A fresh machine/workspace
+needs the registration recreated there by hand.
 
 Operative routing (the member lists, thresholds and per-class evidence
 live in ONE place — `qiven-context collaboration/long-command-registry.md`,

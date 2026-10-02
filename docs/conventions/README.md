@@ -24,7 +24,8 @@ pointer in every managed `AGENTS.md`.
 | [naming-cmake.md](naming-cmake.md) | CMake: targets, presets, options, functions, test registration |
 | [cross-repo-cmake.md](cross-repo-cmake.md) | Consuming targets defined outside the consuming repository: the one consumption pattern, external-root registry, pin discipline, and what is deliberately not allowed (status banner in-file; landing shape: `../design/workspace-resolution.md`) |
 | [cmake-usage.md](cmake-usage.md) | CMake usage law: presets as the only entry, toolchain pinning, forbidden invocations |
-| [build-performance.md](build-performance.md) | Build-performance policy: measurement duty, PCH and /MP levers, linker notes, banned list, revisit triggers || [operator-usage.md](operator-usage.md) | Qiven Operator canonical usage: gate/run/ci/exec, exit codes, hang-contract execution path |
+| [build-performance.md](build-performance.md) | Build-performance policy: measurement duty, PCH and /MP levers, linker notes, banned list, revisit triggers |
+| [operator-usage.md](operator-usage.md) | Qiven Operator canonical usage: info/surface/records, gate/run/ci/exec, evidence-read, exit codes, hang-contract execution path, workspace mechanisms (lock-update/resolver/bootstrap, B6), devkit tool surfaces (schema-check/deploy) |
 | [agent-entry.md](agent-entry.md) | AGENTS.md policy: pointer-only entry files, hard size limit, authority stays canonical |
 
 ## Known deviations (tracked, not hidden)

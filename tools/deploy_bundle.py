@@ -32,11 +32,15 @@ MANIFEST_SCHEMA = "qiven-deploy-manifest-v1"
 
 
 def log(message: str) -> None:
-    print(f"[deploy] {message}", flush=True)
+    print(f"[deploy] " + message, flush=True)
 
 
-def fail(message: str) -> int:
-    print(f"[FAIL][deploy] {message}", file=sys.stderr, flush=True)
+def fail(message: str, next_action: str = "") -> int:
+    """Typed deploy failure (B6: the four-element law - every FAIL carries
+    WHAT/WHY/evidence in the message plus the NEXT action on the same
+    selector-friendly line)."""
+    suffix = f" - NEXT action: {next_action}" if next_action else ""
+    print(f"[FAIL][deploy] {message}{suffix}", file=sys.stderr, flush=True)
     return 1
 
 
@@ -108,7 +112,11 @@ def resolve_singleton(repo: pathlib.Path) -> pathlib.Path | None:
     head = git(root, "rev-parse", "HEAD").stdout.strip()
     if head != locked:
         raise SystemExit(f"[FAIL] third-party singleton at {head[:12] or '<unreadable>'} != "
-                         f"locked node {locked[:12]}; advance the workspace lock deliberately")
+                         f"locked node {locked[:12]}; advance the workspace lock deliberately"
+                         " - NEXT action: RECONCILE - a lock-update transaction"
+                         " (workspace_resolver.py lock-update --move"
+                         " qiven-third-party-win=<checkout>) is the lock's only"
+                         " writer; never re-point the singleton checkout")
     return root
 
 
@@ -152,7 +160,11 @@ def assemble(repo: pathlib.Path, policy: dict, staging: pathlib.Path, version: s
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
         else:
-            raise SystemExit(f"declared product missing: {src}")
+            raise SystemExit(
+                f"declared product missing: {src}"
+                " - NEXT action: FIX - build the product first or correct"
+                " the products[].from mapping in .qiven/deploy.json"
+            )
     # docs: rendered README + repo-provided extras
     template_path = repo / policy["docs"]["readme_template"]
     template = template_path.read_text(encoding="utf-8")
@@ -205,27 +217,52 @@ def smoke(staging: pathlib.Path, policy: dict) -> list[dict]:
         if completed.returncode != step.get("expect_exit", 0):
             print(completed.stdout[-2000:], file=sys.stderr)
             print(completed.stderr[-2000:], file=sys.stderr)
-            raise SystemExit(f"smoke failed: {step['command']} -> {completed.returncode}")
+            raise SystemExit(
+                f"smoke failed: {step['command']} -> {completed.returncode}"
+                " - NEXT action: DIAGNOSE - the assembled bundle's own smoke"
+                " step failed; classify from the bounded output above (the"
+                " bundle was NOT published)"
+            )
     return results
 
 
 def deploy(repo_arg: str, profile_override: str | None) -> int:
     repo = pathlib.Path(repo_arg).resolve()
     if not (repo / ".git").exists():
-        return fail(f"{repo} is not a git repository")
-    policy = load_policy(repo)
+        return fail(
+            f"{repo} is not a git repository",
+            "FIX - point --repo at a qiven repository checkout",
+        )
+    try:
+        policy = load_policy(repo)
+    except SystemExit as error:
+        return fail(
+            str(error),
+            "FIX - declare the deploy policy .qiven/deploy.json"
+            " (schema qiven-deploy-policy-v1: products/from-to, docs/"
+            "readme_template+extras, licenses/repo, optional smoke steps;"
+            " shape in --help and docs/engineering/deployment.md)",
+        )
     profile = profile_override or policy.get("profile", "release-x64")
 
     # --- preconditions ----------------------------------------------------
     status = git(repo, "status", "--porcelain")
     if status.returncode != 0 or status.stdout.strip():
-        return fail("working tree not clean; deploy refuses")
+        return fail(
+            "working tree not clean; deploy refuses",
+            "FIX - commit or stash, then re-run (a clean exact head is a"
+            " deploy precondition)",
+        )
     head = git(repo, "rev-parse", "HEAD").stdout.strip()
     short = head[:8]
     gate_name = policy.get("gate", "local")
     receipt = repo / ".generated-temp" / "operator" / "receipts" / f"{gate_name}-{head}.json"
     if not receipt.is_file():
-        return fail(f"no gate receipt {gate_name} at head {short}; run the gate first")
+        return fail(
+            f"no gate receipt {gate_name} at head {short}",
+            f"NEXT - run `qiven gate {gate_name} --expect-head {head}` at"
+            " this exact head, then re-run the deploy",
+        )
 
     # --- deploy root: workspace-bounded, fail closed ----------------------
     deploy_root = os.environ.get("QIVEN_DEPLOY_ROOT")
@@ -234,7 +271,11 @@ def deploy(repo_arg: str, profile_override: str | None) -> int:
     else:
         root = repo.parent / "deploy"  # sibling-layout workspace
     if not inside_workspace(root, repo.parent):
-        return fail(f"deploy root {root} resolves outside the workspace ({repo.parent}); refusing")
+        return fail(
+            f"deploy root {root} resolves outside the workspace ({repo.parent}); refusing",
+            "FIX - set QIVEN_DEPLOY_ROOT to a path inside the workspace"
+            " (or unset it for the sibling default)",
+        )
 
     version = f"{policy['version']}-g{short}"
     final = root / repo.name / profile / version
@@ -264,7 +305,9 @@ def deploy(repo_arg: str, profile_override: str | None) -> int:
             if not bootstrap.is_file():
                 return fail(
                     f"workspace bootstrap not found at {bootstrap}; the deploy "
-                    "build requires the WR-5 resolution path (no bare configure)")
+                    "build requires the WR-5 resolution path (no bare configure)",
+                    "FIX - point QIVEN_WORKSPACE_CONTROL at the control"
+                    " checkout carrying bootstrap/qiven-bootstrap.py")
             configure = run(
                 [sys.executable, str(bootstrap), "gate-configure",
                  "--control", str(control), "--devkit", str(devkit),
@@ -273,12 +316,19 @@ def deploy(repo_arg: str, profile_override: str | None) -> int:
                  "--cmake", "cmake"],
                 repo)
             if configure.returncode != 0:
-                return fail(f"configure failed: {configure.stderr[-800:]}")
+                return fail(
+                    f"configure failed: {configure.stderr[-800:]}",
+                    "DIAGNOSE - classify the bootstrap gate-configure failure"
+                    " above (WR-5: configure rides the workspace resolution"
+                    " path; a bare `cmake --preset` is not an alternative)")
             built = run(
                 ["cmake", "--build", str(repo / build["binary_dir"]), "--config", build["config"]], repo
             )
             if built.returncode != 0:
-                return fail(f"build failed: {built.stderr[-800:]}")
+                return fail(
+                    f"build failed: {built.stderr[-800:]}",
+                    "DIAGNOSE - classify the build failure from the bounded"
+                    " stderr tail above before any repair")
 
         # --- assemble + manifest -------------------------------------------
         files = assemble(repo, policy, staging, version, head)
@@ -334,10 +384,18 @@ def verify(bundle_arg: str) -> int:
     bundle = pathlib.Path(bundle_arg).resolve()
     manifest_path = bundle / "manifest.json"
     if not manifest_path.is_file():
-        return fail(f"no manifest.json in {bundle}")
+        return fail(
+            f"no manifest.json in {bundle}",
+            "FIX - point --verify at a bundle directory produced by this"
+            " tool (it contains manifest.json at its root)",
+        )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("schema") != MANIFEST_SCHEMA:
-        return fail(f"manifest schema {manifest.get('schema')!r} unrecognized")
+        return fail(
+            f"manifest schema {manifest.get('schema')!r} unrecognized",
+            "FIX - verify a bundle built by this tool (its manifest"
+            f" carries schema {MANIFEST_SCHEMA})",
+        )
     failures = 0
     for entry in manifest.get("files", []):
         target = bundle / entry["path"]
@@ -349,21 +407,42 @@ def verify(bundle_arg: str) -> int:
             print(f"[FAIL] digest mismatch {entry['path']}")
             failures += 1
     if failures:
-        return fail(f"{failures} file(s) failed verification")
+        return fail(
+            f"{failures} file(s) failed verification",
+            "NEXT - re-run the deploy for the same head to rebuild a"
+            " consistent bundle, or restore the missing/corrupt files from"
+            " the published bundle",
+        )
     print(f"[ OK ] deploy-verify: {len(manifest.get('files', []))} file(s) verified for {manifest.get('version')}")
     return 0
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="workspace-bounded deployment bundle builder (Devkit law: docs/engineering/deployment.md)")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="workspace-bounded deployment bundle builder (Devkit law: docs/engineering/deployment.md)",
+        epilog=(
+            "deploy policy shape (.qiven/deploy.json, schema"
+            " qiven-deploy-policy-v1): {schema, product, version, profile,"
+            " gate, build{configure_preset,binary_dir,config},"
+            " products[{from,to}], docs{readme_template, extras[]},"
+            " licenses{repo}, smoke[{cwd,command,expect_exit}]};"
+            " the repository declares WHAT, this tool enforces HOW (clean"
+            " exact head + gate receipt, release build, digests, atomic"
+            " publish, append-only deploy log)"
+        ),
+    )
     parser.add_argument("--repo", help="repository checkout to deploy")
     parser.add_argument("--profile", help="override the policy profile")
     parser.add_argument("--verify", metavar="BUNDLE", help="verify a bundle against its manifest")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.verify:
         return verify(args.verify)
     if not args.repo:
-        return fail("--repo required (or --verify BUNDLE)")
+        return fail(
+            "--repo required (or --verify BUNDLE)",
+            "FIX - python tools/deploy_bundle.py --repo <repo-path>"
+            " [--profile P] | --verify <bundle-dir>",
+        )
     return deploy(args.repo, args.profile)
 
 
