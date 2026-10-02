@@ -1063,6 +1063,20 @@ def _exec_start_frontend(argv: list[str], timeout_seconds: float, max_lifetime: 
                 f"exec {exec_id}: still running after {timeout_seconds:.0f}s "
                 f"(log {snapshot['log_bytes']} bytes); operator returns; lease {deadline_utc}",
             )
+            # B5 (four-element law): the 124 surface teaches WHY (the
+            # operator's own supervision budget elapsed - the run is NOT
+            # failed, it continues under watchdog custody until the lease)
+            # and the re-attach route; the WAIT line above stays
+            # byte-stable and 124 is never a verdict
+            console.block(
+                f"  why: exit 124 is the operator supervision budget, not a failure\n"
+                f"  verdict - the run continues under watchdog custody until lease\n"
+                f"  {deadline_utc}; the business outcome is not yet observed\n"
+                f"  NEXT action: re-attach with `qiven exec status {exec_id}` between\n"
+                f"  other work (never a tight poll); read the log at\n"
+                f"  done/expired/indeterminate; key on the payload status field,\n"
+                f"  not the exit code"
+            )
             return dict(snapshot, status="still-running"), EXEC_EXIT_STILL_RUNNING
         if now >= next_heartbeat:
             log_bytes = log_path.stat().st_size if log_path.is_file() else 0
@@ -1449,6 +1463,21 @@ def _run_process(name: str, spec: dict[str, Any], console: Console) -> Result:
             evidence_note = (f"captured output: {len(raw_output)} bytes "
                              "(not retained: evidence copy failed)")
         console.block(f"{excerpt}\n{evidence_note}")
+        # B5 (four-element law): the task FAIL carrier names WHY (typed
+        # rule: a declared task must exit 0) and the mechanical NEXT route -
+        # DIAGNOSE (D3: unexpected task failures; the mechanism does not
+        # mechanically know the correction) - with the evidence read-back
+        # handle and the exact re-run command. The WHAT line and the
+        # excerpt/evidence note above stay byte-stable.
+        read_route = (f"`qiven evidence-read {evidence[0]}` for the full bytes"
+                      if evidence else "re-run with --verbose for the full output")
+        console.block(
+            f"  rule: operator/task-failed (a declared task must exit 0; {name} exited\n"
+            f"  {returncode} - unexpected-failure class, correction not mechanically known)\n"
+            f"  NEXT: DIAGNOSE - classify the failure from the excerpt/evidence above,\n"
+            f"  {read_route}, fix at the\n"
+            f"  cause, then re-run `qiven run {name}`; do NOT weaken the gate or re-run blind"
+        )
         return Result(name, "fail", int(returncode), duration, output=output,
                       evidence_path=evidence[0] if evidence else None,
                       evidence_sha256=evidence[1] if evidence else None,
@@ -1485,6 +1514,18 @@ def _builtin(name: str, spec: dict[str, Any], console: Console, expect_head: str
             detail = f"expected {expected}, got {actual or '<unresolved>'}"
             _emit_failure_guidance(console, "exact-head")
             console.emit("fail", f"{name}: {detail}")
+            # B5 (four-element law): the mismatch FAIL names the rule, the
+            # compared values and the FIX route; the pinned detail line
+            # above stays byte-stable
+            console.block(
+                f"  rule: operator/exact-head-mismatch (string-exact compare of the FULL\n"
+                f"  40-char sha - never name resolution or prefix matching)\n"
+                f"  evidence: expected {expected}\n"
+                f"            got {actual or '<unresolved>'}  (git rev-parse HEAD)\n"
+                f"  NEXT: FIX - verify the intended full sha, commit or stash new work,\n"
+                f"  then re-run with the exact 40-char sha; do NOT bypass or re-point\n"
+                f"  the check"
+            )
             return Result(name, "fail", 1, time.monotonic() - started, detail=detail, output=completed.stdout)
     elif kind == "gate_proof":
         # pit P-53: merge-class publication requires a recorded full-gate
@@ -2879,9 +2920,13 @@ def main(argv: list[str] | None = None) -> int:
     console = Console(json_mode=json_mode, verbose=verbose_mode, no_color=no_color_mode)
     try:
         # dead-man insurance rides every invocation (never blocks, never
-        # raises into the caller's command)
+        # raises into the caller's command) - except the explicit `exec
+        # sweep`, which IS the sweep: piggybacking first would reconcile
+        # everything and leave the explicit pass nothing to report
         try:
-            _sweep_exec_records(console, quiet=not verbose_mode)
+            if not (args.command == "exec"
+                    and getattr(args, "exec_command", None) == "sweep"):
+                _sweep_exec_records(console, quiet=not verbose_mode)
         except Exception:
             pass
         config = _load_config()
@@ -3151,6 +3196,27 @@ def main(argv: list[str] | None = None) -> int:
                 _workspace_identity_fields(payload)
                 if args.json:
                     _print_json(payload)
+                elif not actions:
+                    # B5 (four-element law): silent success is not a
+                    # result (the B1 exec-list law) - an empty sweep
+                    # states itself with NEXT NONE
+                    console.emit(
+                        "ok",
+                        "exec sweep: no actions (no expired or stale runs;"
+                        " NEXT action: NONE - nothing to reconcile)",
+                    )
+                else:
+                    # B5 (four-element law): reconciled actions state WHY
+                    # they happened (lease law) and the read-back route;
+                    # the per-action lines above stay byte-stable
+                    console.block(
+                        f"  why: {len(actions)} run(s) past their lease or stale were\n"
+                        f"  reconciled (expired runs are terminated at their lease - the\n"
+                        f"  business exit code is unknown and never guessed)\n"
+                        f"  NEXT action: DIAGNOSE - read each run's log under\n"
+                        f"  .generated-temp/operator/exec/ to classify the outcomes;\n"
+                        f"  `qiven exec list` inventories the remaining runs"
+                    )
                 return 0
 
         raise OperatorError("unsupported command")

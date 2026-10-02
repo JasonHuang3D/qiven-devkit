@@ -30,7 +30,13 @@ jobs:
             windows) matrix='[{"name":"Windows","os":"windows-2022"}]' ;;
             linux) matrix='[{"name":"Linux","os":"ubuntu-24.04"}]' ;;
             macos) matrix='[{"name":"macOS","os":"macos-15"}]' ;;
-            *) echo "Unknown validation unit: $REQUESTED" >&2; exit 1 ;;
+            *)
+              echo "Unknown validation unit: $REQUESTED" >&2
+              echo "  WHY: the plan is the typed admission surface - an unknown unit" >&2
+              echo "  would validate nothing while appearing to run CI (rule: devkit/ci-plan)" >&2
+              echo "  NEXT action: FIX - re-dispatch with jobs=full or one of:" >&2
+              echo "  windows, linux, macos" >&2
+              exit 1 ;;
           esac
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
   test:
@@ -55,5 +61,15 @@ jobs:
           PLAN: ${{ needs.plan.result }}
           TEST: ${{ needs.test.result }}
         run: |
-          [[ "$PLAN" == success ]]
-          [[ "$TEST" == success ]]
+          set -euo pipefail
+          if [[ "$PLAN" != "success" || "$TEST" != "success" ]]; then
+            echo "[FAIL] CI Gate: WHY: a requested validation unit did not succeed"
+            echo "  (plan=$PLAN, test=$TEST; rule: devkit/ci-gate - the gate"
+            echo "  conclusion is the enforcement)"
+            echo "  NEXT action: DIAGNOSE - open the failed unit's step logs"
+            echo "  (gh run view --log-failed, or qiven ci watch), classify the"
+            echo "  failure, fix it at this head, then re-dispatch; a re-dispatch"
+            echo "  without a fix is not a retry."
+            exit 1
+          fi
+          echo "CI Gate: requested validation passed"
