@@ -321,11 +321,12 @@ own checkout against its lock node (the observed skew class: qiven-context
 executing checkout 98639a8 ahead of its locked node 1329bcf). Until SG-5
 closes, a consumer that needs that guarantee compares `git rev-parse HEAD`
 in the invoking repo against its entry in `<control>/workspace.lock.json`
-manually. Known residual in the same family: qiven-foundation carries
-`tools/toolchain.py` one revision behind the devkit canonical (the devkit
-revision guards git-unavailability with a typed `[FAIL]` carrier);
-converging it is a one-file adoption deliberately left to an owner-scoped
-change.
+manually. Known residual in the same family: qiven-foundation's
+`tools/toolchain.py` was converged to the devkit canonical byte-identically
+at B6 (DG-5 closed, sha256 c22cdc03...); qiven-runtime's copy lagged one
+revision until the v61 integral review adopted the same convergence
+(the devkit revision guards git-unavailability with a typed `[FAIL]`
+carrier). After v61 no carrying repo lags the canonical.
 
 ## Devkit tool surfaces (B6 discovery)
 
@@ -380,6 +381,12 @@ commands and instructs the ADR-0051 re-call. It is a backstop, never the
 contract; it fails open on unparseable input and cannot catch indirection
 (`BASE=<tool>; $BASE ...`). Its classification table is pinned by
 `tools/hook_exec_router_test.py` (gate task `router-tests`).
+
+Router denial carriers are the named legacy profile
+`router-denial-legacy-v1` (P0 register rows; declared in
+`tools/router_record_adapter.py` `ROUTER_PROFILE`): byte-stable
+denial text by law ADR-0051 via ADR-0060 D7 until an explicit
+public-carrier amendment — do not restyle denial lines ad hoc.
 
 Registration location (DG-4, B6): the hook is wired in the harness's
 MACHINE-LOCAL, untracked config `D:\JasonWork\.zcode\config.json` (the
