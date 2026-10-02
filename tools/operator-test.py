@@ -328,6 +328,14 @@ def main() -> int:
               "G1b.exact-head-guidance-first")
         check(any("40-char" in l for l in bh[:bh_fail]),
               "G1b.exact-head-guidance-content")
+        # B5 (four-element law): the exact-head FAIL names the rule, the
+        # compared values and the FIX route after the pinned detail line
+        check(any("rule: operator/exact-head-mismatch" in l for l in bh),
+              "B5-E1.rule", bad_head.stdout)
+        check(any("NEXT: FIX - verify the intended full sha" in l for l in bh),
+              "B5-E1.fix-route", bad_head.stdout)
+        check(any(l.strip().startswith("evidence: expected") for l in bh),
+              "B5-E1.evidence-values", bad_head.stdout)
 
         isolation = run(
             [sys.executable, OPERATOR, "--json", "gate", "--name", "fixture-isolation"],
@@ -569,7 +577,7 @@ def main() -> int:
         r2_buffer = io.StringIO()
         r2_human = operator.Console(json_mode=False, verbose=False, no_color=True)
         with contextlib.redirect_stdout(r2_buffer):
-            operator._run_process(
+            r2_render = operator._run_process(
                 "r2-render-task",
                 {"argv": [sys.executable, "-c",
                           "print('r2-render-head'); print('R2-MIDDLE-OMITTED ' + 'z' * 6000); "
@@ -586,6 +594,17 @@ def main() -> int:
         check("z" * 1200 not in rendered_fail, "R2.middle-omitted-from-render")
         check("bytes omitted" in rendered_fail, "R2.omitted-marker-rendered")
         check("full output retained at:" in rendered_fail, "R2.evidence-path-named")
+        # B5 (four-element law): the task FAIL human carrier names WHY (the
+        # typed operator/task-failed rule) and the NEXT DIAGNOSE route with
+        # the evidence read-back handle and the exact re-run command
+        check("rule: operator/task-failed" in rendered_fail,
+              "B5-T1.rule", rendered_fail[-500:])
+        check("NEXT: DIAGNOSE -" in rendered_fail,
+              "B5-T1.next-diagnose", rendered_fail[-500:])
+        check(f"qiven evidence-read {r2_render.evidence_path}" in rendered_fail,
+              "B5-T1.evidence-read-handle", rendered_fail[-500:])
+        check("re-run `qiven run r2-render-task`" in rendered_fail,
+              "B5-T1.rerun-command", rendered_fail[-500:])
 
         # R2 threshold law: small successful outputs are NOT retained
         # (declared threshold, not happenstance); over-threshold success
@@ -682,6 +701,16 @@ def main() -> int:
         check("not retained: evidence copy failed" in degrade_render
               and "captured output:" in degrade_render,
               "R2.copy-failure-honest-note", degrade_render[-300:])
+        # B5 variant: with no retained artifact the NEXT route names the
+        # --verbose re-run instead of an evidence-read handle (honest
+        # degradation, never a dangling locator)
+        check("rule: operator/task-failed" in degrade_render
+              and "NEXT: DIAGNOSE -" in degrade_render,
+              "B5-T2.degrade-carrier", degrade_render[-400:])
+        check("re-run with --verbose for the full output" in degrade_render,
+              "B5-T2.degrade-route", degrade_render[-400:])
+        check("evidence-read" not in degrade_render,
+              "B5-T2.no-dangling-handle", degrade_render[-400:])
         assert_no_repo_bytecode(repo)
 
         # -------- G2/G3 fixtures + helpers ---------------------------------
@@ -1068,6 +1097,30 @@ def main() -> int:
               and "lease" in er1_doc["next_action"]["supported_by"],
               "ER1.next-status-handle", str(er1_doc["next_action"]))
         check(er1_doc["retry_state"]["side_effects"] == "in_progress", "ER1.side-effects")
+
+        # B5-X1 (four-element law): the exec 124 surface in HUMAN mode
+        # teaches WHY (supervision budget, run continues under lease) and
+        # the status re-attach route; the run is stopped before moving on
+        # (testing law: a leaked test process is a failed test)
+        b5_human = run(
+            [sys.executable, OPERATOR, "--no-color", "exec", "start",
+             "--timeout", "1", "--max-lifetime", "30", "--",
+             sys.executable, "-c", "import time; time.sleep(8)"],
+            cwd=repo,
+            expect=124,
+        )
+        b5_wait_line = next(
+            (l for l in b5_human.stdout.splitlines() if "still running after" in l), "")
+        check(bool(b5_wait_line), "B5-X1.wait-line", b5_human.stdout)
+        check("why: exit 124 is the operator supervision budget" in b5_human.stdout,
+              "B5-X1.why", b5_human.stdout)
+        b5_x1_id = b5_wait_line.split()[2].rstrip(":") if b5_wait_line else ""
+        check(f"NEXT action: re-attach with `qiven exec status {b5_x1_id}`"
+              in b5_human.stdout, "B5-X1.next-status-handle", b5_human.stdout)
+        check("key on the payload status field" in b5_human.stdout,
+              "B5-X1.status-field-law", b5_human.stdout)
+        json.loads(qiven_cli("exec", "stop", b5_x1_id).stdout)
+        check(exec_status(b5_x1_id)["state"] == "stopped", "B5-X1.cleaned-up")
 
         # C8: record rewrites are atomic — a concurrent reader never sees
         # torn JSON while the watchdog heartbeats
