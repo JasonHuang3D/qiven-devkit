@@ -169,6 +169,12 @@ def main() -> int:
     if BOOTSTRAP is None:
         print(f"[SKIP] B1-B6: real bootstrap not found (QIVEN_WORKSPACE_BOOTSTRAP unset, "
               f"no sibling qiven-workspace) - cross-repo legs not run")
+        print("[SKIP] B1-B6: evidence: QIVEN_WORKSPACE_BOOTSTRAP probe and sibling "
+              "qiven-workspace search both came up empty in this environment; B7 "
+              "(router classification leg) ran completely")
+        print("[SKIP] B1-B6: NEXT: NEXT - run inside the qiven workspace (or set "
+              "QIVEN_WORKSPACE_BOOTSTRAP to the bootstrap path) for the live legs "
+              "(no FIX applies: absence is environment, not a defect)")
         return 0
 
     text = BOOTSTRAP.read_text(encoding="utf-8")
@@ -635,4 +641,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import selftest_carrier
+    raise SystemExit(selftest_carrier.run(__file__, main))

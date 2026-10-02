@@ -92,6 +92,14 @@ def main() -> int:
               "(attribution block must be the trailer, not the subject):")
         for line in offenders:
             print(f"  {line}")
+        print("[FAIL] commit-subjects: evidence: subject lines above (full shas: "
+              "git log --pretty=format:'%H %s'); law: pit P-51 - the role-first "
+              "layout renders commit listings as role lines and each prior "
+              "occurrence needed an owner-directed history rewrite (docstring)")
+        print("[FAIL] commit-subjects: NEXT: FIX - rewrite the offender commits so "
+              "the conventional subject leads and the attribution block moves to "
+              "the trailer position (tip: git commit --amend; published history: "
+              "owner-directed rewrite per MEM-20260919T135930Z-F1C2A9), then re-run")
         return 1
     print("[ OK ] commit subjects clean (attribution in trailer position)")
     return 0

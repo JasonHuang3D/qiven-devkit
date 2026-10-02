@@ -14,7 +14,11 @@ foreach(path IN LISTS cmd_templates)
     if(NOT unsafe_if_chain STREQUAL "")
         message(FATAL_ERROR
             "Unsafe generated CMD conditional in ${path}: ${unsafe_if_chain}\n"
-            "Group the conditional body with parentheses or use goto-safe control flow; do not place '& exit /b' on an ungrouped IF line.")
+            "Group the conditional body with parentheses or use goto-safe control flow; do not place '& exit /b' on an ungrouped IF line.\n"
+            "  rule: cmd-control-flow/generated-cmd (the 2026-09 CMD conditional class)\n"
+            "  evidence: offending match shown above in ${path}\n"
+            "  NEXT: FIX - rewrite the conditional with grouped bodies or goto labels; "
+            "re-run qiven run cmd-control-flow; never widen the regex to pass")
     endif()
 endforeach()
 
@@ -24,23 +28,39 @@ string(REGEX MATCH "exit /b[ \t]+%errorlevel%" unsafe_qiven_errorlevel "${qiven_
 if(NOT unsafe_qiven_errorlevel STREQUAL "")
     message(FATAL_ERROR
         "Unsafe qiven.cmd errorlevel propagation: ${unsafe_qiven_errorlevel}\n"
-        "Do not expand %errorlevel% directly at exit sites that may move into parenthesized CMD blocks; capture it into an explicit variable using goto-safe control flow.")
+        "Do not expand %errorlevel% directly at exit sites that may move into parenthesized CMD blocks; capture it into an explicit variable using goto-safe control flow.\n"
+        "  rule: cmd-control-flow/errorlevel-propagation (late-expansion-in-block class)\n"
+        "  evidence: offending match shown above\n"
+        "  NEXT: FIX - capture the code into a named variable (set \"QIVEN_EXIT_CODE=%errorlevel%\") "
+        "then exit /b that variable; re-run qiven run cmd-control-flow")
 endif()
 
 string(FIND "${qiven_content}" "where python >nul 2>nul" python_probe_index)
 string(FIND "${qiven_content}" "where py >nul 2>nul" py_probe_index)
 if(python_probe_index EQUAL -1 OR py_probe_index EQUAL -1)
-    message(FATAL_ERROR "qiven.cmd must probe both python and py compatibility fallback")
+    message(FATAL_ERROR "qiven.cmd must probe both python and py compatibility fallback\n"
+        "  rule: cmd-control-flow/probe-chain (python-first, py -3 fallback law)\n"
+        "  evidence: probe markers searched in ${qiven_entrypoint}\n"
+        "  NEXT: FIX - restore both 'where python >nul 2>nul' and 'where py >nul 2>nul' "
+        "probes; re-run qiven run cmd-control-flow")
 endif()
 if(python_probe_index GREATER py_probe_index)
-    message(FATAL_ERROR "qiven.cmd must prefer python before the legacy py launcher fallback")
+    message(FATAL_ERROR "qiven.cmd must prefer python before the legacy py launcher fallback\n"
+        "  rule: cmd-control-flow/probe-order (python probed BEFORE py -3)\n"
+        "  evidence: marker offsets python=${python_probe_index} py=${py_probe_index}\n"
+        "  NEXT: FIX - reorder the probe chain so python is tried first; re-run "
+        "qiven run cmd-control-flow")
 endif()
 
 string(REGEX MATCHALL "sys\\.version_info >= \\(3, 9\\)" qiven_version_checks "${qiven_content}")
 list(LENGTH qiven_version_checks qiven_version_check_count)
 if(qiven_version_check_count LESS 3)
     message(FATAL_ERROR
-        "qiven.cmd must validate Python 3.9+ for QIVEN_PYTHON, python, and py -3 candidates")
+        "qiven.cmd must validate Python 3.9+ for QIVEN_PYTHON, python, and py -3 candidates\n"
+        "  rule: cmd-control-flow/version-probe (every candidate runs the 3.9+ probe)\n"
+        "  evidence: ${qiven_version_check_count} probe expression(s) found in ${qiven_entrypoint}, expected at least 3\n"
+        "  NEXT: FIX - restore the version probe on every candidate path "
+        "(QIVEN_PYTHON, python, py -3); re-run qiven run cmd-control-flow")
 endif()
 
 message(STATUS "Generated CMD control-flow regression checks passed")

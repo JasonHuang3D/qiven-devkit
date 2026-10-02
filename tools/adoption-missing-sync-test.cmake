@@ -5,7 +5,15 @@ if(NOT DEFINED DEVKIT_ROOT)
 endif()
 
 function(fail message_text)
-    message(FATAL_ERROR "TEST FAILURE: ${message_text}")
+    # B7a four-element carrier (byte-stable TEST FAILURE prefix + rule +
+    # evidence + the exact NEXT re-run; never weaken the assertion)
+    message(FATAL_ERROR "TEST FAILURE: ${message_text}\n"
+        "  rule: adoption-missing-sync assertion (tools/adoption-missing-sync-test.cmake; "
+        "the assertion text names the violated law)\n"
+        "  evidence: full cmake -P output above; disposable fixture: ${repo}\n"
+        "  NEXT: DIAGNOSE - re-run qiven run adoption-missing-sync (or cmake "
+        "-DDEVKIT_ROOT=${DEVKIT_ROOT} -P ${CMAKE_CURRENT_LIST_FILE}); fix the "
+        "condition named above; never weaken or skip the assertion")
 endfunction()
 
 function(run_expect_success)

@@ -258,7 +258,13 @@ def main(argv: list[str] | None = None) -> int:
     if findings:
         for finding in findings:
             print(f"[FAIL] {finding}")
-        print(f"[FAIL] forbidden resolver patterns: {len(findings)} finding(s)")
+        print(f"[FAIL] forbidden resolver patterns: {len(findings)} finding(s) - rule "
+              "letter + repo-relative site on every line above; taxonomy R1-R6: this "
+              "file's docstring (ADR-0052 doc 02 WR-8)")
+        print("[FAIL] forbidden resolver patterns: NEXT: FIX - remove the forbidden "
+              "pattern at each listed site (restore the workspace-lock resolution "
+              "path; the narrowly documented exceptions are in the docstring), then "
+              "re-run: python tools/check_resolver_patterns.py")
         return 1
     print(f"[ OK ] resolver patterns clean ({len(targets)} repos scanned)")
     return 0
