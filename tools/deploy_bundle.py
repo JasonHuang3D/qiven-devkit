@@ -88,11 +88,27 @@ def _locked_singleton_commit() -> str:
     try:
         lock = json.loads(lock_path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise SystemExit(f"[FAIL] workspace lock unreadable at {lock_path}: {exc}")
+        raise SystemExit(
+            f"workspace lock unreadable at {lock_path}: {exc} (WHY: the "
+            "deploy bundle must identity-check the third-party singleton "
+            "against the locked node - WR-5; a lock that cannot be read "
+            "fails closed) - NEXT action: DIAGNOSE - read the lock file at "
+            "the path above; if it is missing/corrupt, re-run "
+            "workspace_resolver.py lock-update to rebuild it, then re-run "
+            "the deploy"
+        )
     node = lock.get("nodes", {}).get("qiven-third-party-win")
     commit = node.get("commit") if isinstance(node, dict) else None
     if not isinstance(commit, str) or len(commit) != 40:
-        raise SystemExit("[FAIL] workspace lock has no qiven-third-party-win node commit")
+        raise SystemExit(
+            "workspace lock has no qiven-third-party-win node commit "
+            "(WHY: the deploy bundle must identity-check the third-party "
+            "singleton against the locked node - WR-5) - NEXT action: "
+            "RECONCILE - a lock-update transaction "
+            "(workspace_resolver.py lock-update --move "
+            "qiven-third-party-win=<checkout>) is the lock's only writer; "
+            "re-run the deploy after the node is recorded"
+        )
     return commit
 
 
@@ -111,12 +127,13 @@ def resolve_singleton(repo: pathlib.Path) -> pathlib.Path | None:
     locked = _locked_singleton_commit()
     head = git(root, "rev-parse", "HEAD").stdout.strip()
     if head != locked:
-        raise SystemExit(f"[FAIL] third-party singleton at {head[:12] or '<unreadable>'} != "
-                         f"locked node {locked[:12]}; advance the workspace lock deliberately"
-                         " - NEXT action: RECONCILE - a lock-update transaction"
-                         " (workspace_resolver.py lock-update --move"
-                         " qiven-third-party-win=<checkout>) is the lock's only"
-                         " writer; never re-point the singleton checkout")
+        raise SystemExit(
+            f"third-party singleton at {head[:12] or '<unreadable>'} != "
+            f"locked node {locked[:12]}; advance the workspace lock deliberately"
+            " - NEXT action: RECONCILE - a lock-update transaction"
+            " (workspace_resolver.py lock-update --move"
+            " qiven-third-party-win=<checkout>) is the lock's only"
+            " writer; never re-point the singleton checkout")
     return root
 
 
@@ -260,7 +277,7 @@ def deploy(repo_arg: str, profile_override: str | None) -> int:
     if not receipt.is_file():
         return fail(
             f"no gate receipt {gate_name} at head {short}",
-            f"NEXT - run `qiven gate {gate_name} --expect-head {head}` at"
+            f"run `qiven gate {gate_name} --expect-head {head}` at"
             " this exact head, then re-run the deploy",
         )
 
@@ -409,7 +426,7 @@ def verify(bundle_arg: str) -> int:
     if failures:
         return fail(
             f"{failures} file(s) failed verification",
-            "NEXT - re-run the deploy for the same head to rebuild a"
+            "re-run the deploy for the same head to rebuild a"
             " consistent bundle, or restore the missing/corrupt files from"
             " the published bundle",
         )

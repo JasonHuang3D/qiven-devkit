@@ -45,8 +45,15 @@ def render_failure(script: Path, exc: BaseException,
     time (a bound default would freeze the import-time stream and break
     under redirect_stdout in-process drivers)."""
     name = script.name
-    what = _bounded(str(exc) or exc.__class__.__name__, WHAT_PREFIX_BYTES)
+    message = str(exc)
+    what = _bounded(message or exc.__class__.__name__, WHAT_PREFIX_BYTES)
     print(f"[FAIL] {name}: self-test case failed - {what}", file=file_handle)
+    if not message.strip():
+        # carrier-law guard: a message-less assert cannot carry the WHY;
+        # the case itself is defective alongside whatever it caught
+        print(f"  why-gap: the assert carried no message - every case MUST "
+              f"name its law in the assertion (fix the case while fixing the "
+              f"failure)", file=file_handle)
     print(f"  why: the case text names the violated law; case registry: "
           f"tools/{name} (docstring + the case id sites)", file=file_handle)
     print("  evidence: complete traceback above; when this runs as a "

@@ -1612,6 +1612,13 @@ def _builtin(name: str, spec: dict[str, Any], console: Console, expect_head: str
             if dirty:
                 console.emit("fail", f"{name}: NEXT: FIX - commit or stash the paths "
                                      "above, then re-run; never force the check green")
+            else:
+                # git itself failed (rc != 0, no listing): the clean-tree
+                # law still fails closed; DIAGNOSE names the real defect
+                console.emit("fail", f"{name}: NEXT: DIAGNOSE - git status itself "
+                                     "failed; run `git status --porcelain=v1 "
+                                     "--untracked-files=all` directly to see the git "
+                                     "error, fix that first, then re-run")
             return Result(name, "fail", 1, time.monotonic() - started, detail=detail, output=completed.stdout)
     else:
         detail = f"unknown builtin: {kind}"
