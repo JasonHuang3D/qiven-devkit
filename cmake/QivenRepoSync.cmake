@@ -57,6 +57,9 @@ include("${template}/managed-files.cmake")
 if(NOT DEFINED QIVEN_MANAGED_SOURCE_DIR)
     set(QIVEN_MANAGED_SOURCE_DIR "${template}")
 endif()
+if(NOT DEFINED QIVEN_SEED_ONLY_FILES)
+    set(QIVEN_SEED_ONLY_FILES "")
+endif()
 set(new_template_version "${QIVEN_TEMPLATE_VERSION}")
 set(new_managed_files ${QIVEN_MANAGED_FILES})
 foreach(relative IN LISTS new_managed_files)
@@ -126,6 +129,13 @@ foreach(relative IN LISTS all_paths)
         qiven_hash("${stage}/${relative}" new_hash)
     endif()
 
+    if(in_old AND NOT in_new AND relative IN_LIST QIVEN_SEED_ONLY_FILES)
+        # Seed-only handoff (v61 owner decision): the path leaves the
+        # managed set into repository ownership. Sync keeps the file
+        # untouched, whatever its bytes, and drops it from the recorded
+        # state; it is never deleted and never conflict-checked.
+        continue()
+    endif()
     if(in_old AND in_new)
         if(current_hash STREQUAL old_hash)
             if(NOT current_hash STREQUAL new_hash)

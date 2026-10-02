@@ -54,6 +54,16 @@ if(NOT exact_apply_result EQUAL 0)
 endif()
 assert_exists("${adopt_exact}/.qiven/repo.json")
 assert_exists("${adopt_exact}/.qiven/generated-state.cmake")
+# v61 seed-only: the fixture's .qiven was removed wholesale, so adoption
+# must SEED the repository-owned operator policy; the generated state
+# must NOT manage it.
+assert_exists("${adopt_exact}/.qiven/operator.json")
+file(STRINGS "${adopt_exact}/.qiven/generated-state.cmake" state_lines)
+foreach(state_line IN LISTS state_lines)
+    if(state_line MATCHES "operator\\.json")
+        fail("generated state manages the seed-only operator policy: ${state_line}")
+    endif()
+endforeach()
 file(SHA256 "${adopt_exact}/.editorconfig" exact_after)
 if(NOT exact_before STREQUAL exact_after)
     fail("apply rewrote an exact managed file")
@@ -236,13 +246,15 @@ commit_adoption_fixture("${non_regular}")
 run_adoption(check "${non_regular}" non_regular_result non_regular_output)
 assert_adoption_rejected("${non_regular_result}" "${non_regular_output}" "non-regular managed path")
 
-# Foundation-shaped regression: 3 exact paths, Operator policy missing, all other managed paths conflicting.
+# Foundation-shaped regression: 3 exact paths, all other managed paths
+# conflicting. (v61 seed-only: .qiven/operator.json left the managed set —
+# the fixture carries it as a KEPT repository-owned file; it must not
+# appear in any conflict/missing category.)
 set(foundation_shape "${fixtures}/adopt-foundation-shape")
 make_adoption_fixture("${foundation_shape}" qiven-foundation)
 set(foundation_exact .editorconfig .gitattributes tools/delete_all_branches.py)
-set(foundation_missing .qiven/operator.json)
 foreach(path IN LISTS QIVEN_MANAGED_FILES)
-    if(NOT path IN_LIST foundation_exact AND NOT path IN_LIST foundation_missing)
+    if(NOT path IN_LIST foundation_exact)
         file(APPEND "${foundation_shape}/${path}" "\nFoundation-shaped managed drift\n")
     endif()
 endforeach()
