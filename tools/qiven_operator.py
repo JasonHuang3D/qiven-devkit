@@ -2842,12 +2842,195 @@ def _evidence_read(path_text: str, offset: int, count: int,
     return 0
 
 
+# ===========================================================================
+# Discovery surface (B6, register DG-2/DG-3). `surface` is the O(1)
+# tasks/gates introspection (names discoverable without opening
+# .qiven/operator.json per repo); `records` is the read-back route for
+# the Common Records the gate/run/ci/exec carriers WRITE - until B6 they
+# were write-only (no stdout carrier named them). The bounded view is
+# the ADOPTED record_projection (never a second renderer).
+# ============================================================================
+
+_RECORDS_LIST_CAP = 40
+
+
+def _surface(config: dict[str, Any], console: Console, json_mode: bool) -> int:
+    """One call lists every declared gate and task (DG-2)."""
+    gates_raw = config.get("gates")
+    gates = gates_raw if isinstance(gates_raw, dict) else {}
+    tasks_raw = config.get("tasks")
+    tasks = tasks_raw if isinstance(tasks_raw, dict) else {}
+    default = config.get("default_gate")
+    task_summary: dict[str, dict[str, Any]] = {}
+    for name, spec in sorted(tasks.items()):
+        if isinstance(spec, dict) and spec.get("builtin"):
+            task_summary[name] = {"kind": "builtin", "builtin": spec["builtin"]}
+        elif isinstance(spec, dict) and spec.get("argv"):
+            task_summary[name] = {"kind": "argv", "argv": [str(a) for a in spec["argv"]]}
+        else:
+            task_summary[name] = {"kind": "unrecognized"}
+
+    def _sequence(spec: Any) -> str:
+        parts: list[str] = []
+        for item in spec if isinstance(spec, list) else [spec]:
+            if isinstance(item, list):  # parallel group (gate sequence law)
+                parts.append("(" + " | ".join(str(x) for x in item) + ")")
+            else:
+                parts.append(str(item))
+        return " -> ".join(parts)
+
+    if json_mode:
+        payload: dict[str, Any] = {
+            "status": "ok",
+            "repository": config.get("repository_name"),
+            "default_gate": default,
+            "gates": {str(name): _sequence(spec) for name, spec in sorted(gates.items())},
+            "tasks": task_summary,
+        }
+        _workspace_identity_fields(payload)
+        _print_json(payload)
+        return 0
+    console.emit(
+        "ok",
+        f"surface: {len(gates)} gate(s), {len(tasks)} task(s) -"
+        " config: .qiven/operator.json",
+    )
+    for name, spec in sorted(gates.items()):
+        mark = " (default)" if name == default else ""
+        console.block(f"  gate {name}{mark}: {_sequence(spec)}")
+    for name, spec in task_summary.items():
+        if spec["kind"] == "builtin":
+            console.block(f"  task {name}: builtin {spec['builtin']}")
+        elif spec["kind"] == "argv":
+            console.block(f"  task {name}: {' '.join(spec['argv'])}")
+        else:
+            console.block(f"  task {name}: (unrecognized task spec)")
+    console.block(
+        "  NEXT action: NONE - run `qiven gate <name>` or `qiven run <task>`;\n"
+        "  record read-back: `qiven records`"
+    )
+    return 0
+
+
+def _record_headline(doc: dict[str, Any]) -> dict[str, str]:
+    outcome = (doc.get("domain_outcome") or {}).get("outcome") or "-"
+    action = (doc.get("next_action") or {}).get("action") or "-"
+    return {
+        "record_kind": str(doc.get("record_kind") or "-"),
+        "verdict": str(outcome).upper(),
+        "next": str(action),
+    }
+
+
+def _records_list(console: Console, json_mode: bool) -> int:
+    """Newest-first listing of the retained Common Records (names embed
+    the operation-id timestamp, so a reverse-name sort is the
+    deterministic newest-first order - no filesystem mtime dependency)."""
+    directory = _records_dir()
+    names = (
+        sorted((p.name for p in directory.glob("*.json")), reverse=True)
+        if directory.is_dir() else []
+    )
+    shown = names[:_RECORDS_LIST_CAP]
+    entries: list[dict[str, Any]] = []
+    for name in shown:
+        entry: dict[str, Any] = {"name": name}
+        try:
+            doc = json.loads((directory / name).read_text(encoding="utf-8"))
+            entry.update(_record_headline(doc) if isinstance(doc, dict) else
+                         {"record_kind": "unreadable", "verdict": "-", "next": "-"})
+        except (OSError, json.JSONDecodeError):
+            entry.update({"record_kind": "unreadable", "verdict": "-", "next": "-"})
+        entries.append(entry)
+    if json_mode:
+        _print_json({
+            "status": "ok",
+            "count": len(names),
+            "returned": len(entries),
+            "omitted": len(names) - len(entries),
+            "records": entries,
+        })
+        return 0
+    if not entries:
+        # B1 exec-list law: an empty state states itself, never silence
+        console.emit(
+            "ok",
+            f"records: none yet under .generated-temp/operator/records/ -"
+            " NEXT action: NONE (a gate/run/ci/exec invocation writes one)",
+        )
+        return 0
+    console.emit(
+        "ok",
+        f"records: {len(names)} under .generated-temp/operator/records/"
+        f" (newest first, {len(entries)} shown, {len(names) - len(entries)} omitted)",
+    )
+    for entry in entries:
+        console.block(
+            f"  {entry['name']}  kind={entry['record_kind']}"
+            f" verdict={entry['verdict']} next={entry['next']}"
+        )
+    console.block(
+        "  NEXT action: NONE - bounded view: `qiven records <name>`;"
+        " raw bytes: `qiven evidence-read"
+        " .generated-temp/operator/records/<name>`"
+    )
+    return 0
+
+
+def _record_show(name: str, console: Console, json_mode: bool) -> int:
+    """Print one record's bounded model view (the ADOPTED
+    record_projection; raw JSON stays reachable via evidence-read)."""
+    if Path(name).name != name:
+        raise OperatorError(
+            f"records rejects path traversal: {name!r} (a record NAME from"
+            " `qiven records`, never a path)"
+        )
+    target = _records_dir() / name
+    if not target.is_file():
+        raise OperatorError(
+            f"unknown record: {name} (use `qiven records` to list; records"
+            " live under .generated-temp/operator/records/)"
+        )
+    try:
+        doc = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OperatorError(f"record unreadable: {target}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise OperatorError(f"record is not a common record object: {target}")
+    locator = f".generated-temp/operator/records/{name}"
+    if json_mode:
+        payload = _rp.project_json(doc)
+        payload["status"] = "ok"
+        payload["record"] = locator
+        payload["raw_read"] = f"qiven evidence-read {locator}"
+        _print_json(payload)
+        return 0
+    console.emit("run", f"records {name} (bounded model view)")
+    console.block(_rp.project(doc))
+    console.block(f"  raw bytes: qiven evidence-read {locator}")
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="qiven", description="Qiven local engineering operator", parents=[_common_flags()]
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("info", help="show repository/operator metadata", parents=[_common_flags()])
+    surface = sub.add_parser(
+        "surface",
+        help="O(1) introspection: list this repository's declared gates and tasks",
+        parents=[_common_flags()],
+    )
+    records = sub.add_parser(
+        "records",
+        help="read back the operator's Common Records (list, or NAME for the bounded model view)",
+        parents=[_common_flags()],
+    )
+    records.add_argument(
+        "name", nargs="?", default=None,
+        help="record file name under .generated-temp/operator/records/ (omit to list)",
+    )
     gate = sub.add_parser("gate", help="run the configured local validation gate", parents=[_common_flags()])
     gate.add_argument("gate", nargs="?", default=None, help="gate name; defaults to config default_gate")
     gate.add_argument("--name", dest="gate_flag", default=None, help="gate name (alternative to the positional)")
@@ -2945,6 +3128,18 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 console.emit("ok", f"repository={payload['repository']} head={payload['head']}")
             return 0
+
+        if args.command == "surface":
+            # B6 (DG-2): discovery introspection - one call names every
+            # gate/task; no config-file spelunking
+            return _surface(config, console, args.json)
+
+        if args.command == "records":
+            # B6 (DG-3): the read-back surface for the write-only Common
+            # Records (bounded view via the adopted record_projection)
+            if args.name:
+                return _record_show(args.name, console, args.json)
+            return _records_list(console, args.json)
 
         tasks = config.get("tasks")
         if not isinstance(tasks, dict):

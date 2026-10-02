@@ -114,6 +114,12 @@
         "tools/b2_envelope_test.py"
       ]
     },
+    "b6-discovery-tests": {
+      "argv": [
+        "{python}",
+        "tools/b6_discovery_test.py"
+      ]
+    },
     "context-records-crosscheck-tests": {
       "argv": [
         "{python}",
@@ -184,6 +190,7 @@
       "b7a-carrier-tests",
       "b5-carrier-tests",
       "b2-envelope-tests",
+      "b6-discovery-tests",
       "context-records-crosscheck-tests",
       "router-record-adapter-tests",
       "workspace-schemas-tests",

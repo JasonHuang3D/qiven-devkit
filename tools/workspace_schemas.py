@@ -177,22 +177,66 @@ def check_file(instance_path: Path, schema_path: Path) -> list[SchemaError]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Strict qiven workspace schema validator")
+    parser = argparse.ArgumentParser(
+        description="Strict qiven workspace schema validator",
+        epilog=(
+            "canonical invocation: python tools/workspace_schemas.py"
+            " --check FILE --schema docs/schemas/NAME.schema.json;"
+            " --list enumerates the schema documents; strictness is the"
+            " contract (unknown fields, duplicate keys and floats are typed"
+            " rejections, never warnings; WR-1, ADR-0052)"
+        ),
+    )
     parser.add_argument("--check", metavar="FILE", help="instance file to validate")
     parser.add_argument("--schema", metavar="FILE", help="schema document to validate against")
+    parser.add_argument(
+        "--list", action="store_true",
+        help="list the schema documents in docs/schemas/ (the discovery surface)",
+    )
     args = parser.parse_args(argv)
 
+    if args.list:
+        names = sorted(path.name for path in SCHEMA_DIR.glob("*.json"))
+        print("[ RUN] schema inventory docs/schemas/")
+        for name in names:
+            print(f"[ OK ] {name}")
+        print(
+            f"       next NONE ({len(names)} schema document(s);"
+            " validate: --check FILE --schema docs/schemas/NAME)"
+        )
+        return 0
+
     if not args.check or not args.schema:
-        parser.print_usage(sys.stderr)
+        print(
+            "[FAIL] usage: both --check FILE and --schema FILE are required",
+            file=sys.stderr,
+        )
+        print(
+            "       NEXT action: FIX - python tools/workspace_schemas.py"
+            " --check FILE --schema docs/schemas/NAME.schema.json"
+            " (--list enumerates the schema documents)",
+            file=sys.stderr,
+        )
         return 2
 
     instance_path = Path(args.check)
     schema_path = Path(args.schema)
     if not instance_path.is_file():
         print(f"[FAIL] instance file not found: {instance_path}", file=sys.stderr)
+        print(
+            "       NEXT action: FIX - point --check at the instance file"
+            " to validate (workspace.json, workspace.lock.json, or a"
+            " .qiven/dependencies.json)",
+            file=sys.stderr,
+        )
         return 2
     if not schema_path.is_file():
         print(f"[FAIL] schema file not found: {schema_path}", file=sys.stderr)
+        print(
+            "       NEXT action: FIX - point --schema at a schema document"
+            " from docs/schemas/ (--list enumerates them)",
+            file=sys.stderr,
+        )
         return 2
 
     print(f"[ RUN] schema-check {instance_path.name} against {schema_path.name}")
@@ -200,6 +244,12 @@ def main(argv: list[str] | None = None) -> int:
     if errors:
         for error in errors:
             print(f"[FAIL] {error}")
+        print(
+            f"[FAIL] schema-check: {len(errors)} error(s) against"
+            f" {schema_path.name} - NEXT action: FIX - correct the instance"
+            " at the reported paths (strict law: unknown fields, duplicate"
+            " keys and floats are rejections, never warnings)"
+        )
         return 1
     print("[ OK ] schema-check")
     return 0
