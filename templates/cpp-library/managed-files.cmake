@@ -1,4 +1,4 @@
-set(QIVEN_TEMPLATE_VERSION "0.1.13")
+set(QIVEN_TEMPLATE_VERSION "0.1.14")
 set(QIVEN_FILE_CLASS managed)
 set(QIVEN_MANAGED_FILES
     .clang-format
@@ -6,7 +6,6 @@ set(QIVEN_MANAGED_FILES
     .gitattributes
     CMakePresets.json
     AGENTS.md
-    .qiven/operator.json
     tools/toolchain.py
     tools/check_toolchain.py
     tools/format_sources.py
@@ -15,6 +14,16 @@ set(QIVEN_MANAGED_FILES
     tools/qiven.py
     tools/delete_all_branches.py
     tools/b3_carrier_test.py
+)
+# Seed-only files (v61 owner decision, OBL-20261002T162000Z-B2C3D4):
+# rendered once at repository generation and seeded at adoption when
+# missing; afterwards the file belongs to the repository. Sync never
+# manages, conflict-checks or deletes them - a path whose content is
+# legitimately per-repository (task/gate declarations are repository
+# property) can never equal a generic render, so keeping it managed
+# made every sync fail closed on a structural conflict.
+set(QIVEN_SEED_ONLY_FILES
+    .qiven/operator.json
 )
 # WR-6 (2026-09-28, v44): tools/qiven_operator.py is REMOVED from the
 # managed set - generated repositories launch through the workspace

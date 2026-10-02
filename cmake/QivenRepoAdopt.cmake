@@ -82,6 +82,9 @@ if(NOT porcelain STREQUAL "")
 endif()
 set(template "${DEVKIT_ROOT}/templates/cpp-library")
 include("${template}/managed-files.cmake")
+if(NOT DEFINED QIVEN_SEED_ONLY_FILES)
+    set(QIVEN_SEED_ONLY_FILES "")
+endif()
 string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef nonce)
 set(stage "${repository}.qiven-adopt-${nonce}")
 cmake_path(IS_PREFIX repository "${stage}" stage_inside_repository NORMALIZE)
@@ -101,6 +104,13 @@ endif()
 file(MAKE_DIRECTORY "${stage}")
 
 foreach(relative IN LISTS QIVEN_MANAGED_FILES)
+    qiven_validate_managed_path("${relative}")
+    qiven_render("${template}/managed/${relative}.in" "${stage}/${relative}")
+endforeach()
+# Seed-only files (v61): rendered for seeding only; the repository's
+# existing bytes, if any, are KEPT - they are repository property and
+# are never adoption-conflict-checked.
+foreach(relative IN LISTS QIVEN_SEED_ONLY_FILES)
     qiven_validate_managed_path("${relative}")
     qiven_render("${template}/managed/${relative}.in" "${stage}/${relative}")
 endforeach()
@@ -163,6 +173,26 @@ if(conflict_paths)
         "MODE apply")
 endif()
 
+# Seed-only disposition (v61): these paths are repository property -
+# existing bytes are KEPT verbatim, a missing file is seeded, and they
+# are never adoption-conflict-checked. A non-regular path is invalid in
+# BOTH modes (input validity, not a plan decision).
+foreach(relative IN LISTS QIVEN_SEED_ONLY_FILES)
+    if(EXISTS "${repository}/${relative}")
+        message(STATUS "SEED-ONLY kept (repository-owned, never managed): ${relative}")
+    elseif(IS_DIRECTORY "${repository}/${relative}" OR IS_SYMLINK "${repository}/${relative}")
+        file(REMOVE_RECURSE "${stage}")
+        message(FATAL_ERROR "Seed-only path is a directory or symlink: ${relative}\n"
+            "  rule: qivenrepo/adopt/seed-path-not-a-file (a seed-only file must "
+            "land as a regular file)\n"
+            "  evidence: ${repository}/${relative}\n"
+            "  NEXT: FIX - resolve the non-regular path to a regular file (or "
+            "remove it so adoption seeds one), then re-run")
+    else()
+        message(STATUS "SEED-ONLY will seed: ${relative}")
+    endif()
+endforeach()
+
 if(MODE STREQUAL "check")
     file(REMOVE_RECURSE "${stage}")
     message(STATUS "Adoption check passed; target repository was not changed")
@@ -174,6 +204,14 @@ foreach(relative IN LISTS missing_paths)
     file(MAKE_DIRECTORY "${parent}")
     execute_process(COMMAND "${CMAKE_COMMAND}" -E copy "${stage}/${relative}" "${repository}/${relative}"
         COMMAND_ERROR_IS_FATAL ANY)
+endforeach()
+foreach(relative IN LISTS QIVEN_SEED_ONLY_FILES)
+    if(NOT EXISTS "${repository}/${relative}")
+        get_filename_component(parent "${repository}/${relative}" DIRECTORY)
+        file(MAKE_DIRECTORY "${parent}")
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E copy "${stage}/${relative}" "${repository}/${relative}"
+            COMMAND_ERROR_IS_FATAL ANY)
+    endif()
 endforeach()
 file(MAKE_DIRECTORY "${repository}/.qiven")
 execute_process(COMMAND "${CMAKE_COMMAND}" -E copy "${stage}/.qiven/repo.json" "${repository}/.qiven/repo.json"
