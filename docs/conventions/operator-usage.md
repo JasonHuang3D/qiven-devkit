@@ -66,8 +66,9 @@ with no `ci` section lists `0 ci profile(s)` / an empty array).
 
 `qiven records` — the read-back surface for the operator's Common Records
 (`.generated-temp/operator/records/`, `common-record-v1`; written by
-every gate/run/ci/exec invocation). Until B6 these were write-only: no
-stdout carrier named them.
+every gate/run/ci/exec invocation). Canonical law carrier: qiven-context
+`collaboration/generated-temp-convention.md` (ADR-0040/0042). Until B6
+these were write-only: no stdout carrier named them.
 
 ```text
 qiven records                list newest-first (name, kind, verdict, next)
@@ -160,8 +161,12 @@ absent it defaults to the invoking repository's current HEAD, resolved and
 recorded (ci-dispatch record `selected_revision` + materialized
 invocation). A malformed candidate (not exactly 40 hex chars) or an
 unresolvable HEAD is a typed local refusal (four-element carrier, exit 2)
-— nothing is dispatched. `--workspace-ref` passes through to the optional
-workflow input when given and is omitted entirely when absent.
+— nothing is dispatched. Law home: qiven-context ADR-0060 (P0 producer
+program); the owner-verbatim four-element statement is recorded in
+qiven-context OBL-20261001T234500Z-B9C0D1 and
+runtime/p0-producer-inventory.yaml. `--workspace-ref` passes through to
+the optional workflow input when given and is omitted entirely when
+absent.
 
 `qiven ci watch PROFILE [--timeout MINUTES] [--receipt]` (2026-09-26,
 OBL-F1A2B3 owner design) observes an ALREADY-DISPATCHED run to its

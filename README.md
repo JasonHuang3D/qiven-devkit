@@ -43,14 +43,8 @@ The default local gate (works in this repository and in any generated one):
 tools\qiven.cmd gate --expect-head <full 40-char sha>
 ```
 
-Global flags go before the command: `--json` (machine-readable),
-`--no-color` (stable layout, no ANSI). CI dispatch is asynchronous —
-`tools\qiven.cmd ci start full` validates the local Git context,
-requires the named `origin` branch at the exact local HEAD, dispatches
-through `gh`, returns immediately.
-
-Usage law — command surface, routing, custody, exit codes, `ci watch`
-observation — has a single home:
+Usage law — command surface, global flags, CI dispatch, routing,
+custody, exit codes, `ci watch` observation — has a single home:
 [`docs/conventions/operator-usage.md`](docs/conventions/operator-usage.md).
 Ownership/distribution states:
 [`docs/operator-contract.md`](docs/operator-contract.md) (Phase-1 design

@@ -5,6 +5,11 @@ register only: every row names the test that proves it at the heads of
 this batch (qiven-devkit + qiven-context, branch
 `jason-extended-cognition/v57-p0-e`). No advocacy.
 
+Law pointer: the `.generated-temp/` generated-artifact-location law's
+canonical home is qiven-context `collaboration/generated-temp-convention.md`
+(ADR-0040/0042); restatements in this checklist are operational
+conveniences.
+
 ## 1. D15 fixture-class coverage matrix
 
 ADR-0060 D15 names the required P0 fixture classes; this batch (E)
