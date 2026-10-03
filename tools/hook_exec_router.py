@@ -439,7 +439,7 @@ _DENY_SWEEP_SCOPED_TEMPLATE = (
 # reframed by OBL-D5E6F7: operational session end kills nothing, so an
 # unbounded background sweep can outlive the session - the ghost class).
 _DENY_SWEEP_TEMPLATE = (
-    f"{_HOOK_TAG} 别慌张：照下面的指令做即可，不要绕路（不要改用 run_in_background，不要缩小扫描来绕过）。\n"
+    f"{_HOOK_TAG} Stay calm: follow the instruction below; do not detour (do not use run_in_background or narrow the scan to bypass it).\n"
     f"{_HOOK_TAG} unbounded filesystem tree sweep (no explicit in-repo path, escapes the workspace\n"
     "root, or names a heavy tree like .venv/node_modules/third-party): this class runs under\n"
     "the Qiven Operator lease - custody must not depend on this session's lifetime (ghost-\n"
@@ -451,7 +451,7 @@ _DENY_SWEEP_TEMPLATE = (
     "files only), which pass this hook raw (v4.3)."
 )
 _DENY_INTERACTIVE = (
-    f"{_HOOK_TAG} 别慌张：这不是要修复的失败——照指令换非交互形式即可，不要绕路。\n"
+    f"{_HOOK_TAG} Stay calm: this is not a repair failure; use the non-interactive form below and do not detour.\n"
     f"{_HOOK_TAG} interactive command invoked raw: it suspends the shell awaiting a human\n"
     "and hangs the tool call (2026-09-19 modal incident class). Use the non-interactive\n"
     "form instead (git add <paths> / git commit -m <msg>; native Write/Edit tools for file\n"
@@ -461,8 +461,8 @@ _DENY_INTERACTIVE = (
 _DENY_HEREDOC = (
     f"{_HOOK_TAG} heredoc authoring DENIED (contract: collaboration/operating-contract.md\n"
     "File-authoring tool discipline; MEM-20260921T203500Z-D2A7F4; MEM-20260923T183000Z-A1B2C3).\n"
-    "严厉禁止使用 heredoc：文件创作必须使用原生 Read/Write/Edit 工具；请勿尝试绕路。\n"
-    "(A genuine bit-shift expression can match this pattern — rewrite it, e.g. compute via python.)"
+    "Heredoc authoring is strictly forbidden: use native Read/Write/Edit tools for file creation; do not detour.\n"
+    "(A genuine bit-shift expression can match this pattern - rewrite it, e.g. compute via python.)"
 )
 # Same law, same one-step teaching shape, extended authoring channel:
 # the inline -c/-e/-Command string body. Compute stays inline - only
@@ -471,8 +471,8 @@ _DENY_HEREDOC = (
 _DENY_INLINE_AUTHORING = (
     f"{_HOOK_TAG} inline-script authoring DENIED (contract: collaboration/operating-contract.md\n"
     "File-authoring tool discipline; MEM-20260921T203500Z-D2A7F4; MEM-20260923T183000Z-A1B2C3).\n"
-    "严厉禁止使用内联脚本（python -c / node -e / powershell -Command）写文件：文件创作必须使用原生\n"
-    "Read/Write/Edit 工具；请勿尝试绕路。\n"
+    "Inline script authoring (python -c / node -e / powershell -Command) is strictly forbidden for file writes: use native\n"
+    "Read/Write/Edit tools for file creation; do not detour.\n"
     "(Compute may stay inline: write statements targeting .generated-temp/ derived artifacts pass\n"
     "raw, and stdout/stderr stream writes are not file authoring.)"
 )

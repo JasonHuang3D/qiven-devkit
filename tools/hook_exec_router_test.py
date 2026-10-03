@@ -541,9 +541,24 @@ def main() -> int:
     # instruction body — guidance first, then the actionable instruction.
     for template, label in ((router._DENY_INTERACTIVE, "interactive"),
                             (router._DENY_SWEEP_TEMPLATE, "sweep-unbounded")):
-        if not template.startswith("[qiven-hook] 别慌张"):
+        if not template.startswith("[qiven-hook] Stay calm:"):
             failures += 1
             print(f"[FAIL] guidance guard line not first in {label} denial template")
+
+    fixed_templates = (
+        router._DENY_BG_TEMPLATE,
+        router._DENY_BG_GUARD_LINE,
+        router._DENY_BG_GUARD_TEMPLATE,
+        router._DENY_SWEEP_SCOPED_TEMPLATE,
+        router._DENY_SWEEP_TEMPLATE,
+        router._DENY_INTERACTIVE,
+        router._DENY_HEREDOC,
+        router._DENY_INLINE_AUTHORING,
+        router._DENY_GIT_NETWORK_TEMPLATE,
+    )
+    if any(any(ord(char) > 127 for char in template) for template in fixed_templates):
+        failures += 1
+        print("[FAIL] fixed router control templates must be ASCII")
 
     # suspension sentinel: at the shipped default (suspended), a raw git
     # network command passes end-to-end. If this fails after flipping the

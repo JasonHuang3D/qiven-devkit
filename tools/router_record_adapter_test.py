@@ -85,7 +85,7 @@ def main() -> int:
         assert any(token in instruction for token in teaching_tokens), (
             f"RA: instruction body lost for {command!r}: {instruction[:120]!r}"
         )
-        assert "别慌张" not in instruction, "RA: guard framing must not pose as instruction"
+        assert "Stay calm:" not in instruction, "RA: guard framing must not pose as instruction"
         # evidence excerpt is the carrier itself, complete
         assert record["evidence"][0]["excerpt"] == message, "RA: excerpt fidelity"
         assert record["evidence"][0]["completeness"] == "complete", "RA: completeness"

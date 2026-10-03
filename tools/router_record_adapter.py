@@ -10,12 +10,13 @@ next call; the adapter derives from it, it never rewrites it).
 
 CARRIER LAW (ADR-0051 / ADR-0060 D7, normative): the denial output bytes
 of tools/hook_exec_router.py are the named legacy profile
-router-denial-legacy-v1 and stay BYTE-STABLE until an explicit
-public-carrier amendment. This module therefore imports NOTHING from the
-router and is wired NOWHERE by default - the adapter is a derivable,
-tested view (``denial_to_record(command, denial_text)``), not a routing
-stage. Byte-stability is proven by router_record_adapter_test.py against
-the actual verdict() outputs with this module imported.
+router-denial-legacy-v1. The owner-approved public-carrier amendment makes
+the fixed control text ASCII; those current bytes stay BYTE-STABLE until a
+future explicit amendment. This module therefore imports NOTHING from the
+router and is wired NOWHERE by default - the adapter is a derivable, tested
+view (``denial_to_record(command, denial_text)``), not a routing stage.
+Byte-stability is proven by router_record_adapter_test.py against the actual
+verdict() outputs with this module imported.
 """
 
 from __future__ import annotations
@@ -36,8 +37,8 @@ ROUTER_PROFILE = "router-denial-legacy-v1"
 SUPPORTED_BY_MAX_BYTES = 1200
 
 #: Lines that are panic-guard framing, not the instruction itself (the
-#' 别慌张' guard line precedes the teaching by design).
-_GUARD_MARKERS = ("别慌张",)
+#' Stay calm' guard line precedes the teaching by design).
+_GUARD_MARKERS = ("Stay calm:",)
 
 
 def _operation_id() -> str:

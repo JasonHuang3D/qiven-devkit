@@ -310,7 +310,9 @@ def main() -> int:
         first_guidance = next(i for i, l in enumerate(lines) if l.startswith("[qiven]"))
         check(first_guidance < first_fail, "G1b.guidance-before-fail",
               f"guidance@{first_guidance} fail@{first_fail}")
-        check(sum(1 for l in lines if "别慌张" in l) == 1, "G1b.guidance-once")
+        check(sum(1 for l in lines if "Stay calm:" in l) == 1, "G1b.guidance-once")
+        check(all(ord(char) < 128 for line in lines if line.startswith("[qiven]")
+                  for char in line), "G1b.guidance-ascii")
         check(any(": exit " in l for l in lines[first_fail:first_fail + 2]),
               "G1b.detail-verbatim")
 
@@ -509,6 +511,8 @@ def main() -> int:
         check("log_file" in wide, "R1.byte-budget-not-char-count")
         check(wide["results"][0]["output_bytes_total"] == 9000, "R1.wide-total-bytes")
         check("中" in wide["results"][0]["output"], "R1.wide-codepoints-intact")
+        check("中" in Path(wide["log_file"]).read_text(encoding="utf-8"),
+              "R1.spill-file-keeps-utf8")
         # mid-band near-miss: an output wider than the 1024-byte excerpt
         # budget but fully covered by head+tail keeps its FULL text inline
         # (an attractive wrong fix truncates at the head budget; the
@@ -877,6 +881,16 @@ def main() -> int:
         big_path = ev_dir / "big.log"
         big_bytes = bytes(range(256)) * 400  # 102400 bytes, incl. invalid UTF-8
         big_path.write_bytes(big_bytes)
+
+        unicode_path = ev_dir / "unicode.log"
+        unicode_text = "证据内容\n"
+        unicode_path.write_text(unicode_text, encoding="utf-8", newline="\n")
+        unicode_json = qiven_cli("evidence-read", str(unicode_path),
+                                 "--count", str(len(unicode_text.encode("utf-8"))))
+        check(all(ord(char) < 128 for char in unicode_json.stdout),
+              "EVR.json-stdout-ascii", unicode_json.stdout)
+        check(json.loads(unicode_json.stdout)["content"] == unicode_text,
+              "EVR.json-unicode-roundtrip", unicode_json.stdout)
 
         evr = json.loads(qiven_cli("evidence-read", "evr/big.log",
                                    "--offset", "10", "--count", "50").stdout)

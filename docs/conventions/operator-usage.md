@@ -403,9 +403,10 @@ contract; it fails open on unparseable input and cannot catch indirection
 
 Router denial carriers are the named legacy profile
 `router-denial-legacy-v1` (P0 register rows; declared in
-`tools/router_record_adapter.py` `ROUTER_PROFILE`): byte-stable
-denial text by law ADR-0051 via ADR-0060 D7 until an explicit
-public-carrier amendment — do not restyle denial lines ad hoc.
+`tools/router_record_adapter.py` `ROUTER_PROFILE`). The owner-approved
+public-carrier amendment makes the fixed control text ASCII; the current
+denial bytes remain stable by ADR-0051 via ADR-0060 D7. Do not restyle
+denial lines ad hoc.
 
 Registration location (DG-4, B6): the hook is wired in the harness's
 MACHINE-LOCAL, untracked config `D:\JasonWork\.zcode\config.json` (the

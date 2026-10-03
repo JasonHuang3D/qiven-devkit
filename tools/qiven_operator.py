@@ -153,22 +153,22 @@ class OperatorError(RuntimeError):
 
 _FAILURE_GUIDANCE = {
     "task": (
-        "[qiven] 别慌张：这不是你第一次遇到这类失败，先分类，不要立即动手改或绕路。\n"
+        "[qiven] Stay calm: classify this failure first; do not edit or detour.\n"
         "[qiven] Do NOT: weaken the gate, comment out a test, lower warnings, or re-run\n"
-        "[qiven]       blind (testing-standard §11 - the gate is the acceptance proof).\n"
+        "[qiven]       blind (testing-standard section 11 - the gate is the acceptance proof).\n"
         "[qiven] FIRST: read the failing task's output BELOW and NAME the failure class;\n"
         "[qiven]       a timeout is a classification event, never a verdict.\n"
         "[qiven] Procedure + profiles: docs/engineering/execution-protocol.md."
     ),
     "exact-head": (
-        "[qiven] 别慌张：exact-head 是字符串精确比对，不是模糊匹配。\n"
+        "[qiven] Stay calm: exact-head is a string comparison, not fuzzy matching.\n"
         "[qiven] The gate pins the EXACT head: pass the FULL 40-char sha (an abbreviated\n"
         "[qiven]       sha fails the compare even when it names the same commit).\n"
         "[qiven] If HEAD moved since the invocation: commit/stash first, then re-run at\n"
         "[qiven]       the new full sha. Do NOT bypass or re-point the check."
     ),
     "exec": (
-        "[qiven] 别慌张：exec 的失败/退出码都有既定处置，不要换路径绕行。\n"
+        "[qiven] Stay calm: exec failures and exit codes have defined handling; do not detour.\n"
         "[qiven] Exit codes: child code observed / 124 still-running OR indeterminate\n"
         "[qiven]       (key on the payload status field, not the code alone) /\n"
         "[qiven]       1 expired (business code unknown, never guessed) / 2 operator error.\n"
@@ -2749,7 +2749,9 @@ def _common_flags() -> argparse.ArgumentParser:
 
 
 def _print_json(payload: dict[str, Any]) -> None:
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    # Machine-readable stdout must survive Windows consoles/code pages; JSON
+    # escapes preserve the Unicode value while keeping the transport ASCII.
+    print(json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
 
 
 LOG_SPILL_THRESHOLD = 4096
