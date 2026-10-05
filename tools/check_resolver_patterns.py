@@ -233,7 +233,7 @@ def scan_repo(repo: Path, repo_name: str, findings: list[str]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="WR-8 forbidden resolver-pattern gate")
+    parser = argparse.ArgumentParser(description="routine-advance forbidden resolver-pattern gate")
     parser.add_argument("--workspace-root", default=str(Path(__file__).resolve().parent.parent.parent))
     parser.add_argument("--repo", action="append",
                         help="scan a single repository root instead of the workspace siblings")

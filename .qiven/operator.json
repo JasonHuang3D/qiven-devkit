@@ -196,7 +196,6 @@
       "workspace-schemas-tests",
       "workspace-resolver-tests",
       "workspace-bootstrap-tests",
-      "workspace-shadow-tests",
       "workspace-profile-b-tests",
       "resolver-patterns",
       "resolver-patterns-tests",

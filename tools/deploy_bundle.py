@@ -91,7 +91,7 @@ def _locked_singleton_commit() -> str:
         raise SystemExit(
             f"workspace lock unreadable at {lock_path}: {exc} (WHY: the "
             "deploy bundle must identity-check the third-party singleton "
-            "against the locked node - WR-5; a lock that cannot be read "
+            "against the locked node - resolver adapter-generation; a lock that cannot be read "
             "fails closed) - NEXT action: DIAGNOSE - read the lock file at "
             "the path above; if it is missing/corrupt, re-run "
             "workspace_resolver.py lock-update to rebuild it, then re-run "
@@ -103,7 +103,7 @@ def _locked_singleton_commit() -> str:
         raise SystemExit(
             "workspace lock has no qiven-third-party-win node commit "
             "(WHY: the deploy bundle must identity-check the third-party "
-            "singleton against the locked node - WR-5) - NEXT action: "
+            "singleton against the locked node - resolver adapter-generation) - NEXT action: "
             "RECONCILE - a lock-update transaction "
             "(workspace_resolver.py lock-update --move "
             "qiven-third-party-win=<checkout>) is the lock's only writer; "
@@ -322,7 +322,7 @@ def deploy(repo_arg: str, profile_override: str | None) -> int:
             if not bootstrap.is_file():
                 return fail(
                     f"workspace bootstrap not found at {bootstrap}; the deploy "
-                    "build requires the WR-5 resolution path (no bare configure)",
+                    "build requires the resolver adapter-generation resolution path (no bare configure)",
                     "FIX - point QIVEN_WORKSPACE_CONTROL at the control"
                     " checkout carrying bootstrap/qiven-bootstrap.py")
             configure = run(
@@ -336,7 +336,7 @@ def deploy(repo_arg: str, profile_override: str | None) -> int:
                 return fail(
                     f"configure failed: {configure.stderr[-800:]}",
                     "DIAGNOSE - classify the bootstrap gate-configure failure"
-                    " above (WR-5: configure rides the workspace resolution"
+                    " above (resolver adapter-generation: configure rides the workspace resolution"
                     " path; a bare `cmake --preset` is not an alternative)")
             built = run(
                 ["cmake", "--build", str(repo / build["binary_dir"]), "--config", build["config"]], repo
