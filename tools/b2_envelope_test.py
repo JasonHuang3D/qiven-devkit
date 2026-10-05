@@ -173,6 +173,10 @@ def resolver_legs(temp: Path) -> None:
           json.dumps(transaction["next_action"]))
     check("--apply" in transaction["next_action"]["supported_by"], "b2-6.apply-named",
           json.dumps(transaction["next_action"]))
+    # publish-first precondition (AD6): the shadow form gates the commit on
+    # the moved revisions' publications being accepted first
+    check("publications are accepted" in transaction["next_action"]["supported_by"],
+          "b2-6.shadow-publish-first", json.dumps(transaction["next_action"]))
     # the APPLIED form names the commit step (temp fixture control only)
     apply_control = temp / "apply-control"
     shutil.copytree(control, apply_control)
@@ -183,6 +187,9 @@ def resolver_legs(temp: Path) -> None:
     check(applied["next_action"]["action"] == "NEXT", "b2-6.applied-next", done.stdout)
     check("commit the control repository" in applied["next_action"]["supported_by"],
           "b2-6.commit-law", done.stdout)
+    # publish-first precondition (AD6): the applied form carries it too
+    check("publications are accepted" in applied["next_action"]["supported_by"],
+          "b2-6.applied-publish-first", done.stdout)
     check("applied_to" in applied, "b2-6.applied-to", done.stdout)
 
     # b2-7: candidate failures FIX, validated NONE

@@ -1394,7 +1394,8 @@ def lock_update(control: Path, moves: dict[str, Path], mode: str,
         "supported_by": (
             "write the emitted lock + declaration cache into the control "
             "tree (re-run with --apply), then commit the control repository "
-            "as one auditable transaction"
+            "as one auditable transaction - only after the moved revisions' "
+            "publications are accepted (pushed/published)"
         ),
     }
     receipt["graph_receipt_digest"] = content_digest(
@@ -1598,9 +1599,11 @@ def main(argv: list[str] | None = None) -> int:
                 receipt["next_action"] = {
                     "action": "NEXT",
                     "supported_by": (
-                        "commit the control repository now - the lock + "
-                        "declaration cache are written as one uncommitted "
-                        "transaction at " + str(control)
+                        "commit the control repository only after the moved "
+                        "revisions' publications are accepted (pushed/"
+                        "published) - the lock + declaration cache are "
+                        "written as one uncommitted transaction at "
+                        + str(control)
                     ),
                 }
                 receipt["graph_receipt_digest"] = content_digest(

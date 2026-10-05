@@ -466,6 +466,11 @@ def main() -> int:
         receipt_19 = wr.lock_update(control_19, {"fixture-provider": provider_repo_19},
                                     "shadow", None)
         assert receipt_19["new_generation"] != receipt_19["base_generation"], "R19: generation moved"
+        # publish-first precondition (AD6): the receipt gates the commit on
+        # the moved revisions' publications being accepted first
+        assert "publications are accepted" in receipt_19["next_action"]["supported_by"], (
+            "R19: publish-first precondition absent from the next_action"
+        )
         assert receipt_19["changed_nodes"][0]["declaration_origin"] == "repository-manifest", "R19: origin"
         node_19 = receipt_19["new_lock"]["nodes"]["fixture-provider"]
         assert node_19["declaration"]["origin"] == "repository-manifest", "R19: lock node origin"

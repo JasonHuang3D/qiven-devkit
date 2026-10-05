@@ -25,7 +25,9 @@ Pins the B6 discovery claims:
   B6-5  deploy_bundle.py: verify OK line byte-stable, per-file FAIL
         bytes stable + final NEXT carrier; typed deploy preconditions
         (no receipt / dirty tree / not a repo) carry NEXT actions
-        (rows devkit-tool-deploy-bundle-deploy/verify).
+        (rows devkit-tool-deploy-bundle-deploy/verify); P3-20: the
+        per-file missing/digest FAILs and the deploy() SystemExit
+        relay carry the FIX token (single recovery channel kept).
   B6-6  doc anchors (devkit-local): operator-usage.md carries the
         workspace-mechanism section (lock-update exact invocation, v58
         friction named), the DG-4 router-registration note, the SG-5
@@ -305,6 +307,20 @@ def b6_5_deploy(base: pathlib.Path) -> None:
           "B6-5.per-file-bytes-stable", bad.stdout)
     check("- NEXT action: re-run the deploy" in bad.stdout,
           "B6-5.verify-next", bad.stdout)
+    # P3-20: the per-file digest-mismatch FAIL carries the FIX token on the
+    # same selector-friendly line (byte-stable prefix + typed suffix)
+    check(any(line.startswith("[FAIL] digest mismatch app.exe")
+              and "NEXT action: FIX -" in line
+              for line in bad.stdout.splitlines()),
+          "B6-5.digest-mismatch-fix-token", bad.stdout)
+    # P3-20: the per-file missing-artifact FAIL carries the FIX token too
+    (bundle / "app.exe").write_bytes(b"binary-bytes")
+    (bundle / "docs" / "README.md").unlink()
+    gone = run([sys.executable, DEPLOY, "--verify", str(bundle)], cwd=ROOT, expect=1)
+    check(any(line.startswith("[FAIL] missing docs/README.md")
+              and "NEXT action: FIX -" in line
+              for line in gone.stdout.splitlines()),
+          "B6-5.missing-file-fix-token", gone.stdout)
     empty = run([sys.executable, DEPLOY, "--verify", str(base / "empty")],
                 cwd=ROOT, expect=1)
     check("no manifest.json" in empty.stdout and "NEXT action: FIX" in empty.stdout,
@@ -343,6 +359,68 @@ def b6_5_deploy(base: pathlib.Path) -> None:
     check("working tree not clean; deploy refuses" in dirty.stderr
           and "NEXT action: FIX - commit or stash" in dirty.stderr,
           "B6-5.dirty-next", dirty.stderr)
+
+    # P3-20 (relay site): the deploy() SystemExit relay guarantees the FIX
+    # token when the raised message carries none, and keeps an embedded
+    # NEXT action verbatim as the single recovery channel (never a second)
+    import contextlib
+    import io
+
+    import deploy_bundle as deploy_module
+
+    relay_repo = base / "relayrepo"
+    (relay_repo / ".qiven").mkdir(parents=True)
+    (relay_repo / ".qiven" / "deploy.json").write_text(
+        json.dumps({"schema": "qiven-deploy-policy-v1", "product": "b6",
+                    "version": "1.0", "products": [], "build": {},
+                    "skip_build": True,
+                    "docs": {"readme_template": "README.md"}, "licenses": {}}),
+        encoding="utf-8",
+    )
+    (relay_repo / "README.md").write_text("r", encoding="utf-8")
+    (relay_repo / ".gitignore").write_text(".generated-temp/\n", encoding="utf-8")
+    git(relay_repo, "init", "-b", "main")
+    git(relay_repo, "config", "user.name", "B6Discovery")
+    git(relay_repo, "config", "user.email", "b6@example.invalid")
+    git(relay_repo, "add", "--all")
+    git(relay_repo, "commit", "-m", "baseline")
+    relay_head = git(relay_repo, "rev-parse", "HEAD").stdout.strip()
+    relay_receipt = (relay_repo / ".generated-temp" / "operator" / "receipts"
+                     / f"local-{relay_head}.json")
+    relay_receipt.parent.mkdir(parents=True)
+    relay_receipt.write_text("{}", encoding="utf-8")
+    saved_assemble = deploy_module.assemble
+    saved_deploy_root = os.environ.get("QIVEN_DEPLOY_ROOT")
+    os.environ["QIVEN_DEPLOY_ROOT"] = str(base / "relayroot")
+
+    def _relay_deploy(message: str) -> str:
+        def _raise(*_args):
+            raise SystemExit(message)
+        deploy_module.assemble = _raise
+        captured = io.StringIO()
+        with contextlib.redirect_stderr(captured):
+            deploy_module.deploy(str(relay_repo), None)
+        return captured.getvalue()
+
+    try:
+        relay_bare = _relay_deploy("synthetic bare precondition")
+        check("[FAIL][deploy] synthetic bare precondition" in relay_bare,
+              "B6-5.relay-bare-relayed", relay_bare)
+        check("- NEXT action: FIX -" in relay_bare, "B6-5.relay-bare-fix-token",
+              relay_bare)
+
+        relay_embedded = _relay_deploy(
+            "embedded failure - NEXT action: DIAGNOSE - classify first")
+        check("- NEXT action: DIAGNOSE - classify first" in relay_embedded,
+              "B6-5.relay-embedded-verbatim", relay_embedded)
+        check(relay_embedded.count("NEXT action:") == 1,
+              "B6-5.relay-single-channel", relay_embedded)
+    finally:
+        deploy_module.assemble = saved_assemble
+        if saved_deploy_root is None:
+            os.environ.pop("QIVEN_DEPLOY_ROOT", None)
+        else:
+            os.environ["QIVEN_DEPLOY_ROOT"] = saved_deploy_root
 
 
 def b6_6_doc_anchors() -> None:

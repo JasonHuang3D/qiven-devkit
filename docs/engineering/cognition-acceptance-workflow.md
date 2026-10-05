@@ -54,4 +54,9 @@ publication checks; the sealed fixture harness/scoring workflow.
 This draft sits ABOVE the design-first workflow (design-first-workflow.md)
 and the H1 kit standard (h1-kit.md): it does not replace them; CA-2 wires
 the activation receipt into their gates. The execution protocol (branch/
-batch/commit discipline) is unchanged.
+batch/commit discipline) is unchanged. The publication-review chain is
+canonical in the qiven-context base contract
+`collaboration/base-local-agent-workflow.md` (ADR-0062 d4: complete review
+by a clean-context review worker at the committed head, exact-head gate,
+pre-publication receipt); steps 4-5 above compose with that chain and
+replace none of it.

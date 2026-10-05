@@ -1198,6 +1198,51 @@ def main() -> int:
               and er2_doc["domain_outcome"]["exit_code"] == 0,
               "ER2.done-shape", str(er2_doc["domain_outcome"]))
 
+        # (n) ADR-0062 d5: the exec-start invocation-precondition failure
+        # (empty command after '--') carries the canonical FIX recovery
+        # channel on BOTH surfaces with exit code 2 unchanged. Channel
+        # PRESENCE is asserted first - the audit finding's law: an
+        # in-vocabulary-value check alone does not detect absent channels.
+        def _channel_conformant(payload: dict) -> bool:
+            channel = payload.get("next_action")
+            if not isinstance(channel, dict):
+                return False  # absent channel is non-conformant
+            return channel.get("action") in cr.NEXT_ACTIONS
+
+        empty_json = run(
+            [sys.executable, OPERATOR, "--json", "exec", "start", "--"],
+            cwd=repo,
+            expect=2,
+        )
+        empty_payload = json.loads(empty_json.stdout)
+        check(empty_payload["status"] == "error", "G2n.error-status", empty_json.stdout)
+        check("requires a command" in empty_payload["error"], "G2n.what", empty_json.stdout)
+        check("next_action" in empty_payload, "G2n.channel-present", empty_json.stdout)
+        check(_channel_conformant(empty_payload), "G2n.channel-conformant",
+              empty_json.stdout)
+        check(empty_payload["next_action"]["action"] == "FIX", "G2n.fix-class",
+              empty_json.stdout)
+        check("'--'" in empty_payload["next_action"]["supported_by"],
+              "G2n.supported-by-names-correction", empty_json.stdout)
+
+        # negative presence check: the conformance predicate rejects a
+        # channelless failure payload (a vocabulary check alone would pass)
+        check(not _channel_conformant({"status": "error", "error": "channelless"}),
+              "G2n.negative-absent-channel-detected",
+              "presence-blind vocabulary validation passes a channelless payload")
+
+        empty_human = run(
+            [sys.executable, OPERATOR, "--no-color", "exec", "start", "--"],
+            cwd=repo,
+            expect=2,
+        )
+        check("[FAIL]" in empty_human.stdout and "requires a command" in empty_human.stdout,
+              "G2n.human-what", empty_human.stdout)
+        check("NEXT action: FIX -" in empty_human.stdout, "G2n.human-next-line",
+              empty_human.stdout)
+        check("'--'" in empty_human.stdout, "G2n.human-correction-named",
+              empty_human.stdout)
+
         # -------- G3: custody laws (the incident regression classes) ------
 
         # C1 node-reuse leak: primary exits, lingering grandchild must die
