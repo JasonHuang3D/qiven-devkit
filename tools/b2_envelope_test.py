@@ -563,7 +563,9 @@ def recovery_legs() -> None:
     # construction fails, the typed envelope STILL carries a minimal
     # VALID recovery record (the failure class's rule_id + a DIAGNOSE
     # next_action), never degrading to the recordless legacy shape.
-    # In-process patch of the real bootstrap (B19's pattern): the
+    # In-process patch of the real bootstrap (the workspace-local
+    # RecoveryEnvelopeTests pattern, same window - the b2 legs here are
+    # subprocess-driven and cannot monkeypatch the constructor): the
     # record constructor is monkeypatched to raise; both routings are
     # exercised and the fallback record is validated against the
     # FROZEN v1 validator.
@@ -636,11 +638,11 @@ def main() -> int:
         temp = Path(temp_name)
         resolver_legs(temp)
     if BOOTSTRAP is None or not WORKSPACE_CMD.is_file():
-        print("[SKIP] b2-11..16: real qiven-workspace not found "
+        print("[SKIP] b2-11..20: real qiven-workspace not found "
               "(QIVEN_WORKSPACE_BOOTSTRAP unset, no sibling qiven-workspace)")
-        print("[SKIP] b2-11..16: evidence: sibling probe "
+        print("[SKIP] b2-11..20: evidence: sibling probe "
               f"{WORKSPACE_CMD} and env probe both came up empty; resolver legs ran")
-        print("[SKIP] b2-11..16: NEXT: NEXT - run inside the qiven workspace for the "
+        print("[SKIP] b2-11..20: NEXT: NEXT - run inside the qiven workspace for the "
               "cross-repo legs (no FIX applies: absence is environment, not a defect)")
     else:
         with tempfile.TemporaryDirectory(prefix="qiven-b2-envelope-gate-") as temp_name:
