@@ -993,7 +993,19 @@ def _exec_terminal_response(exec_id: str, current: dict[str, Any], console: Cons
 def _exec_start_frontend(argv: list[str], timeout_seconds: float, max_lifetime: float,
                          console: Console) -> tuple[dict[str, Any], int]:
     if not argv:
-        raise OperatorError("exec requires a command after --")
+        # ADR-0062 d5 channel law mirrored from main()'s exec-start check:
+        # unreachable via the CLI today (main rejects the empty command
+        # first), but a direct caller of the frontend must not bypass the
+        # canonical FIX recovery channel.
+        raise OperatorError(
+            "exec requires a command after --",
+            next_action=asdict(_cr.next_action_for(
+                "invocation-rejected",
+                "supply the command to run after the '--' separator"
+                " (qiven exec start -- <command> [args...]) and"
+                " re-invoke",
+            )),
+        )
     max_lifetime = _clamp_lifetime(max_lifetime)
     timeout_seconds = max(1.0, min(timeout_seconds, max_lifetime))
     exec_id = _new_exec_id()
@@ -2495,7 +2507,10 @@ def _ci_start(config: dict[str, Any], profile: str, console: Console,
                 f" - evidence: git rev-parse HEAD failed in {ROOT}: {exc}"
                 " - NEXT action: FIX - repair the checkout (attach/commit the"
                 " detached HEAD), or pass --candidate <full-40-hex-sha>"
-                " explicitly"
+                " explicitly",
+                # forward the structured recovery channel when the wrapped
+                # failure carried one (a re-raise must not drop it)
+                next_action=exc.next_action,
             ) from exc
         selected_candidate = _require_ci_candidate(profile, head_probe, "HEAD")
         candidate_origin = "head"

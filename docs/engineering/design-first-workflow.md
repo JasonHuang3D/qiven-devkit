@@ -130,8 +130,9 @@ never excepted.
 (2026-09-23) is the reference shape for a program-level design: basis,
 ground rules, topology+migration, per-subsystem design with failure
 modes, test spine, dependency slots, deferrals with triggers,
-compliance map, self-review record. Batch-level designs scale this
-down; they do not omit sections silently — they mark them N/A.
+compliance map, drafting-hygiene review record. Batch-level designs
+scale this down; they do not omit sections silently — they mark them
+N/A.
 
 ## Review record
 

@@ -395,7 +395,7 @@ def deploy(repo_arg: str, profile_override: str | None) -> int:
         # surface; a message that already states its own NEXT action keeps
         # it verbatim as the single recovery channel (never a second one).
         message = str(error)
-        if "NEXT action:" in message:
+        if "next action:" in message.casefold():
             return fail(message)
         return fail(
             message,
