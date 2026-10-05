@@ -3284,6 +3284,24 @@ def main(argv: list[str] | None = None) -> int:
                 "head": _head(),
             }
             _workspace_identity_fields(payload)
+            # WD3 (accepted PR15 workspace audit, honest-statement variant,
+            # ruled EXECUTE 2026-10-05): `qiven info` states exactly WHAT
+            # the workspace lock enforces and what it does NOT - as data,
+            # on the machine surface. The console line stays bounded
+            # (JSON-only statement; the README in qiven-workspace carries
+            # the human prose).
+            payload["workspace_lock_enforces"] = [
+                "devkit identity at operator import (shadow/authoritative mode boundary)",
+                "full-graph validation of all locked declarations and edges",
+                "configure admission (validated resolution adapter and matching provider revisions)",
+                "TCA closure selection (locked context identity consumed; WorkspaceGeneration as provenance)",
+            ]
+            payload["workspace_lock_does_not_enforce"] = [
+                "the invoking repository's own checkout state (node-vs-checkout comparison is the activation surface's informational carrier)",
+            ]
+            payload["workspace_lock_note"] = (
+                "informational: honest enforcement statement per the accepted PR15 workspace audit WD3 (adopted 2026-10-06)"
+            )
             if args.json:
                 _print_json(payload)
             else:
