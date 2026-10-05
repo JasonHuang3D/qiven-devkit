@@ -1,4 +1,4 @@
-set(QIVEN_TEMPLATE_VERSION "0.1.14")
+set(QIVEN_TEMPLATE_VERSION "0.1.15")
 set(QIVEN_FILE_CLASS managed)
 set(QIVEN_MANAGED_FILES
     .clang-format
