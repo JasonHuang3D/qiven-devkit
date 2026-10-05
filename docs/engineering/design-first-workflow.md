@@ -21,10 +21,10 @@ design document that (a) existed before implementation started, and
 implementation, with the implementation PR naming it.
 
 "Design existed before implementation" is proven by the document's
-review record: the design self-review is performed against the design
-ALONE, before any implementation code exists in the branch. Writing
-the design after the code and backdating is a process violation worse
-than having no design — it forfeits the document's entire purpose
+review record: the drafting-hygiene review is performed against the
+design ALONE, before any implementation code exists in the branch.
+Writing the design after the code and backdating is a process violation
+worse than having no design — it forfeits the document's entire purpose
 (finding design defects while they are still cheap).
 
 **Commit-ordering requirement for R2/R3 (v2, adjudicated 2026-09-26):**
@@ -67,8 +67,13 @@ code. Small batches may satisfy both in one document (a section each).
    observable failure signal and a falsifiable revisit trigger
    (constitution §15 — a deferral without these is wishful thinking,
    not engineering).
-9. **Review record**: the pre-publication self-review with its
-   findings and how each was folded in.
+9. **Review record**: the drafting-hygiene review with its findings and
+   how each was folded in (2026-10-05: renamed from "pre-publication
+   self-review" — the publication review is a separate canonical step,
+   not this authoring-session pass; it follows the qiven-context base
+   contract `collaboration/base-local-agent-workflow.md`, ADR-0062 d4:
+   complete review by a clean-context review worker at the committed
+   head, exact-head gate, pre-publication receipt).
 
 Documents that are diagrams-without-failure-modes or
 code-dumps-without-contracts do not qualify.
@@ -87,7 +92,7 @@ code-dumps-without-contracts do not qualify.
 ## 5. Review and publication
 
 1. The authoring session writes the design and performs the
-   self-review (§3.9) BEFORE implementation.
+   drafting-hygiene review (§3.9) BEFORE implementation.
 2. The design is published (PR/merge) before the implementation PR, or
    as the first commit of a batch PR whose remaining commits are the
    implementation — in both cases the PR body names the design
@@ -125,8 +130,9 @@ never excepted.
 (2026-09-23) is the reference shape for a program-level design: basis,
 ground rules, topology+migration, per-subsystem design with failure
 modes, test spine, dependency slots, deferrals with triggers,
-compliance map, self-review record. Batch-level designs scale this
-down; they do not omit sections silently — they mark them N/A.
+compliance map, drafting-hygiene review record. Batch-level designs
+scale this down; they do not omit sections silently — they mark them
+N/A.
 
 ## Review record
 

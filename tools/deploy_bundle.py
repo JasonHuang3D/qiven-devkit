@@ -391,7 +391,17 @@ def deploy(repo_arg: str, profile_override: str | None) -> int:
         log(f"files={len(files)} manifest_sha256={manifest_digest[:16]}...")
         return 0
     except SystemExit as error:
-        return fail(str(error))
+        # P3-20: the relay guarantees a vocabulary token on this FAIL
+        # surface; a message that already states its own NEXT action keeps
+        # it verbatim as the single recovery channel (never a second one).
+        message = str(error)
+        if "next action:" in message.casefold():
+            return fail(message)
+        return fail(
+            message,
+            "FIX - the deploy aborted at the precondition above; produce"
+            " or repair the artifact it names, then re-run the deploy",
+        )
     finally:
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
@@ -417,11 +427,24 @@ def verify(bundle_arg: str) -> int:
     for entry in manifest.get("files", []):
         target = bundle / entry["path"]
         if not target.is_file():
-            print(f"[FAIL] missing {entry['path']}")
+            # P3-20: the per-file FAIL keeps its byte-stable prefix and
+            # gains the vocabulary token (the file's four-element suffix
+            # idiom) - the correction is mechanically known
+            print(
+                f"[FAIL] missing {entry['path']}"
+                " - NEXT action: FIX - restore or produce the named"
+                " artifact, then re-verify (re-running the deploy for the"
+                " same head rebuilds a consistent bundle)"
+            )
             failures += 1
             continue
         if sha256_file(target) != entry["sha256"]:
-            print(f"[FAIL] digest mismatch {entry['path']}")
+            print(
+                f"[FAIL] digest mismatch {entry['path']}"
+                " - NEXT action: FIX - restore the file from the published"
+                " bundle, or re-run the deploy for the same head to rebuild"
+                " it, then re-verify"
+            )
             failures += 1
     if failures:
         return fail(

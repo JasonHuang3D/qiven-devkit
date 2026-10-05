@@ -133,7 +133,22 @@ class Console:
 
 
 class OperatorError(RuntimeError):
-    pass
+    """A typed operator failure.
+
+    ``next_action`` is the single canonical recovery channel for
+    invocation-precondition refusals (ADR-0062 d5: the one failure class
+    where the mechanism mechanically knows the correction): a Common
+    Record NextAction token (FIX + supported_by) carried BESIDE the
+    frozen error text - JSON payload field and human NEXT line share it,
+    no second advisory channel. Other failure classes leave it unset and
+    their published shape is unchanged (classification stays the
+    consumer's step; a guessed correction would violate the class law).
+    """
+
+    def __init__(self, message: str, *,
+                 next_action: dict[str, str] | None = None) -> None:
+        super().__init__(message)
+        self.next_action = next_action
 
 
 # ===========================================================================
@@ -978,7 +993,19 @@ def _exec_terminal_response(exec_id: str, current: dict[str, Any], console: Cons
 def _exec_start_frontend(argv: list[str], timeout_seconds: float, max_lifetime: float,
                          console: Console) -> tuple[dict[str, Any], int]:
     if not argv:
-        raise OperatorError("exec requires a command after --")
+        # ADR-0062 d5 channel law mirrored from main()'s exec-start check:
+        # unreachable via the CLI today (main rejects the empty command
+        # first), but a direct caller of the frontend must not bypass the
+        # canonical FIX recovery channel.
+        raise OperatorError(
+            "exec requires a command after --",
+            next_action=asdict(_cr.next_action_for(
+                "invocation-rejected",
+                "supply the command to run after the '--' separator"
+                " (qiven exec start -- <command> [args...]) and"
+                " re-invoke",
+            )),
+        )
     max_lifetime = _clamp_lifetime(max_lifetime)
     timeout_seconds = max(1.0, min(timeout_seconds, max_lifetime))
     exec_id = _new_exec_id()
@@ -2480,7 +2507,10 @@ def _ci_start(config: dict[str, Any], profile: str, console: Console,
                 f" - evidence: git rev-parse HEAD failed in {ROOT}: {exc}"
                 " - NEXT action: FIX - repair the checkout (attach/commit the"
                 " detached HEAD), or pass --candidate <full-40-hex-sha>"
-                " explicitly"
+                " explicitly",
+                # forward the structured recovery channel when the wrapped
+                # failure carried one (a re-raise must not drop it)
+                next_action=exc.next_action,
             ) from exc
         selected_candidate = _require_ci_candidate(profile, head_probe, "HEAD")
         candidate_origin = "head"
@@ -3447,7 +3477,20 @@ def main(argv: list[str] | None = None) -> int:
                 if command and command[0] == "--":
                     command = command[1:]
                 if not command:
-                    raise OperatorError("exec start requires a command after '--'")
+                    # ADR-0062 d5: an invocation-precondition refusal is the
+                    # class where the mechanism mechanically knows the
+                    # correction - it carries the canonical FIX channel
+                    # (JSON next_action field / human NEXT line) beside the
+                    # frozen error text, as the one recovery channel.
+                    raise OperatorError(
+                        "exec start requires a command after '--'",
+                        next_action=asdict(_cr.next_action_for(
+                            "invocation-rejected",
+                            "supply the command to run after the '--' separator"
+                            " (qiven exec start -- <command> [args...]) and"
+                            " re-invoke",
+                        )),
+                    )
                 payload, exit_code = _exec_start_frontend(
                     command, float(args.timeout), float(args.max_lifetime), console
                 )
@@ -3555,6 +3598,11 @@ def main(argv: list[str] | None = None) -> int:
     except OperatorError as exc:
         if args.json:
             error_payload = {"status": "error", "error": str(exc)}
+            if exc.next_action is not None:
+                # ADR-0062 d5: the canonical recovery channel rides as one
+                # ADDITIVE field beside the frozen error shape (other
+                # failure paths keep their published bytes unchanged).
+                error_payload["next_action"] = exc.next_action
             try:
                 _workspace_identity_fields(error_payload)
             except Exception:
@@ -3562,6 +3610,13 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(error_payload)
         else:
             console.emit("fail", str(exc))
+            if exc.next_action is not None:
+                # the human mirror of the same single channel (the exec
+                # surface's NEXT action line idiom), never a second one
+                console.block(
+                    f"  NEXT action: {exc.next_action['action']}"
+                    f" - {exc.next_action.get('supported_by', '')}"
+                )
         return 2
 
 

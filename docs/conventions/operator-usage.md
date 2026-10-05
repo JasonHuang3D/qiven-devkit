@@ -309,6 +309,10 @@ Authoritative movement adds `--mode authoritative --trust-policy
 `--apply`, which writes the new lock + declaration cache INTO the control
 tree as one uncommitted transaction — the session then commits the
 control repository (the receipt's `next_action` says exactly this).
+Publication precedes lock advancement: the moved revisions must be
+accepted (pushed/published) BEFORE the control repository is committed —
+a committed lock never points at revisions other workspace consumers
+cannot fetch.
 `lock-update` is the lock's ONLY writer; `--move` targets must be clean
 (at their exact HEAD) and identity-checked. Routine advance (WR-8): a
 control commit whose diff from the closest admitted ancestor is limited
