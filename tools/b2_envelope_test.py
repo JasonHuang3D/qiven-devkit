@@ -31,6 +31,10 @@ workspace-launcher-qiven-cmd; structural gaps SG-3 + SG-4):
   b2-15      workspace qiven.cmd: typed interpreter-failure carriers
              (exit 2) + verbatim argv/exit-code forwarding
   b2-16      byte-stability structural pins on the real bootstrap source
+  b2-20      recovery envelope (audit C2): record-construction failure
+             keeps a minimal VALID recovery record (rule_id + DIAGNOSE
+             next_action) on the typed envelope, validated against the
+             frozen v1 validator, both routings (preflight + gate)
 
 Cross-repo legs (b2-11..16) SKIP visibly when the real qiven-workspace
 sibling is absent (same honesty law as workspace_bootstrap_test).
@@ -44,6 +48,9 @@ workspace lock).
 from __future__ import annotations
 
 import ast
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import shutil
@@ -551,6 +558,64 @@ def launcher_legs(temp: Path) -> None:
           done.stdout)
 
 
+def recovery_legs() -> None:
+    # b2-20: audit C2 recovery envelope - when full Common Record
+    # construction fails, the typed envelope STILL carries a minimal
+    # VALID recovery record (the failure class's rule_id + a DIAGNOSE
+    # next_action), never degrading to the recordless legacy shape.
+    # In-process patch of the real bootstrap (the workspace-local
+    # RecoveryEnvelopeTests pattern, same window - the b2 legs here are
+    # subprocess-driven and cannot monkeypatch the constructor): the
+    # record constructor is monkeypatched to raise; both routings are
+    # exercised and the fallback record is validated against the
+    # FROZEN v1 validator.
+    spec = importlib.util.spec_from_file_location("qiven_bootstrap_b2_20", BOOTSTRAP)
+    mod = importlib.util.module_from_spec(spec)
+    saved_dont_write = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True  # the real workspace stays clean
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = saved_dont_write
+
+    def broken(*_args, **_kwargs):
+        raise ValueError("b2-20 fixture: full record construction failed")
+
+    original = mod._typed_error_record
+    mod._typed_error_record = broken
+    try:
+        cases = [
+            (mod.Typed("PreflightTimeout", "b2-20 preflight fixture"),
+             "bootstrap/preflight-timeout", "workspace-bootstrap-preflight"),
+            (mod._gate_typed("ConfigureTimeout", "b2-20 gate fixture"),
+             "gate-configure/configure-timeout", "workspace-bootstrap-gate-configure"),
+        ]
+        for error, rule_id, producer in cases:
+            captured = io.StringIO()
+            with contextlib.redirect_stdout(captured):
+                rc = mod._emit_typed_envelope(error)
+            text = captured.getvalue()
+            check(rc == 1, "b2-20.exit", text[:200])
+            envelope, _ = json.JSONDecoder().raw_decode(text[text.find("{"):])
+            check(envelope["error"]["type"] == error.kind,
+                  "b2-20.legacy-kind", text[:200])
+            check("record" in envelope, f"b2-20.record-present-{error.kind}",
+                  text[-300:])
+            record = envelope["record"]
+            check(cr.validate(record) == [], f"b2-20.record-valid-{error.kind}",
+                  json.dumps(cr.validate(record)))
+            check(record["findings"][0]["rule_id"] == rule_id,
+                  f"b2-20.rule-id-{error.kind}",
+                  record["findings"][0]["rule_id"])
+            check(record["producer"]["id"] == producer,
+                  f"b2-20.producer-{error.kind}", record["producer"]["id"])
+            check(record["next_action"] == {"action": "DIAGNOSE"},
+                  f"b2-20.diagnose-{error.kind}",
+                  json.dumps(record["next_action"]))
+    finally:
+        mod._typed_error_record = original
+
+
 def structural_legs() -> None:
     # b2-16: byte-stability pins - the pinned banner bytes the bootstrap
     # contract test drives behaviorally (B11-B13, B15) stay verbatim in the
@@ -573,17 +638,18 @@ def main() -> int:
         temp = Path(temp_name)
         resolver_legs(temp)
     if BOOTSTRAP is None or not WORKSPACE_CMD.is_file():
-        print("[SKIP] b2-11..16: real qiven-workspace not found "
+        print("[SKIP] b2-11..20: real qiven-workspace not found "
               "(QIVEN_WORKSPACE_BOOTSTRAP unset, no sibling qiven-workspace)")
-        print("[SKIP] b2-11..16: evidence: sibling probe "
+        print("[SKIP] b2-11..20: evidence: sibling probe "
               f"{WORKSPACE_CMD} and env probe both came up empty; resolver legs ran")
-        print("[SKIP] b2-11..16: NEXT: NEXT - run inside the qiven workspace for the "
+        print("[SKIP] b2-11..20: NEXT: NEXT - run inside the qiven workspace for the "
               "cross-repo legs (no FIX applies: absence is environment, not a defect)")
     else:
         with tempfile.TemporaryDirectory(prefix="qiven-b2-envelope-gate-") as temp_name:
             gate_configure_legs(Path(temp_name))
         with tempfile.TemporaryDirectory(prefix="qiven-b2-envelope-cmd-") as temp_name:
             launcher_legs(Path(temp_name))
+        recovery_legs()
         structural_legs()
     print(f"[ OK ] b2-envelope: {CHECKS} checks")
     return 0
