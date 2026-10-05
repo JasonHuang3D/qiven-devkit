@@ -548,7 +548,7 @@ def main() -> int:
         assert b17["completion"]["state"] == "completed", "B17: completion"
         assert b17["domain_outcome"]["outcome"] == "failed", "B17: outcome"
         assert b17["next_action"]["action"] == "FIX", "B17: FIX class"
-        assert "WR-8" in b17["next_action"]["supported_by"], (
+        assert "routine-advance trust-policy admission step" in b17["next_action"]["supported_by"], (
             f"B17: FIX must name the trust-policy admission step: "
             f"{b17['next_action']['supported_by'][:120]}"
         )

@@ -184,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
             " --check FILE --schema docs/schemas/NAME.schema.json;"
             " --list enumerates the schema documents; strictness is the"
             " contract (unknown fields, duplicate keys and floats are typed"
-            " rejections, never warnings; WR-1, ADR-0052)"
+            " rejections, never warnings; workspace schemas, ADR-0052)"
         ),
     )
     parser.add_argument("--check", metavar="FILE", help="instance file to validate")

@@ -144,7 +144,7 @@ def template_launcher_cases(temp: Path) -> None:
                      "['fixture identity note']}))\n")
     done = launch(control)
     check(done.returncode == 0, "B3-T1.notes-exit", done.stdout)
-    check("[wr6] devkit identity note: fixture identity note" in done.stdout,
+    check("[devkit-identity] devkit identity note: fixture identity note" in done.stdout,
           "B3-T1.notes-surfaced", done.stdout)
     check("OPERATOR-REACHED" in done.stdout, "B3-T1.happy-path", done.stdout)
 

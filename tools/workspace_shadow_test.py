@@ -1,5 +1,12 @@
 """Self-test for tools/workspace_shadow.py (WR-2 shadow preflight).
 
+EXPLICIT-LEGACY-PROFILE (2026-10-06, WD1): dispatch-only — retired from
+the default `local` gate (`.qiven/operator.json` keeps the
+`workspace-shadow-tests` task declared for explicit `qiven run
+workspace-shadow-tests` dispatch). The shadowed tool's live path is dead
+by design since WR-8 (census retirement); this suite preserves the
+fixture regression value only.
+
 Temp git fixtures only. Case ids ride in failure messages; each case
 asserts one named WR-2 behavior (doc 02 section 2: per-class equality or
 typed shadow conflict; a mismatch fails only its own class's migration

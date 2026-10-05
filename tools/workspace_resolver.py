@@ -160,9 +160,9 @@ _NEXT_ACTIONS: dict[str, tuple[str, str]] = {
     ),
     "BaselineConflict": (
         "FIX",
-        "reconcile the legacy consumer pin with the locked selection (WR-6 "
-        "reconciliation target): update the pin or move the lock via "
-        "lock-update",
+        "reconcile the legacy consumer pin with the locked selection "
+        "(devkit-identity reconciliation target): update the pin or move "
+        "the lock via lock-update",
     ),
     "CandidateRejected": (
         "FIX",
@@ -172,8 +172,8 @@ _NEXT_ACTIONS: dict[str, tuple[str, str]] = {
     "BootstrapDevkitMismatch": (
         "FIX",
         "run the resolver from the locked devkit revision (check it out), or "
-        "advance the lock deliberately through the WR-8 trust-policy "
-        "admission step",
+        "advance the lock deliberately through the routine-advance "
+        "trust-policy admission step",
     ),
 }
 
@@ -758,7 +758,7 @@ def _baseline_conflicts(records: dict[str, tuple[dict, bool]], lock: dict) -> li
                     "consumer_edge": f"{consumer_id}->{dep['id']}",
                     "legacy_pin": pin["sha"],
                     "locked_node": locked_commit,
-                    "note": pin.get("note", "legacy pin split (WR-6 reconciliation target)"),
+                    "note": pin.get("note", "legacy pin split (devkit-identity reconciliation target)"),
                 })
     return conflicts
 
@@ -894,7 +894,7 @@ def validate_candidate(control: Path, manifest_path: Path) -> dict:
         raise ResolutionError(
             "CandidateRejected",
             f"candidate {candidate['repository']} is already a base lock node; "
-            "an overlay for an existing node is WR-3 scope, not candidate admission",
+            "an overlay for an existing node is revision-overlay admission scope, not candidate admission",
         )
 
     records: dict[str, dict] = {}
