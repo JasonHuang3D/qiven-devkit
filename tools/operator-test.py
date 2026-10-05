@@ -200,6 +200,14 @@ def main() -> int:
         check(payload["status"] == "ok", "G1.info-status")
         check(payload["repository"] == "operator-fixture", "G1.info-repo")
         check(payload["head"] == head, "G1.info-head")
+        # WD3: info carries the honest workspace-lock enforcement statement
+        # (four enforced + one not-enforced item, JSON surface only)
+        check("workspace_lock_enforces" in payload
+              and len(payload["workspace_lock_enforces"]) == 4,
+              "G1.info-lock-enforces")
+        check("workspace_lock_does_not_enforce" in payload
+              and len(payload["workspace_lock_does_not_enforce"]) == 1,
+              "G1.info-lock-not-enforced")
         check("[ RUN]" not in info.stdout and "[ OK ]" not in info.stdout, "G1.json-purity")
         assert_no_repo_bytecode(repo)
 
